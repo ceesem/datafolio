@@ -345,7 +345,7 @@ class TestDescribeWithLineage:
         """Test that describe shows created_at and updated_at."""
         folio = DataFolio(tmp_path / "test")
 
-        description = folio.describe()
+        description = folio.describe(return_string=True)
 
         assert "Created:" in description
         assert "Updated:" in description
@@ -358,7 +358,7 @@ class TestDescribeWithLineage:
         folio.add_table("raw", df)
         folio.add_table("processed", df, inputs=["raw"])
 
-        description = folio.describe()
+        description = folio.describe(return_string=True)
 
         # Should show lineage with arrow notation
         assert "↳" in description or "raw" in description
@@ -370,7 +370,7 @@ class TestDescribeWithLineage:
 
         folio.add_model("clf", model, hyperparameters={"lr": 0.01, "epochs": 100})
 
-        description = folio.describe()
+        description = folio.describe(return_string=True)
 
         # Should mention hyperparameters
         assert "hyperparameters" in description.lower() or "lr" in description

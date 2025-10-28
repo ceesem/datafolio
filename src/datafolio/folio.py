@@ -62,13 +62,6 @@ class MetadataDict(dict):
         super().__setitem__("updated_at", datetime.now(timezone.utc).isoformat())
         self._parent._save_metadata()
 
-    def pop(self, *args, **kwargs) -> Any:
-        """Pop item and trigger save."""
-        result = super().pop(*args, **kwargs)
-        super().__setitem__("updated_at", datetime.now(timezone.utc).isoformat())
-        self._parent._save_metadata()
-        return result
-
     def clear(self) -> None:
         """Clear dict and trigger save."""
         super().clear()
@@ -127,7 +120,7 @@ class DataFolio:
         self,
         path: Union[str, Path],
         metadata: Optional[Dict[str, Any]] = None,
-        use_random_suffix: bool = False,
+        random_suffix: bool = False,
     ):
         """Initialize a new or open an existing DataFolio.
 
@@ -137,7 +130,7 @@ class DataFolio:
         Args:
             path: Full path to bundle directory (local or cloud)
             metadata: Optional dictionary of analysis metadata (for new bundles)
-            use_random_suffix: If True, append random suffix to bundle name (default: False)
+            random_suffix: If True, append random suffix to bundle name (default: False)
 
         Examples:
             Create new bundle with exact name:
@@ -147,7 +140,7 @@ class DataFolio:
             Create new bundle with random suffix:
             >>> folio = DataFolio(
             ...     'experiments/protein-analysis',
-            ...     use_random_suffix=True
+            ...     random_suffix=True
             ... )
             # Creates: experiments/protein-analysis-blue-happy-falcon/
 
@@ -168,7 +161,7 @@ class DataFolio:
         self._artifacts_paths: Dict[str, Union[str, Path]] = {}  # Artifact file paths
 
         # Store random suffix setting for collision retry
-        self._use_random_suffix = use_random_suffix
+        self._use_random_suffix = random_suffix
 
         # Check if path is an existing bundle (has metadata.json or items.json)
         path_str = str(path)
@@ -188,7 +181,7 @@ class DataFolio:
             self.metadata = MetadataDict(self, **self._metadata_raw)
         else:
             # Create new bundle
-            if use_random_suffix:
+            if random_suffix:
                 # Append random suffix to the last component of the path
                 # For 'experiments/my-exp' → 'experiments/my-exp-blue-happy-falcon'
                 if is_cloud_path(path_str):
@@ -430,6 +423,201 @@ class DataFolio:
         else:
             return joblib.load(path)
 
+    def _write_pytorch(
+        self,
+        path: str,
+        model: Any,
+        init_args: Optional[Dict[str, Any]] = None,
+        save_class: bool = False,
+    ) -> None:
+        """Write PyTorch model state dict with metadata (local or cloud).
+
+        Saves a dictionary containing:
+        - state_dict: Model weights
+        - metadata: Class name, module, and optional init args
+        - serialized_class: Optional dill-serialized class (if save_class=True)
+
+        Args:
+            path: File path
+            model: PyTorch model (will save state_dict)
+            init_args: Optional dict of args needed to instantiate the model
+            save_class: If True, use dill to serialize the model class
+        """
+        try:
+            import torch
+        except ImportError:
+            raise ImportError(
+                "PyTorch is required to save PyTorch models. "
+                "Install with: pip install torch"
+            )
+
+        # Prepare save bundle
+        save_bundle = {
+            "state_dict": model.state_dict(),
+            "metadata": {
+                "model_class": model.__class__.__name__,
+                "model_module": model.__class__.__module__,
+            },
+        }
+
+        if init_args is not None:
+            save_bundle["metadata"]["init_args"] = init_args
+
+        # Optionally serialize class with dill
+        if save_class:
+            try:
+                import dill
+
+                save_bundle["serialized_class"] = dill.dumps(model.__class__)
+            except ImportError:
+                raise ImportError(
+                    "dill is required when save_class=True. "
+                    "Install with: pip install dill"
+                )
+
+        if is_cloud_path(path):
+            # Write to temp file, then upload
+            import tempfile
+
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pt") as tmp:
+                torch.save(save_bundle, tmp.name)
+                with open(tmp.name, "rb") as f:
+                    content = f.read()
+                # Upload
+                from cloudfiles import CloudFiles
+
+                parts = path.rsplit("/", 1)
+                if len(parts) == 2:
+                    dir_path, filename = parts
+                else:
+                    dir_path = ""
+                    filename = parts[0]
+                cf = CloudFiles(dir_path) if dir_path else CloudFiles(path)
+                cf.put(filename, content)
+                # Cleanup
+                Path(tmp.name).unlink()
+        else:
+            torch.save(save_bundle, path)
+
+    def _read_pytorch(self, path: str) -> Dict[str, Any]:
+        """Read PyTorch model bundle (local or cloud).
+
+        Args:
+            path: File path
+
+        Returns:
+            Dictionary containing state_dict, metadata, and optionally serialized_class
+        """
+        try:
+            import torch
+        except ImportError:
+            raise ImportError(
+                "PyTorch is required to load PyTorch models. "
+                "Install with: pip install torch"
+            )
+
+        if is_cloud_path(path):
+            # Download to temp file, then load
+            import tempfile
+
+            from cloudfiles import CloudFiles
+
+            parts = path.rsplit("/", 1)
+            if len(parts) == 2:
+                dir_path, filename = parts
+            else:
+                dir_path = ""
+                filename = parts[0]
+            cf = CloudFiles(dir_path) if dir_path else CloudFiles(path)
+            content = cf.get(filename)
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pt") as tmp:
+                tmp.write(content)
+                tmp.flush()
+                bundle = torch.load(tmp.name, weights_only=False)
+                Path(tmp.name).unlink()
+                return bundle
+        else:
+            return torch.load(path, weights_only=False)
+
+    def _write_numpy(self, path: str, array: Any) -> None:
+        """Write numpy array to file (local or cloud).
+
+        Args:
+            path: File path
+            array: numpy array to save
+        """
+        try:
+            import numpy as np
+        except ImportError:
+            raise ImportError(
+                "NumPy is required to save numpy arrays. "
+                "Install with: pip install numpy"
+            )
+
+        if is_cloud_path(path):
+            # Write to temp file, then upload
+            import tempfile
+
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".npy") as tmp:
+                np.save(tmp.name, array)
+                with open(tmp.name, "rb") as f:
+                    content = f.read()
+                # Upload
+                from cloudfiles import CloudFiles
+
+                parts = path.rsplit("/", 1)
+                if len(parts) == 2:
+                    dir_path, filename = parts
+                else:
+                    dir_path = ""
+                    filename = parts[0]
+                cf = CloudFiles(dir_path) if dir_path else CloudFiles(path)
+                cf.put(filename, content)
+                # Cleanup
+                Path(tmp.name).unlink()
+        else:
+            np.save(path, array)
+
+    def _read_numpy(self, path: str) -> Any:
+        """Read numpy array from file (local or cloud).
+
+        Args:
+            path: File path
+
+        Returns:
+            numpy array
+        """
+        try:
+            import numpy as np
+        except ImportError:
+            raise ImportError(
+                "NumPy is required to load numpy arrays. "
+                "Install with: pip install numpy"
+            )
+
+        if is_cloud_path(path):
+            # Download to temp file, then load
+            import tempfile
+
+            from cloudfiles import CloudFiles
+
+            parts = path.rsplit("/", 1)
+            if len(parts) == 2:
+                dir_path, filename = parts
+            else:
+                dir_path = ""
+                filename = parts[0]
+            cf = CloudFiles(dir_path) if dir_path else CloudFiles(path)
+            content = cf.get(filename)
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".npy") as tmp:
+                tmp.write(content)
+                tmp.flush()
+                array = np.load(tmp.name)
+                Path(tmp.name).unlink()
+                return array
+        else:
+            return np.load(path)
+
     def _copy_file(self, src: Union[str, Path], dst: str) -> None:
         """Copy a file (local to local/cloud).
 
@@ -560,14 +748,16 @@ class DataFolio:
         """List all contents in the DataFolio.
 
         Returns:
-            Dictionary with keys 'referenced_tables', 'included_tables',
-            'models', and 'artifacts', each containing a list of names
+            Dictionary with keys 'referenced_tables', 'included_tables', 'numpy_arrays',
+            'json_data', 'models', 'pytorch_models', and 'artifacts', each containing a list of names
 
         Examples:
             >>> folio = DataFolio('experiments', prefix='test')
             >>> folio.reference_table('data1', path='s3://bucket/data.parquet')
+            >>> folio.add_numpy('embeddings', np.array([1, 2, 3]))
             >>> folio.list_contents()
-            {'referenced_tables': ['data1'], 'included_tables': [], 'models': [], 'artifacts': []}
+            {'referenced_tables': ['data1'], 'included_tables': [], 'numpy_arrays': ['embeddings'],
+             'json_data': [], 'models': [], 'pytorch_models': [], 'artifacts': []}
         """
         # Filter items by type
         referenced_tables = [
@@ -580,10 +770,25 @@ class DataFolio:
             for name, item in self._items.items()
             if item.get("item_type") == "included_table"
         ]
+        numpy_arrays = [
+            name
+            for name, item in self._items.items()
+            if item.get("item_type") == "numpy_array"
+        ]
+        json_data = [
+            name
+            for name, item in self._items.items()
+            if item.get("item_type") == "json_data"
+        ]
         models = [
             name
             for name, item in self._items.items()
             if item.get("item_type") == "model"
+        ]
+        pytorch_models = [
+            name
+            for name, item in self._items.items()
+            if item.get("item_type") == "pytorch_model"
         ]
         artifacts = [
             name
@@ -594,7 +799,10 @@ class DataFolio:
         return {
             "referenced_tables": referenced_tables,
             "included_tables": included_tables,
+            "numpy_arrays": numpy_arrays,
+            "json_data": json_data,
             "models": models,
+            "pytorch_models": pytorch_models,
             "artifacts": artifacts,
         }
 
@@ -638,6 +846,25 @@ class DataFolio:
         ]
 
     @property
+    def pytorch_models(self) -> list[str]:
+        """Get list of PyTorch model names.
+
+        Returns:
+            List of PyTorch model names (strings)
+
+        Examples:
+            >>> folio = DataFolio('experiments', prefix='test')
+            >>> folio.add_pytorch('neural_net', model)
+            >>> folio.pytorch_models
+            ['neural_net']
+        """
+        return [
+            name
+            for name, item in self._items.items()
+            if item.get("item_type") == "pytorch_model"
+        ]
+
+    @property
     def artifacts(self) -> list[str]:
         """Get list of artifact names.
 
@@ -662,38 +889,41 @@ class DataFolio:
         total_items = sum(len(v) for v in contents.values())
         return f"DataFolio(bundle_dir='{self._bundle_dir}', items={total_items})"
 
-    def describe(self) -> str:
+    def describe(
+        self, return_string: bool = False, show_empty: bool = False
+    ) -> Optional[str]:
         """Generate a human-readable description of all items in the bundle.
 
         Includes lineage information showing inputs and dependencies.
 
+        Args:
+            return_string: If True, return the description as a string instead of printing
+            show_empty: If True, show empty sections (e.g., "Models (0): (none)")
+
         Returns:
-            Formatted string showing name, type, description, and lineage for all items
+            None if return_string=False (prints to stdout), otherwise returns the description string
 
         Examples:
-            >>> folio = DataFolio('experiments', prefix='test')
-            >>> folio.reference_table('raw_data', path='s3://bucket/data.parquet', description='Training data')
-            >>> folio.add_table('results', df, description='Model results', inputs=['raw_data'], models=['classifier'])
-            >>> folio.add_model('classifier', model, description='Random forest', inputs=['raw_data'])
-            >>> print(folio.describe())
-            DataFolio: experiments/test-blue-happy-falcon
-            ================================================
-            Created: 2025-10-12T14:30:00Z
-            Updated: 2025-10-12T16:45:00Z
-
-            Referenced Tables (1):
-              • raw_data [referenced_table]: Training data
-
-            Included Tables (1):
-              • results [included_table]: Model results
-                ↳ inputs: raw_data
-                ↳ models: classifier
-
-            Models (1):
-              • classifier [model]: Random forest
+            Print description (default):
+            >>> folio = DataFolio('experiments/test')
+            >>> folio.describe()
+            DataFolio: experiments/test
+            ===========================
+            Tables (2):
+              • raw_data (reference): Training data
+              • results: Model results
                 ↳ inputs: raw_data
 
-            Artifacts (0):
+            Get description as string:
+            >>> folio = DataFolio('experiments/test')
+            >>> text = folio.describe(return_string=True)
+
+            Show empty sections:
+            >>> folio.describe(show_empty=True)
+            Tables (2):
+              • raw_data: Training data
+              • results: Model results
+            Models (0):
               (none)
         """
         lines = []
@@ -715,74 +945,155 @@ class DataFolio:
 
         contents = self.list_contents()
 
-        # Referenced tables
+        # Combine referenced and included tables
         ref_tables = contents["referenced_tables"]
-        lines.append(f"Referenced Tables ({len(ref_tables)}):")
-        if ref_tables:
-            for name in ref_tables:
-                item = self._items[name]
-                desc = item.get("description", "(no description)")
-                lines.append(f"  • {name} [{item['item_type']}]: {desc}")
-                # Show lineage if present
-                if "inputs" in item and item["inputs"]:
-                    lines.append(f"    ↳ inputs: {', '.join(item['inputs'])}")
-        else:
-            lines.append("  (none)")
-        lines.append("")
-
-        # Included tables
         inc_tables = contents["included_tables"]
-        lines.append(f"Included Tables ({len(inc_tables)}):")
-        if inc_tables:
-            for name in inc_tables:
-                item = self._items[name]
-                desc = item.get("description", "(no description)")
-                lines.append(f"  • {name} [{item['item_type']}]: {desc}")
-                # Show lineage if present
-                if "inputs" in item and item["inputs"]:
-                    lines.append(f"    ↳ inputs: {', '.join(item['inputs'])}")
-                if "models" in item and item["models"]:
-                    lines.append(f"    ↳ models: {', '.join(item['models'])}")
-        else:
-            lines.append("  (none)")
-        lines.append("")
+        all_tables = ref_tables + inc_tables
+
+        if all_tables or show_empty:
+            lines.append(f"Tables ({len(all_tables)}):")
+            if all_tables:
+                # Show referenced tables first
+                for name in ref_tables:
+                    item = self._items[name]
+                    desc = item.get("description", "(no description)")
+                    lines.append(f"  • {name} (reference): {desc}")
+                    # Show path for referenced tables
+                    if "path" in item:
+                        lines.append(f"    ↳ path: {item['path']}")
+                    # Show lineage if present
+                    if "inputs" in item and item["inputs"]:
+                        lines.append(f"    ↳ inputs: {', '.join(item['inputs'])}")
+
+                # Then included tables
+                for name in inc_tables:
+                    item = self._items[name]
+                    desc = item.get("description", "(no description)")
+                    lines.append(f"  • {name}: {desc}")
+                    # Show lineage if present
+                    if "inputs" in item and item["inputs"]:
+                        lines.append(f"    ↳ inputs: {', '.join(item['inputs'])}")
+                    if "models" in item and item["models"]:
+                        lines.append(f"    ↳ models: {', '.join(item['models'])}")
+            else:
+                lines.append("  (none)")
+            lines.append("")
+
+        # Numpy arrays
+        numpy_arrays = contents["numpy_arrays"]
+        if numpy_arrays or show_empty:
+            lines.append(f"Numpy Arrays ({len(numpy_arrays)}):")
+            if numpy_arrays:
+                for name in numpy_arrays:
+                    item = self._items[name]
+                    desc = item.get("description", "(no description)")
+                    shape = item.get("shape", "unknown")
+                    dtype = item.get("dtype", "unknown")
+                    lines.append(f"  • {name}: {desc}")
+                    lines.append(f"    ↳ shape: {shape}, dtype: {dtype}")
+                    # Show lineage if present
+                    if "inputs" in item and item["inputs"]:
+                        lines.append(f"    ↳ inputs: {', '.join(item['inputs'])}")
+            else:
+                lines.append("  (none)")
+            lines.append("")
+
+        # JSON data
+        json_data = contents["json_data"]
+        if json_data or show_empty:
+            lines.append(f"JSON Data ({len(json_data)}):")
+            if json_data:
+                for name in json_data:
+                    item = self._items[name]
+                    desc = item.get("description", "(no description)")
+                    data_type = item.get("data_type", "unknown")
+                    lines.append(f"  • {name}: {desc}")
+                    lines.append(f"    ↳ type: {data_type}")
+                    # Show lineage if present
+                    if "inputs" in item and item["inputs"]:
+                        lines.append(f"    ↳ inputs: {', '.join(item['inputs'])}")
+            else:
+                lines.append("  (none)")
+            lines.append("")
 
         # Models
         models = contents["models"]
-        lines.append(f"Models ({len(models)}):")
-        if models:
-            for name in models:
-                item = self._items[name]
-                desc = item.get("description", "(no description)")
-                lines.append(f"  • {name} [{item['item_type']}]: {desc}")
-                # Show lineage if present
-                if "inputs" in item and item["inputs"]:
-                    lines.append(f"    ↳ inputs: {', '.join(item['inputs'])}")
-                if "hyperparameters" in item and item["hyperparameters"]:
-                    # Show a few key hyperparameters
-                    hps = item["hyperparameters"]
-                    hp_str = ", ".join(f"{k}={v}" for k, v in list(hps.items())[:3])
-                    if len(hps) > 3:
-                        hp_str += f", ... ({len(hps) - 3} more)"
-                    lines.append(f"    ↳ hyperparameters: {hp_str}")
-        else:
-            lines.append("  (none)")
-        lines.append("")
+        if models or show_empty:
+            lines.append(f"Models ({len(models)}):")
+            if models:
+                for name in models:
+                    item = self._items[name]
+                    desc = item.get("description", "(no description)")
+                    lines.append(f"  • {name}: {desc}")
+                    # Show lineage if present
+                    if "inputs" in item and item["inputs"]:
+                        lines.append(f"    ↳ inputs: {', '.join(item['inputs'])}")
+                    if "hyperparameters" in item and item["hyperparameters"]:
+                        # Show a few key hyperparameters
+                        hps = item["hyperparameters"]
+                        hp_str = ", ".join(f"{k}={v}" for k, v in list(hps.items())[:3])
+                        if len(hps) > 3:
+                            hp_str += f", ... ({len(hps) - 3} more)"
+                        lines.append(f"    ↳ hyperparameters: {hp_str}")
+            else:
+                lines.append("  (none)")
+            lines.append("")
+
+        # PyTorch Models
+        pytorch_models = contents["pytorch_models"]
+        if pytorch_models or show_empty:
+            lines.append(f"PyTorch Models ({len(pytorch_models)}):")
+            if pytorch_models:
+                for name in pytorch_models:
+                    item = self._items[name]
+                    desc = item.get("description", "(no description)")
+                    lines.append(f"  • {name}: {desc}")
+                    # Show lineage if present
+                    if "inputs" in item and item["inputs"]:
+                        lines.append(f"    ↳ inputs: {', '.join(item['inputs'])}")
+                    if "hyperparameters" in item and item["hyperparameters"]:
+                        # Show a few key hyperparameters
+                        hps = item["hyperparameters"]
+                        hp_str = ", ".join(f"{k}={v}" for k, v in list(hps.items())[:3])
+                        if len(hps) > 3:
+                            hp_str += f", ... ({len(hps) - 3} more)"
+                        lines.append(f"    ↳ hyperparameters: {hp_str}")
+                    if "init_args" in item and item["init_args"]:
+                        # Show init args
+                        init_args = item["init_args"]
+                        init_str = ", ".join(
+                            f"{k}={v}" for k, v in list(init_args.items())[:3]
+                        )
+                        if len(init_args) > 3:
+                            init_str += f", ... ({len(init_args) - 3} more)"
+                        lines.append(f"    ↳ init_args: {init_str}")
+            else:
+                lines.append("  (none)")
+            lines.append("")
 
         # Artifacts
         artifacts = contents["artifacts"]
-        lines.append(f"Artifacts ({len(artifacts)}):")
-        if artifacts:
-            for name in artifacts:
-                item = self._items[name]
-                desc = item.get("description", "(no description)")
-                category = item.get("category", "")
-                category_str = f" ({category})" if category else ""
-                lines.append(f"  • {name} [{item['item_type']}]{category_str}: {desc}")
-        else:
-            lines.append("  (none)")
+        if artifacts or show_empty:
+            lines.append(f"Artifacts ({len(artifacts)}):")
+            if artifacts:
+                for name in artifacts:
+                    item = self._items[name]
+                    desc = item.get("description", "(no description)")
+                    category = item.get("category", "")
+                    category_str = f" ({category})" if category else ""
+                    lines.append(f"  • {name}{category_str}: {desc}")
+            else:
+                lines.append("  (none)")
 
-        return "\n".join(lines)
+        # Build final output
+        output = "\n".join(lines)
+
+        # Print or return based on parameter
+        if return_string:
+            return output
+        else:
+            print(output)
+            return None
 
     def reference_table(
         self,
@@ -1142,7 +1453,7 @@ class DataFolio:
 
         return item
 
-    def add_model(
+    def add_sklearn(
         self,
         name: str,
         model: Any,
@@ -1152,7 +1463,7 @@ class DataFolio:
         hyperparameters: Optional[Dict[str, Any]] = None,
         code: Optional[str] = None,
     ) -> Self:
-        """Add a trained model to the bundle.
+        """Add a scikit-learn style model to the bundle.
 
         Writes immediately to models/ directory and updates items.json.
         Uses joblib for serialization.
@@ -1177,7 +1488,7 @@ class DataFolio:
             >>> folio = DataFolio('experiments', prefix='test')
             >>> model = RandomForestClassifier(n_estimators=100, max_depth=10)
             >>> # ... train model ...
-            >>> folio.add_model('classifier', model,
+            >>> folio.add_sklearn('classifier', model,
             ...     description='Random forest classifier',
             ...     inputs=['training_data', 'validation_data'],
             ...     hyperparameters={'n_estimators': 100, 'max_depth': 10},
@@ -1218,8 +1529,68 @@ class DataFolio:
 
         return self
 
-    def get_model(self, name: str) -> Any:
-        """Get a model by name.
+    def add_model(
+        self,
+        name: str,
+        model: Any,
+        description: Optional[str] = None,
+        overwrite: bool = False,
+        **kwargs,
+    ) -> Self:
+        """Add a model with automatic framework detection.
+
+        Automatically detects PyTorch vs sklearn-style models and uses the
+        appropriate serialization method. For fine-grained control, use
+        add_sklearn() or add_pytorch().
+
+        Args:
+            name: Unique name for this model
+            model: Trained model (PyTorch or sklearn-style)
+            description: Optional description
+            overwrite: If True, allow overwriting existing model (default: False)
+            **kwargs: Additional arguments passed to the specific method
+                (e.g., init_args for PyTorch, hyperparameters for sklearn)
+
+        Returns:
+            Self for method chaining
+
+        Raises:
+            ValueError: If name already exists and overwrite=False
+
+        Examples:
+            Sklearn model:
+            >>> from sklearn.ensemble import RandomForestClassifier
+            >>> model = RandomForestClassifier()
+            >>> folio.add_model('clf', model, hyperparameters={'n_estimators': 100})
+
+            PyTorch model:
+            >>> import torch.nn as nn
+            >>> model = MyNeuralNet(input_dim=10, hidden_dim=50)
+            >>> folio.add_model('nn', model, init_args={'input_dim': 10, 'hidden_dim': 50})
+        """
+        # Check if PyTorch model
+        if hasattr(model, "state_dict") and hasattr(model, "load_state_dict"):
+            try:
+                import torch.nn as nn
+
+                if isinstance(model, nn.Module):
+                    return self.add_pytorch(
+                        name,
+                        model,
+                        description=description,
+                        overwrite=overwrite,
+                        **kwargs,
+                    )
+            except ImportError:
+                pass
+
+        # Otherwise, assume sklearn-style (joblib-serializable)
+        return self.add_sklearn(
+            name, model, description=description, overwrite=overwrite, **kwargs
+        )
+
+    def get_sklearn(self, name: str) -> Any:
+        """Get a scikit-learn style model by name.
 
         Models are NOT cached - always read fresh from disk.
 
@@ -1231,11 +1602,11 @@ class DataFolio:
 
         Raises:
             KeyError: If model name doesn't exist
-            ValueError: If named item is not a model
+            ValueError: If named item is not a sklearn model
 
         Examples:
-            >>> folio = DataFolio('experiments/test-blue-happy-falcon')
-            >>> model = folio.get_model('classifier')
+            >>> folio = DataFolio('experiments/test')
+            >>> model = folio.get_sklearn('classifier')
         """
         if name not in self._items:
             raise KeyError(f"Model '{name}' not found in DataFolio")
@@ -1243,12 +1614,269 @@ class DataFolio:
         item = self._items[name]
         if item.get("item_type") != "model":
             raise ValueError(
-                f"Item '{name}' is not a model (type: {item.get('item_type')})"
+                f"Item '{name}' is not a sklearn model (type: {item.get('item_type')})"
             )
 
         # Read model (not cached)
         model_path = self._join_paths(self._bundle_dir, MODELS_DIR, item["filename"])
         return self._read_joblib(model_path)
+
+    def get_model(self, name: str, **kwargs) -> Any:
+        """Get a model by name with automatic type detection.
+
+        Automatically detects whether the model is PyTorch or sklearn-style
+        and uses the appropriate loader. For fine-grained control, use
+        get_sklearn() or get_pytorch().
+
+        Models are NOT cached - always read fresh from disk.
+
+        Args:
+            name: Name of the model
+            **kwargs: Additional arguments passed to get_pytorch() if it's a PyTorch model
+                (e.g., model_class, reconstruct)
+
+        Returns:
+            The model object
+
+        Raises:
+            KeyError: If model name doesn't exist
+            ValueError: If named item is not a model
+
+        Examples:
+            >>> folio = DataFolio('experiments/test')
+            >>> # Works for both sklearn and PyTorch models
+            >>> sklearn_model = folio.get_model('classifier')
+            >>> pytorch_model = folio.get_model('neural_net', model_class=MyModel)
+        """
+        if name not in self._items:
+            raise KeyError(f"Model '{name}' not found in DataFolio")
+
+        item = self._items[name]
+        item_type = item.get("item_type")
+
+        # Dispatch based on item type
+        if item_type == "model":
+            return self.get_sklearn(name)
+        elif item_type == "pytorch_model":
+            return self.get_pytorch(name, **kwargs)
+        else:
+            raise ValueError(f"Item '{name}' is not a model (type: {item_type})")
+
+    def add_pytorch(
+        self,
+        name: str,
+        model: Any,
+        description: Optional[str] = None,
+        overwrite: bool = False,
+        inputs: Optional[list[str]] = None,
+        hyperparameters: Optional[Dict[str, Any]] = None,
+        init_args: Optional[Dict[str, Any]] = None,
+        save_class: bool = False,
+        code: Optional[str] = None,
+    ) -> Self:
+        """Add a PyTorch model to the bundle.
+
+        Saves the model's state_dict along with metadata about the model class.
+        Follows PyTorch best practices by saving state_dict rather than full model.
+
+        Args:
+            name: Unique name for this model
+            model: PyTorch model to save (state_dict will be extracted)
+            description: Optional description
+            overwrite: If True, allow overwriting existing model (default: False)
+            inputs: Optional list of table names used for training
+            hyperparameters: Optional dict of hyperparameters
+            init_args: Optional dict of arguments needed to instantiate the model class
+            save_class: If True, use dill to serialize the model class for reconstruction
+            code: Optional code snippet that trained this model
+
+        Returns:
+            Self for method chaining
+
+        Raises:
+            ValueError: If name already exists and overwrite=False
+            ImportError: If torch (or dill when save_class=True) is not installed
+
+        Examples:
+            Basic usage:
+            >>> import torch.nn as nn
+            >>> class MyModel(nn.Module):
+            ...     def __init__(self, input_dim, hidden_dim):
+            ...         super().__init__()
+            ...         self.fc1 = nn.Linear(input_dim, hidden_dim)
+            ...         self.fc2 = nn.Linear(hidden_dim, 1)
+            ...     def forward(self, x):
+            ...         return self.fc2(torch.relu(self.fc1(x)))
+            >>> model = MyModel(10, 50)
+            >>> # ... train model ...
+            >>> folio.add_pytorch('my_model', model,
+            ...     description='Simple feedforward network',
+            ...     inputs=['training_data'],
+            ...     hyperparameters={'input_dim': 10, 'hidden_dim': 50},
+            ...     init_args={'input_dim': 10, 'hidden_dim': 50})
+
+            With class serialization:
+            >>> folio.add_pytorch('my_model', model,
+            ...     save_class=True,  # Saves the class definition with dill
+            ...     init_args={'input_dim': 10, 'hidden_dim': 50})
+        """
+        # Validate inputs
+        if not overwrite and name in self._items:
+            raise ValueError(
+                f"Item '{name}' already exists in this DataFolio. Use overwrite=True to replace it."
+            )
+
+        # Create metadata
+        filename = f"{name}.pt"
+        item: IncludedItem = {
+            "name": name,
+            "filename": filename,
+            "item_type": "pytorch_model",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+        if description is not None:
+            item["description"] = description
+        if inputs is not None:
+            item["inputs"] = inputs
+        if hyperparameters is not None:
+            item["hyperparameters"] = hyperparameters
+        if init_args is not None:
+            item["init_args"] = init_args
+        if code is not None:
+            item["code"] = code
+
+        # Store metadata about whether class was serialized
+        item["has_serialized_class"] = save_class
+
+        self._items[name] = item
+
+        # Write model immediately
+        model_path = self._join_paths(self._bundle_dir, MODELS_DIR, filename)
+        self._write_pytorch(
+            model_path, model, init_args=init_args, save_class=save_class
+        )
+
+        # Update manifest
+        self._save_items()
+
+        return self
+
+    def get_pytorch(
+        self,
+        name: str,
+        model_class: Optional[type] = None,
+        reconstruct: bool = True,
+    ) -> Any:
+        """Get a PyTorch model by name.
+
+        Can return either the state_dict only, or a reconstructed model.
+
+        Args:
+            name: Name of the model
+            model_class: Optional model class to use for reconstruction.
+                If provided, must accept **init_args from manifest.
+            reconstruct: If True, attempt to reconstruct the model (default: True).
+                If False, returns just the state_dict.
+
+        Returns:
+            If reconstruct=False: Returns state_dict dictionary
+            If reconstruct=True: Returns reconstructed model with weights loaded
+
+        Raises:
+            KeyError: If model name doesn't exist
+            ValueError: If named item is not a pytorch_model
+            ImportError: If torch is not installed
+            RuntimeError: If reconstruction fails
+
+        Examples:
+            Get state_dict only:
+            >>> folio = DataFolio('experiments/test')
+            >>> state_dict = folio.get_pytorch('my_model', reconstruct=False)
+            >>> # Manually load into your model
+            >>> model = MyModel(10, 50)
+            >>> model.load_state_dict(state_dict)
+
+            Reconstruct with provided class:
+            >>> model = folio.get_pytorch('my_model', model_class=MyModel)
+
+            Auto-reconstruct (requires model class to be importable):
+            >>> model = folio.get_pytorch('my_model')  # Tries to find class automatically
+        """
+        if name not in self._items:
+            raise KeyError(f"Model '{name}' not found in DataFolio")
+
+        item = self._items[name]
+        if item.get("item_type") != "pytorch_model":
+            raise ValueError(
+                f"Item '{name}' is not a PyTorch model (type: {item.get('item_type')})"
+            )
+
+        # Read model bundle (not cached)
+        model_path = self._join_paths(self._bundle_dir, MODELS_DIR, item["filename"])
+        bundle = self._read_pytorch(model_path)
+
+        # Extract state_dict
+        state_dict = bundle["state_dict"]
+
+        # If not reconstructing, just return state_dict
+        if not reconstruct:
+            return state_dict
+
+        # Attempt reconstruction
+        metadata = bundle.get("metadata", {})
+        init_args = item.get("init_args", {})
+
+        # Option 1: User provided model_class
+        if model_class is not None:
+            try:
+                model = model_class(**init_args)
+                model.load_state_dict(state_dict)
+                return model
+            except Exception as e:
+                raise RuntimeError(
+                    f"Failed to reconstruct model with provided model_class: {e}"
+                )
+
+        # Option 2: Try to import from module.class metadata
+        model_module = metadata.get("model_module")
+        model_class_name = metadata.get("model_class")
+
+        if model_module and model_class_name:
+            try:
+                import importlib
+
+                module = importlib.import_module(model_module)
+                model_cls = getattr(module, model_class_name)
+                model = model_cls(**init_args)
+                model.load_state_dict(state_dict)
+                return model
+            except (ImportError, AttributeError) as e:
+                # Fall through to try dill
+                pass
+
+        # Option 3: Try to use dill-serialized class
+        if "serialized_class" in bundle and bundle["serialized_class"] is not None:
+            try:
+                import dill
+
+                model_cls = dill.loads(bundle["serialized_class"])
+                model = model_cls(**init_args)
+                model.load_state_dict(state_dict)
+                return model
+            except Exception as e:
+                raise RuntimeError(
+                    f"Failed to reconstruct model from serialized class: {e}"
+                )
+
+        # No reconstruction method worked
+        raise RuntimeError(
+            f"Cannot auto-reconstruct model '{name}'. Try one of:\n"
+            f"1. Provide model_class: folio.get_pytorch('{name}', model_class=YourModelClass)\n"
+            f"2. Get state_dict only: folio.get_pytorch('{name}', reconstruct=False)\n"
+            f"3. Ensure model class '{model_class_name}' from '{model_module}' is importable\n"
+            f"4. Re-save model with save_class=True to enable automatic reconstruction"
+        )
 
     def add_artifact(
         self,
@@ -1347,6 +1975,369 @@ class DataFolio:
         # Return path to artifact in bundle
         return self._join_paths(self._bundle_dir, ARTIFACTS_DIR, item["filename"])
 
+    def add_numpy(
+        self,
+        name: str,
+        array: Any,
+        description: Optional[str] = None,
+        overwrite: bool = False,
+        inputs: Optional[list[str]] = None,
+        code: Optional[str] = None,
+    ) -> Self:
+        """Add a numpy array to the bundle.
+
+        Saves array to artifacts/ directory as .npy file and updates items.json.
+
+        Args:
+            name: Unique name for this array
+            array: numpy array to save
+            description: Optional description
+            overwrite: If True, allow overwriting existing array (default: False)
+            inputs: Optional list of items this was derived from
+            code: Optional code snippet that created this array
+
+        Returns:
+            Self for method chaining
+
+        Raises:
+            ValueError: If name already exists and overwrite=False
+            ImportError: If numpy is not installed
+            TypeError: If data is not a numpy array
+
+        Examples:
+            >>> import numpy as np
+            >>> folio = DataFolio('experiments/test')
+            >>> embeddings = np.random.randn(100, 128)
+            >>> folio.add_numpy('embeddings', embeddings, description='Model embeddings')
+            >>> # With lineage
+            >>> predictions = np.array([0, 1, 0, 1])
+            >>> folio.add_numpy('predictions', predictions,
+            ...     inputs=['test_data'],
+            ...     code='predictions = model.predict(X)')
+        """
+        try:
+            import numpy as np
+        except ImportError:
+            raise ImportError(
+                "NumPy is required to save numpy arrays. "
+                "Install with: pip install numpy"
+            )
+
+        # Validate inputs
+        if not overwrite and name in self._items:
+            raise ValueError(
+                f"Item '{name}' already exists in this DataFolio. Use overwrite=True to replace it."
+            )
+
+        if not isinstance(array, np.ndarray):
+            raise TypeError(f"Expected numpy array, got {type(array).__name__}")
+
+        # Create metadata
+        filename = f"{name}.npy"
+        item: IncludedItem = {
+            "name": name,
+            "filename": filename,
+            "item_type": "numpy_array",
+            "shape": list(array.shape),
+            "dtype": str(array.dtype),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+        if description is not None:
+            item["description"] = description
+        if inputs is not None:
+            item["inputs"] = inputs
+        if code is not None:
+            item["code"] = code
+
+        self._items[name] = item
+
+        # Write array immediately
+        array_path = self._join_paths(self._bundle_dir, ARTIFACTS_DIR, filename)
+        self._write_numpy(array_path, array)
+
+        # Update manifest
+        self._save_items()
+
+        return self
+
+    def get_numpy(self, name: str) -> Any:
+        """Get a numpy array by name.
+
+        Arrays are NOT cached - always read fresh from disk.
+
+        Args:
+            name: Name of the array
+
+        Returns:
+            numpy array
+
+        Raises:
+            KeyError: If array name doesn't exist
+            ValueError: If named item is not a numpy array
+            ImportError: If numpy is not installed
+
+        Examples:
+            >>> folio = DataFolio('experiments/test')
+            >>> embeddings = folio.get_numpy('embeddings')
+            >>> print(embeddings.shape)
+        """
+        if name not in self._items:
+            raise KeyError(f"Array '{name}' not found in DataFolio")
+
+        item = self._items[name]
+        if item.get("item_type") != "numpy_array":
+            raise ValueError(
+                f"Item '{name}' is not a numpy array (type: {item.get('item_type')})"
+            )
+
+        # Read array (not cached)
+        array_path = self._join_paths(self._bundle_dir, ARTIFACTS_DIR, item["filename"])
+        return self._read_numpy(array_path)
+
+    def add_json(
+        self,
+        name: str,
+        data: Union[dict, list, int, float, str, bool, None],
+        description: Optional[str] = None,
+        overwrite: bool = False,
+        inputs: Optional[list[str]] = None,
+        code: Optional[str] = None,
+    ) -> Self:
+        """Add JSON-serializable data to the bundle.
+
+        Saves data to artifacts/ directory as .json file and updates items.json.
+        Supports dicts, lists, scalars, and other JSON-serializable types.
+
+        Args:
+            name: Unique name for this data
+            data: JSON-serializable data (dict, list, scalar, etc.)
+            description: Optional description
+            overwrite: If True, allow overwriting existing data (default: False)
+            inputs: Optional list of items this was derived from
+            code: Optional code snippet that created this data
+
+        Returns:
+            Self for method chaining
+
+        Raises:
+            ValueError: If name already exists and overwrite=False, or data not JSON-serializable
+            TypeError: If data cannot be serialized to JSON
+
+        Examples:
+            >>> folio = DataFolio('experiments/test')
+            >>> config = {'learning_rate': 0.01, 'batch_size': 32}
+            >>> folio.add_json('config', config, description='Model config')
+            >>> # With list data
+            >>> class_names = ['cat', 'dog', 'bird']
+            >>> folio.add_json('classes', class_names)
+            >>> # With scalar
+            >>> folio.add_json('best_accuracy', 0.95)
+        """
+        # Validate inputs
+        if not overwrite and name in self._items:
+            raise ValueError(
+                f"Item '{name}' already exists in this DataFolio. Use overwrite=True to replace it."
+            )
+
+        # Check if data is JSON-serializable
+        import orjson
+
+        try:
+            # Test serialization
+            orjson.dumps(data)
+        except (TypeError, ValueError) as e:
+            raise TypeError(f"Data is not JSON-serializable: {e}")
+
+        # Create metadata
+        filename = f"{name}.json"
+        item: IncludedItem = {
+            "name": name,
+            "filename": filename,
+            "item_type": "json_data",
+            "data_type": type(data).__name__,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+        if description is not None:
+            item["description"] = description
+        if inputs is not None:
+            item["inputs"] = inputs
+        if code is not None:
+            item["code"] = code
+
+        self._items[name] = item
+
+        # Write JSON immediately
+        json_path = self._join_paths(self._bundle_dir, ARTIFACTS_DIR, filename)
+        self._write_json(json_path, data)
+
+        # Update manifest
+        self._save_items()
+
+        return self
+
+    def get_json(self, name: str) -> Any:
+        """Get JSON data by name.
+
+        Data is NOT cached - always read fresh from disk.
+
+        Args:
+            name: Name of the JSON data
+
+        Returns:
+            Deserialized JSON data (dict, list, scalar, etc.)
+
+        Raises:
+            KeyError: If data name doesn't exist
+            ValueError: If named item is not JSON data
+
+        Examples:
+            >>> folio = DataFolio('experiments/test')
+            >>> config = folio.get_json('config')
+            >>> print(config['learning_rate'])
+        """
+        if name not in self._items:
+            raise KeyError(f"JSON data '{name}' not found in DataFolio")
+
+        item = self._items[name]
+        if item.get("item_type") != "json_data":
+            raise ValueError(
+                f"Item '{name}' is not JSON data (type: {item.get('item_type')})"
+            )
+
+        # Read JSON (not cached)
+        json_path = self._join_paths(self._bundle_dir, ARTIFACTS_DIR, item["filename"])
+        return self._read_json(json_path)
+
+    def add_data(
+        self,
+        name: str,
+        data: Any = None,
+        reference: Optional[Union[str, Path]] = None,
+        description: Optional[str] = None,
+        **kwargs,
+    ) -> Self:
+        """Generic data addition with automatic type detection.
+
+        Convenience method that dispatches to the appropriate specific method
+        based on data type. For fine-grained control, use the specific methods:
+        add_table(), add_numpy(), add_json(), or reference_table().
+
+        Args:
+            name: Unique name for this data
+            data: Data to save (DataFrame, numpy array, dict, list, scalar)
+            reference: If provided, creates a reference to external data instead
+            description: Optional description
+            **kwargs: Additional arguments passed to the specific method
+
+        Returns:
+            Self for method chaining
+
+        Raises:
+            ValueError: If neither data nor reference is provided, or both are provided
+            TypeError: If data type is not supported
+
+        Examples:
+            DataFrame (saves as parquet):
+            >>> folio.add_data('results', df)
+
+            Numpy array (saves as .npy):
+            >>> folio.add_data('embeddings', np.array([1, 2, 3]))
+
+            JSON data (saves as .json):
+            >>> folio.add_data('config', {'lr': 0.01})
+            >>> folio.add_data('classes', ['cat', 'dog'])
+            >>> folio.add_data('accuracy', 0.95)
+
+            External reference:
+            >>> folio.add_data('raw', reference='s3://bucket/data.parquet')
+        """
+        # Validate inputs
+        if data is None and reference is None:
+            raise ValueError("Must provide either 'data' or 'reference' parameter")
+        if data is not None and reference is not None:
+            raise ValueError("Cannot provide both 'data' and 'reference' parameters")
+
+        # Handle reference
+        if reference is not None:
+            return self.reference_table(
+                name, reference, description=description, **kwargs
+            )
+
+        # Type detection and dispatch
+        try:
+            import pandas as pd
+
+            if isinstance(data, pd.DataFrame):
+                return self.add_table(name, data, description=description, **kwargs)
+        except ImportError:
+            pass
+
+        try:
+            import numpy as np
+
+            if isinstance(data, np.ndarray):
+                return self.add_numpy(name, data, description=description, **kwargs)
+        except ImportError:
+            pass
+
+        # Check if JSON-serializable (dict, list, scalar)
+        if isinstance(data, (dict, list, int, float, str, bool, type(None))):
+            return self.add_json(name, data, description=description, **kwargs)
+
+        # Unsupported type
+        raise TypeError(
+            f"Unsupported data type: {type(data).__name__}. "
+            f"Supported types: pandas.DataFrame, numpy.ndarray, dict, list, or JSON scalars. "
+            f"For other file types, use add_artifact()."
+        )
+
+    def get_data(self, name: str) -> Any:
+        """Generic data getter that returns any data type.
+
+        Automatically detects the item type and calls the appropriate getter.
+        For fine-grained control, use the specific methods: get_table(),
+        get_numpy(), or get_json().
+
+        Args:
+            name: Name of the data item
+
+        Returns:
+            The data (DataFrame, numpy array, dict, list, or scalar)
+
+        Raises:
+            KeyError: If item name doesn't exist
+            ValueError: If item is not a data type (e.g., is a model or artifact)
+
+        Examples:
+            >>> folio.add_data('results', df)
+            >>> folio.add_data('embeddings', np_array)
+            >>> folio.add_data('config', {'lr': 0.01})
+            >>> # Later, retrieve without knowing the type
+            >>> results = folio.get_data('results')  # Returns DataFrame
+            >>> embeddings = folio.get_data('embeddings')  # Returns numpy array
+            >>> config = folio.get_data('config')  # Returns dict
+        """
+        if name not in self._items:
+            raise KeyError(f"Item '{name}' not found in DataFolio")
+
+        item = self._items[name]
+        item_type = item.get("item_type")
+
+        # Dispatch based on item type
+        if item_type in ("referenced_table", "included_table"):
+            return self.get_table(name)
+        elif item_type == "numpy_array":
+            return self.get_numpy(name)
+        elif item_type == "json_data":
+            return self.get_json(name)
+        else:
+            raise ValueError(
+                f"Item '{name}' is not a data item (type: {item_type}). "
+                f"Use get_model() for models or get_artifact_path() for artifacts."
+            )
+
     # ==================== Lineage Methods ====================
 
     def get_inputs(self, item_name: str) -> list[str]:
@@ -1436,7 +2427,7 @@ class DataFolio:
         metadata_updates: Optional[Dict[str, Any]] = None,
         include_items: Optional[list[str]] = None,
         exclude_items: Optional[list[str]] = None,
-        use_random_suffix: bool = False,
+        random_suffix: bool = False,
     ) -> "DataFolio":
         """Create a copy of this bundle with a new name.
 
@@ -1447,7 +2438,7 @@ class DataFolio:
             metadata_updates: Metadata fields to update/add in the copy
             include_items: If specified, only copy these items (by name)
             exclude_items: Items to exclude from copy (by name)
-            use_random_suffix: If True, append random suffix to new bundle name (default: False)
+            random_suffix: If True, append random suffix to new bundle name (default: False)
 
         Returns:
             New DataFolio instance
@@ -1460,7 +2451,7 @@ class DataFolio:
             >>> folio2 = folio.copy('experiments/exp-v2')
 
             >>> # Copy with random suffix
-            >>> folio2 = folio.copy('experiments/exp-v2', use_random_suffix=True)
+            >>> folio2 = folio.copy('experiments/exp-v2', random_suffix=True)
 
             >>> # Copy with metadata updates to track parent
             >>> folio2 = folio.copy(
@@ -1489,7 +2480,7 @@ class DataFolio:
             new_metadata.update(metadata_updates)
 
         new_folio = DataFolio(
-            path=new_path, metadata=new_metadata, use_random_suffix=use_random_suffix
+            path=new_path, metadata=new_metadata, random_suffix=random_suffix
         )
 
         # Determine which items to copy

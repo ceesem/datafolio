@@ -94,7 +94,10 @@ class TestListContents:
         assert contents == {
             "referenced_tables": [],
             "included_tables": [],
+            "numpy_arrays": [],
+            "json_data": [],
             "models": [],
+            "pytorch_models": [],
             "artifacts": [],
         }
 
@@ -104,7 +107,15 @@ class TestListContents:
         contents = folio.list_contents()
 
         # Verify all expected keys are present
-        expected_keys = {"referenced_tables", "included_tables", "models", "artifacts"}
+        expected_keys = {
+            "referenced_tables",
+            "included_tables",
+            "numpy_arrays",
+            "json_data",
+            "models",
+            "pytorch_models",
+            "artifacts",
+        }
         assert set(contents.keys()) == expected_keys
 
         # Verify all values are lists
