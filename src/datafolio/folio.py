@@ -206,13 +206,23 @@ class DataFolio:
 
             self._is_new = True
 
-            # Initialize metadata with timestamps
+            # Initialize metadata with timestamps and version info
             self._metadata_raw = metadata or {}
             now = datetime.now(timezone.utc).isoformat()
             if "created_at" not in self._metadata_raw:
                 self._metadata_raw["created_at"] = now
             if "updated_at" not in self._metadata_raw:
                 self._metadata_raw["updated_at"] = now
+
+            # Add datafolio version info (don't overwrite if already present)
+            if "_datafolio" not in self._metadata_raw:
+                from datafolio import __version__
+
+                self._metadata_raw["_datafolio"] = {
+                    "version": __version__,
+                    "created_by": "datafolio",
+                }
+
             self.metadata = MetadataDict(self, **self._metadata_raw)
 
             # Create directory structure with retries on collision
@@ -645,6 +655,66 @@ class DataFolio:
 
     # ==================== Bundle Initialization ====================
 
+    def _write_readme(self) -> None:
+        """Write a README.md file to document the bundle structure."""
+        from datafolio import __version__
+
+        readme_content = f"""# DataFolio Bundle
+
+This directory was created by [datafolio](https://github.com/seung-lab/datafolio) version {__version__}.
+
+## Structure
+
+- `metadata.json` - User metadata and timestamps
+- `items.json` - Manifest of all data items (tables, models, artifacts)
+- `tables/` - Parquet files for included tables
+- `models/` - Serialized ML models (sklearn, PyTorch)
+- `artifacts/` - Plots, configs, numpy arrays, JSON data, and other files
+
+## Usage
+
+Load this bundle in Python:
+
+```python
+from datafolio import DataFolio
+
+# Open the bundle
+folio = DataFolio('{self.path}')
+
+# View contents
+folio.describe()
+
+# Access data
+df = folio.get_table('table_name')
+model = folio.get_model('model_name')
+array = folio.get_numpy('array_name')
+```
+
+## Documentation
+
+For more information, see the [datafolio documentation](https://github.com/seung-lab/datafolio).
+"""
+
+        readme_path = self._join_paths(self._bundle_dir, "README.md")
+
+        # Write README based on storage type
+        if is_cloud_path(self._bundle_dir):
+            # For cloud storage, use cloudfiles
+            from cloudfiles import CloudFiles
+
+            parts = readme_path.rsplit("/", 1)
+            if len(parts) == 2:
+                dir_path, filename = parts
+            else:
+                dir_path = ""
+                filename = parts[0]
+            cf = CloudFiles(dir_path) if dir_path else CloudFiles(readme_path)
+            cf.put(filename, readme_content.encode("utf-8"))
+        else:
+            # For local storage, write directly
+            with open(readme_path, "w") as f:
+                f.write(readme_content)
+
     def _initialize_bundle(self, max_retries: int = 10) -> None:
         """Initialize new bundle directory structure with collision retry.
 
@@ -703,9 +773,10 @@ class DataFolio:
         self._mkdir(self._join_paths(self._bundle_dir, MODELS_DIR))
         self._mkdir(self._join_paths(self._bundle_dir, ARTIFACTS_DIR))
 
-        # Write initial manifests
+        # Write initial manifests and README
         self._save_metadata()
         self._save_items()
+        self._write_readme()
 
     def _load_manifests(self) -> None:
         """Load all manifest files from existing bundle."""
@@ -882,6 +953,34 @@ class DataFolio:
             for name, item in self._items.items()
             if item.get("item_type") == "artifact"
         ]
+
+    @property
+    def path(self) -> str:
+        """Get the absolute path to the bundle directory.
+
+        Returns absolute local path for local bundles, or the full cloud path
+        for cloud bundles (e.g., s3://bucket/path).
+
+        Returns:
+            Absolute path string
+
+        Examples:
+            >>> folio = DataFolio('experiments/test')
+            >>> print(folio.path)
+            '/absolute/path/to/experiments/test'
+
+            >>> folio = DataFolio('s3://bucket/experiments/test')
+            >>> print(folio.path)
+            's3://bucket/experiments/test'
+        """
+        from datafolio.utils import is_cloud_path
+
+        # Cloud paths are returned as-is
+        if is_cloud_path(self._bundle_dir):
+            return self._bundle_dir
+
+        # For local paths, return absolute filesystem path (not file:// URL)
+        return str(Path(self._bundle_dir).resolve())
 
     def __repr__(self) -> str:
         """Return string representation of DataFolio."""

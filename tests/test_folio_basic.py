@@ -41,7 +41,7 @@ class TestDataFolioInit:
 
     def test_exact_bundle_name_without_random_suffix(self, tmp_path):
         """Test creating bundle with exact name (no random suffix)."""
-        folio = DataFolio(tmp_path / "my-experiment", use_random_suffix=False)
+        folio = DataFolio(tmp_path / "my-experiment", random_suffix=False)
 
         # Bundle directory should be exactly the prefix
         assert folio._bundle_dir.endswith("my-experiment")
@@ -49,7 +49,7 @@ class TestDataFolioInit:
 
     def test_random_suffix_when_enabled(self, tmp_path):
         """Test creating bundle with random suffix."""
-        folio = DataFolio(tmp_path / "my-experiment", use_random_suffix=True)
+        folio = DataFolio(tmp_path / "my-experiment", random_suffix=True)
 
         # Bundle directory should have prefix plus random suffix
         assert "my-experiment" in str(folio._bundle_dir)
@@ -61,11 +61,11 @@ class TestDataFolioInit:
     def test_reopen_existing_bundle_without_random_suffix(self, tmp_path):
         """Test that reopening an existing bundle loads it correctly."""
         # Create first bundle
-        folio1 = DataFolio(tmp_path / "test-experiment", use_random_suffix=False)
+        folio1 = DataFolio(tmp_path / "test-experiment", random_suffix=False)
         original_created_at = folio1.metadata["created_at"]
 
         # Opening the same path loads the existing bundle
-        folio2 = DataFolio(tmp_path / "test-experiment", use_random_suffix=False)
+        folio2 = DataFolio(tmp_path / "test-experiment", random_suffix=False)
 
         # Should load the same bundle, not create a new one
         assert folio2._bundle_dir == folio1._bundle_dir
@@ -74,10 +74,10 @@ class TestDataFolioInit:
     def test_collision_retry_with_random_suffix(self, tmp_path):
         """Test that collision is handled with retry when random suffix enabled."""
         # Create first bundle
-        folio1 = DataFolio(tmp_path / "test", use_random_suffix=True)
+        folio1 = DataFolio(tmp_path / "test", random_suffix=True)
 
         # Create another with same prefix - should get different random suffix
-        folio2 = DataFolio(tmp_path / "test", use_random_suffix=True)
+        folio2 = DataFolio(tmp_path / "test", random_suffix=True)
 
         # Should have different bundle directories
         assert folio1._bundle_dir != folio2._bundle_dir
@@ -144,6 +144,115 @@ class TestRepr:
         repr_str = repr(folio)
 
         assert "items=1" in repr_str
+
+
+class TestPathProperty:
+    """Tests for the path property."""
+
+    def test_path_returns_absolute_local_path(self, tmp_path):
+        """Test that path property returns absolute path for local directories."""
+        folio = DataFolio(tmp_path / "test")
+
+        # Path should be absolute
+        path = folio.path
+        assert Path(path).is_absolute()
+        assert "test" in path
+
+    def test_path_with_relative_input(self, tmp_path):
+        """Test that path property makes relative paths absolute."""
+        import os
+
+        # Change to tmp_path and create with relative path
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(tmp_path)
+            folio = DataFolio("relative-test")
+
+            # Path should be absolute even though we passed relative
+            path = folio.path
+            assert Path(path).is_absolute()
+            assert "relative-test" in path
+        finally:
+            os.chdir(original_cwd)
+
+    def test_path_with_absolute_input(self, tmp_path):
+        """Test that path property works with absolute input paths."""
+        abs_path = tmp_path / "absolute-test"
+        folio = DataFolio(abs_path)
+
+        # Path should remain absolute
+        path = folio.path
+        assert Path(path).is_absolute()
+        assert path == str(abs_path.resolve())
+
+    def test_path_consistent_across_reopen(self, tmp_path):
+        """Test that path property returns same value after reopening bundle."""
+        # Create bundle
+        folio1 = DataFolio(tmp_path / "test")
+        path1 = folio1.path
+
+        # Reopen bundle
+        folio2 = DataFolio(tmp_path / "test")
+        path2 = folio2.path
+
+        # Paths should be identical
+        assert path1 == path2
+
+
+class TestVersionAndReadme:
+    """Tests for version info and README creation."""
+
+    def test_version_info_in_metadata(self, tmp_path):
+        """Test that version info is added to metadata.json."""
+        folio = DataFolio(tmp_path / "test")
+
+        # Check that _datafolio key exists
+        assert "_datafolio" in folio.metadata
+        assert "version" in folio.metadata["_datafolio"]
+        assert "created_by" in folio.metadata["_datafolio"]
+        assert folio.metadata["_datafolio"]["created_by"] == "datafolio"
+
+    def test_readme_created(self, tmp_path):
+        """Test that README.md is created."""
+        folio = DataFolio(tmp_path / "test")
+
+        # Check that README exists
+        readme_path = tmp_path / "test" / "README.md"
+        assert readme_path.exists()
+
+    def test_readme_contains_version(self, tmp_path):
+        """Test that README contains version information."""
+        folio = DataFolio(tmp_path / "test")
+
+        readme_path = tmp_path / "test" / "README.md"
+        readme_content = readme_path.read_text()
+
+        # Check for key content
+        assert "DataFolio Bundle" in readme_content
+        assert "datafolio" in readme_content
+        assert "version" in readme_content
+        assert "## Structure" in readme_content
+        assert "## Usage" in readme_content
+
+    def test_readme_contains_usage_example(self, tmp_path):
+        """Test that README contains usage example with correct path."""
+        folio = DataFolio(tmp_path / "test")
+
+        readme_path = tmp_path / "test" / "README.md"
+        readme_content = readme_path.read_text()
+
+        # Check that the path is included in usage example
+        assert "from datafolio import DataFolio" in readme_content
+        assert "folio.describe()" in readme_content
+        assert "folio.get_table" in readme_content
+
+    def test_existing_datafolio_metadata_not_overwritten(self, tmp_path):
+        """Test that existing _datafolio metadata is not overwritten."""
+        custom_version = {"version": "custom", "created_by": "test"}
+        folio = DataFolio(tmp_path / "test", metadata={"_datafolio": custom_version})
+
+        # Should preserve custom version info
+        assert folio.metadata["_datafolio"] == custom_version
 
 
 class TestLoad:
