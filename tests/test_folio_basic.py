@@ -271,3 +271,235 @@ class TestLoad:
             assert folio._bundle_dir is not None
         finally:
             shutil.rmtree(temp_dir)
+
+
+class TestDelete:
+    """Tests for deleting items from DataFolio."""
+
+    def test_delete_single_table(self, tmp_path):
+        """Test deleting a single table."""
+        import pandas as pd
+
+        folio = DataFolio(tmp_path / "test")
+        df = pd.DataFrame({"a": [1, 2, 3]})
+        folio.add_table("data1", df)
+        folio.add_table("data2", df)
+
+        # Delete one table
+        folio.delete("data1")
+
+        # Verify it's removed from manifest
+        assert "data1" not in folio._items
+        assert "data2" in folio._items
+
+        # Verify file is deleted
+        table_path = tmp_path / "test" / "tables" / "data1.parquet"
+        assert not table_path.exists()
+
+    def test_delete_multiple_items(self, tmp_path):
+        """Test deleting multiple items at once."""
+        import pandas as pd
+
+        folio = DataFolio(tmp_path / "test")
+        df = pd.DataFrame({"a": [1, 2, 3]})
+        folio.add_table("data1", df)
+        folio.add_table("data2", df)
+        folio.add_table("data3", df)
+
+        # Delete multiple items
+        folio.delete(["data1", "data2"])
+
+        # Verify both are removed
+        assert "data1" not in folio._items
+        assert "data2" not in folio._items
+        assert "data3" in folio._items
+
+        # Verify files are deleted
+        assert not (tmp_path / "test" / "tables" / "data1.parquet").exists()
+        assert not (tmp_path / "test" / "tables" / "data2.parquet").exists()
+        assert (tmp_path / "test" / "tables" / "data3.parquet").exists()
+
+    def test_delete_model(self, tmp_path):
+        """Test deleting a model."""
+
+        class DummyModel:
+            def __init__(self):
+                self.param = 42
+
+        folio = DataFolio(tmp_path / "test")
+        model = DummyModel()
+        folio.add_model("clf", model)
+
+        # Delete model
+        folio.delete("clf")
+
+        # Verify it's removed
+        assert "clf" not in folio._items
+        assert not (tmp_path / "test" / "models" / "clf.joblib").exists()
+
+    def test_delete_numpy_array(self, tmp_path):
+        """Test deleting a numpy array."""
+        import numpy as np
+
+        folio = DataFolio(tmp_path / "test")
+        arr = np.array([1, 2, 3])
+        folio.add_numpy("embeddings", arr)
+
+        # Delete array
+        folio.delete("embeddings")
+
+        # Verify it's removed
+        assert "embeddings" not in folio._items
+        assert not (tmp_path / "test" / "artifacts" / "embeddings.npy").exists()
+
+    def test_delete_json_data(self, tmp_path):
+        """Test deleting JSON data."""
+        folio = DataFolio(tmp_path / "test")
+        folio.add_json("config", {"lr": 0.01, "batch_size": 32})
+
+        # Delete JSON
+        folio.delete("config")
+
+        # Verify it's removed
+        assert "config" not in folio._items
+        assert not (tmp_path / "test" / "artifacts" / "config.json").exists()
+
+    def test_delete_artifact(self, tmp_path):
+        """Test deleting an artifact file."""
+        # Create artifact file
+        artifact_file = tmp_path / "plot.png"
+        artifact_file.write_text("fake image")
+
+        folio = DataFolio(tmp_path / "test")
+        folio.add_artifact("plot", artifact_file)
+
+        # Delete artifact
+        folio.delete("plot")
+
+        # Verify it's removed
+        assert "plot" not in folio._items
+        assert not (tmp_path / "test" / "artifacts" / "plot.png").exists()
+
+    def test_delete_referenced_table(self, tmp_path):
+        """Test deleting a referenced table (metadata only, no file)."""
+        import pandas as pd
+
+        # Create external parquet file
+        df = pd.DataFrame({"a": [1, 2, 3]})
+        external_file = tmp_path / "external.parquet"
+        df.to_parquet(external_file)
+
+        folio = DataFolio(tmp_path / "test")
+        folio.reference_table("external_data", external_file, table_format="parquet")
+
+        # Delete reference
+        folio.delete("external_data")
+
+        # Verify reference is removed from manifest
+        assert "external_data" not in folio._items
+
+        # Verify external file still exists (shouldn't be deleted)
+        assert external_file.exists()
+
+    def test_delete_nonexistent_item_raises_error(self, tmp_path):
+        """Test that deleting nonexistent item raises KeyError."""
+        folio = DataFolio(tmp_path / "test")
+
+        with pytest.raises(KeyError, match="not found"):
+            folio.delete("nonexistent")
+
+    def test_delete_validates_all_before_deleting(self, tmp_path):
+        """Test that delete validates all items exist before deleting any."""
+        import pandas as pd
+
+        folio = DataFolio(tmp_path / "test")
+        df = pd.DataFrame({"a": [1, 2, 3]})
+        folio.add_table("data1", df)
+        folio.add_table("data2", df)
+
+        # Try to delete with one nonexistent item
+        with pytest.raises(KeyError, match="nonexistent"):
+            folio.delete(["data1", "nonexistent", "data2"])
+
+        # Both items should still exist (transaction-like behavior)
+        assert "data1" in folio._items
+        assert "data2" in folio._items
+
+    def test_delete_with_dependents_warns(self, tmp_path):
+        """Test that deleting item with dependents shows warning."""
+        import warnings
+
+        import pandas as pd
+
+        folio = DataFolio(tmp_path / "test")
+        df = pd.DataFrame({"a": [1, 2, 3]})
+
+        folio.add_table("raw", df)
+        folio.add_table("processed", df, inputs=["raw"])
+
+        # Delete item with dependent - should warn
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            folio.delete("raw")
+
+            # Check warning was issued
+            assert len(w) == 1
+            assert "used by" in str(w[0].message)
+            assert "processed" in str(w[0].message)
+
+        # Item should still be deleted despite warning
+        assert "raw" not in folio._items
+
+    def test_delete_without_warning(self, tmp_path):
+        """Test deleting with warn_dependents=False."""
+        import warnings
+
+        import pandas as pd
+
+        folio = DataFolio(tmp_path / "test")
+        df = pd.DataFrame({"a": [1, 2, 3]})
+
+        folio.add_table("raw", df)
+        folio.add_table("processed", df, inputs=["raw"])
+
+        # Delete without warning
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            folio.delete("raw", warn_dependents=False)
+
+            # No warning should be issued
+            assert len(w) == 0
+
+        # Item should be deleted
+        assert "raw" not in folio._items
+
+    def test_delete_returns_self_for_chaining(self, tmp_path):
+        """Test that delete returns self for method chaining."""
+        import pandas as pd
+
+        folio = DataFolio(tmp_path / "test")
+        df = pd.DataFrame({"a": [1, 2, 3]})
+        folio.add_table("data1", df)
+        folio.add_table("data2", df)
+
+        # Chain delete operations
+        result = folio.delete("data1").delete("data2")
+
+        assert result is folio
+        assert "data1" not in folio._items
+        assert "data2" not in folio._items
+
+    def test_delete_updates_manifest(self, tmp_path):
+        """Test that delete saves updated manifest."""
+        import pandas as pd
+
+        folio = DataFolio(tmp_path / "test")
+        df = pd.DataFrame({"a": [1, 2, 3]})
+        folio.add_table("data", df)
+
+        # Delete and reload
+        folio.delete("data")
+
+        # Reload bundle and verify item is gone
+        folio2 = DataFolio(tmp_path / "test")
+        assert "data" not in folio2._items

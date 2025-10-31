@@ -374,3 +374,164 @@ class TestDescribeWithLineage:
 
         # Should mention hyperparameters
         assert "hyperparameters" in description.lower() or "lr" in description
+
+
+class TestDescribeMetadataDisplay:
+    """Tests for describe() method showing custom metadata."""
+
+    def test_describe_shows_custom_metadata(self, tmp_path):
+        """Test that describe shows custom metadata fields."""
+        folio = DataFolio(
+            tmp_path / "test",
+            metadata={"experiment": "test_001", "scientist": "Dr. Smith"},
+        )
+
+        description = folio.describe(return_string=True)
+
+        assert "Metadata" in description
+        assert "experiment" in description
+        assert "test_001" in description
+        assert "scientist" in description
+        assert "Dr. Smith" in description
+
+    def test_describe_filters_internal_metadata(self, tmp_path):
+        """Test that describe filters out internal metadata fields."""
+        folio = DataFolio(tmp_path / "test", metadata={"experiment": "test_001"})
+
+        description = folio.describe(return_string=True)
+
+        # Should NOT show internal fields in the Metadata section
+        # (they're shown in the timestamp area already)
+        metadata_section = (
+            description.split("Metadata")[1] if "Metadata" in description else ""
+        )
+        assert "_datafolio" not in metadata_section
+
+    def test_describe_truncates_long_strings(self, tmp_path):
+        """Test that describe truncates long string values."""
+        long_string = "a" * 100
+        folio = DataFolio(tmp_path / "test", metadata={"notes": long_string})
+
+        description = folio.describe(return_string=True)
+
+        # Should show truncated version with indicator
+        assert "..." in description
+        assert "more chars" in description
+
+    def test_describe_shows_list_preview(self, tmp_path):
+        """Test that describe shows preview for long lists."""
+        long_list = list(range(20))
+        folio = DataFolio(tmp_path / "test", metadata={"batch_sizes": long_list})
+
+        description = folio.describe(return_string=True)
+
+        # Should show preview with count of remaining items
+        assert "batch_sizes" in description
+        assert "more items" in description
+
+    def test_describe_shows_dict_preview(self, tmp_path):
+        """Test that describe shows preview for large dicts."""
+        large_dict = {f"key_{i}": i for i in range(10)}
+        folio = DataFolio(tmp_path / "test", metadata={"config": large_dict})
+
+        description = folio.describe(return_string=True)
+
+        # Should show preview with count of remaining fields
+        assert "config" in description
+        assert "more fields" in description
+
+    def test_describe_respects_max_metadata_fields(self, tmp_path):
+        """Test that describe respects max_metadata_fields parameter."""
+        # Create folio with 15 custom metadata fields
+        metadata = {f"field_{i}": f"value_{i}" for i in range(15)}
+        folio = DataFolio(tmp_path / "test", metadata=metadata)
+
+        # Request only 5 fields
+        description = folio.describe(return_string=True, max_metadata_fields=5)
+
+        # Should show "... (10 more fields)" at the end
+        assert "(10 more fields)" in description
+
+    def test_describe_no_custom_metadata(self, tmp_path):
+        """Test describe when there's no custom metadata."""
+        folio = DataFolio(tmp_path / "test")
+
+        description = folio.describe(return_string=True)
+
+        # Should NOT show Metadata section if only internal fields exist
+        # But timestamps should still be shown
+        assert "Created:" in description
+        # Metadata section should not appear (or be empty)
+
+    def test_describe_short_values_not_truncated(self, tmp_path):
+        """Test that short values are not truncated."""
+        folio = DataFolio(
+            tmp_path / "test",
+            metadata={
+                "short_string": "hello",
+                "short_list": [1, 2, 3],
+                "short_dict": {"a": 1, "b": 2},
+            },
+        )
+
+        description = folio.describe(return_string=True)
+
+        # Should show full values without truncation indicators
+        assert "hello" in description
+        assert "[1, 2, 3]" in description
+        # Dict should be fully shown
+        assert "short_dict" in description
+
+    def test_format_metadata_value_strings(self, tmp_path):
+        """Test _format_metadata_value for different string lengths."""
+        folio = DataFolio(tmp_path / "test")
+
+        # Short string - no truncation
+        short = folio._format_metadata_value("hello")
+        assert short == "hello"
+        assert "..." not in short
+
+        # Long string - truncated
+        long = folio._format_metadata_value("a" * 100, max_length=60)
+        assert "..." in long
+        assert "40 more chars" in long
+
+    def test_format_metadata_value_lists(self, tmp_path):
+        """Test _format_metadata_value for lists."""
+        folio = DataFolio(tmp_path / "test")
+
+        # Short list - no truncation
+        short = folio._format_metadata_value([1, 2, 3])
+        assert short == "[1, 2, 3]"
+
+        # Long list - truncated
+        long = folio._format_metadata_value(list(range(20)))
+        assert "..." in long
+        assert "15 more items" in long
+
+    def test_format_metadata_value_dicts(self, tmp_path):
+        """Test _format_metadata_value for dicts."""
+        folio = DataFolio(tmp_path / "test")
+
+        # Small dict - no truncation
+        small = folio._format_metadata_value({"a": 1, "b": 2})
+        assert "..." not in small
+
+        # Large dict - truncated
+        large = folio._format_metadata_value({f"key_{i}": i for i in range(10)})
+        assert "..." in large
+        assert "7 more fields" in large
+
+    def test_metadata_sorting_consistent(self, tmp_path):
+        """Test that metadata fields are sorted consistently."""
+        metadata = {"zebra": "z", "apple": "a", "banana": "b"}
+        folio = DataFolio(tmp_path / "test", metadata=metadata)
+
+        description = folio.describe(return_string=True)
+
+        # Fields should appear in alphabetical order
+        apple_pos = description.find("apple")
+        banana_pos = description.find("banana")
+        zebra_pos = description.find("zebra")
+
+        assert apple_pos < banana_pos < zebra_pos

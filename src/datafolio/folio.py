@@ -78,6 +78,232 @@ class MetadataDict(dict):
         return result
 
 
+class ItemProxy:
+    """Proxy for accessing a single item with autocomplete-friendly properties.
+
+    Provides convenient property-based access to item data and metadata.
+    """
+
+    def __init__(self, folio: "DataFolio", name: str):
+        """Initialize ItemProxy.
+
+        Args:
+            folio: Parent DataFolio instance
+            name: Name of the item
+        """
+        self._folio = folio
+        self._name = name
+
+    @property
+    def content(self) -> Any:
+        """Get the content of this item.
+
+        Returns:
+            - For tables: DataFrame
+            - For numpy arrays: numpy array
+            - For JSON data: dict/list/scalar
+            - For models: loaded model object
+            - For artifacts: file path string (use with open())
+
+        Examples:
+            >>> df = folio.data.results.content  # DataFrame
+            >>> arr = folio.data.embeddings.content  # numpy array
+            >>> cfg = folio.data.config.content  # dict
+            >>> model = folio.data.classifier.content  # model object
+            >>> with open(folio.data.plot.content, 'rb') as f:  # file path
+            ...     img = f.read()
+        """
+        item = self._folio._items[self._name]
+        item_type = item.get("item_type")
+
+        # Dispatch to appropriate getter
+        if item_type in ("referenced_table", "included_table"):
+            return self._folio.get_table(self._name)
+        elif item_type == "numpy_array":
+            return self._folio.get_numpy(self._name)
+        elif item_type == "json_data":
+            return self._folio.get_json(self._name)
+        elif item_type in ("model", "pytorch_model"):
+            return self._folio.get_model(self._name)
+        elif item_type == "artifact":
+            return self._folio.get_artifact_path(self._name)
+        else:
+            raise ValueError(f"Unknown item type: {item_type}")
+
+    @property
+    def description(self) -> Optional[str]:
+        """Get the description of this item.
+
+        Returns:
+            Description string or None if not set
+        """
+        item = self._folio._items[self._name]
+        return item.get("description")
+
+    @property
+    def type(self) -> str:
+        """Get the type of this item.
+
+        Returns:
+            Item type string ('referenced_table', 'included_table', 'model',
+            'pytorch_model', 'numpy_array', 'json_data', 'artifact')
+        """
+        item = self._folio._items[self._name]
+        return item.get("item_type", "unknown")
+
+    @property
+    def path(self) -> Optional[str]:
+        """Get the file path for this item.
+
+        Returns:
+            - For referenced tables: external file path
+            - For artifacts: artifact file path
+            - For other types: None
+
+        Examples:
+            >>> folio.data.external_data.path  # 's3://bucket/data.parquet'
+            >>> folio.data.plot.path  # '/path/to/bundle/artifacts/plot.png'
+        """
+        item = self._folio._items[self._name]
+        item_type = item.get("item_type")
+
+        if item_type == "referenced_table":
+            return item.get("path")
+        elif item_type == "artifact":
+            return self._folio.get_artifact_path(self._name)
+        else:
+            return None
+
+    @property
+    def inputs(self) -> list[str]:
+        """Get the list of items this item depends on (lineage).
+
+        Returns:
+            List of item names that were used to create this item
+        """
+        return self._folio.get_inputs(self._name)
+
+    @property
+    def dependents(self) -> list[str]:
+        """Get the list of items that depend on this item (lineage).
+
+        Returns:
+            List of item names that use this item as input
+        """
+        return self._folio.get_dependents(self._name)
+
+    @property
+    def metadata(self) -> Dict[str, Any]:
+        """Get the full metadata dictionary for this item.
+
+        Returns:
+            Dictionary containing all item metadata
+        """
+        return dict(self._folio._items[self._name])
+
+    def __repr__(self) -> str:
+        """Return string representation."""
+        item = self._folio._items[self._name]
+        item_type = item.get("item_type", "unknown")
+        desc = item.get("description", "")
+        desc_str = f": {desc}" if desc else ""
+        return f"ItemProxy('{self._name}', type='{item_type}'{desc_str})"
+
+
+class DataAccessor:
+    """Accessor for autocomplete-friendly item access.
+
+    Supports both attribute-style (folio.data.my_item) and
+    dictionary-style (folio.data['my_item']) access.
+    """
+
+    def __init__(self, folio: "DataFolio"):
+        """Initialize DataAccessor.
+
+        Args:
+            folio: Parent DataFolio instance
+        """
+        self._folio = folio
+
+    def __getattr__(self, name: str) -> ItemProxy:
+        """Get item by attribute access.
+
+        Args:
+            name: Item name
+
+        Returns:
+            ItemProxy for the item
+
+        Raises:
+            AttributeError: If item doesn't exist
+        """
+        if name.startswith("_"):
+            # Allow access to private attributes
+            raise AttributeError(
+                f"'{type(self).__name__}' object has no attribute '{name}'"
+            )
+
+        if name not in self._folio._items:
+            raise AttributeError(
+                f"Item '{name}' not found in DataFolio. "
+                f"Available items: {', '.join(sorted(self._folio._items.keys()))}"
+            )
+
+        return ItemProxy(self._folio, name)
+
+    def __getitem__(self, name: str) -> ItemProxy:
+        """Get item by dictionary access.
+
+        Args:
+            name: Item name
+
+        Returns:
+            ItemProxy for the item
+
+        Raises:
+            KeyError: If item doesn't exist
+        """
+        if name not in self._folio._items:
+            raise KeyError(f"Item '{name}' not found in DataFolio")
+
+        return ItemProxy(self._folio, name)
+
+    def __dir__(self) -> list[str]:
+        """Return list of item names for autocomplete.
+
+        Returns:
+            Sorted list of all item names
+        """
+        # Include item names for autocomplete
+        return sorted(self._folio._items.keys())
+
+    def __repr__(self) -> str:
+        """Return string representation.
+
+        Returns:
+            String showing available items
+        """
+        items = sorted(self._folio._items.keys())
+        if not items:
+            return "DataAccessor(no items)"
+
+        # Group by type
+        contents = self._folio.list_contents()
+        lines = ["DataAccessor:"]
+
+        for category, item_list in [
+            ("Tables", contents["referenced_tables"] + contents["included_tables"]),
+            ("Models", contents["models"] + contents["pytorch_models"]),
+            ("Numpy Arrays", contents["numpy_arrays"]),
+            ("JSON Data", contents["json_data"]),
+            ("Artifacts", contents["artifacts"]),
+        ]:
+            if item_list:
+                lines.append(f"  {category}: {', '.join(sorted(item_list))}")
+
+        return "\n".join(lines)
+
+
 class DataFolio:
     """A lightweight bundle for tracking analysis artifacts and metadata.
 
@@ -661,7 +887,7 @@ class DataFolio:
 
         readme_content = f"""# DataFolio Bundle
 
-This directory was created by [datafolio](https://github.com/seung-lab/datafolio) version {__version__}.
+This directory was created by [datafolio](https://github.com/ceesem/datafolio) version {__version__}.
 
 ## Structure
 
@@ -692,7 +918,7 @@ array = folio.get_numpy('array_name')
 
 ## Documentation
 
-For more information, see the [datafolio documentation](https://github.com/seung-lab/datafolio).
+For more information, see the [datafolio documentation](https://github.com/ceesem/datafolio).
 """
 
         readme_path = self._join_paths(self._bundle_dir, "README.md")
@@ -955,6 +1181,33 @@ For more information, see the [datafolio documentation](https://github.com/seung
         ]
 
     @property
+    def data(self) -> DataAccessor:
+        """Access items with autocomplete support.
+
+        Returns:
+            DataAccessor that provides attribute-style and dictionary-style
+            access to all items with autocomplete in IPython/Jupyter.
+
+        Examples:
+            Attribute-style access:
+            >>> df = folio.data.results.content
+            >>> desc = folio.data.results.description
+            >>> inputs = folio.data.results.inputs
+
+            Dictionary-style access:
+            >>> df = folio.data['results'].content
+            >>> model = folio.data['classifier'].content
+
+            Artifacts return file path:
+            >>> with open(folio.data.plot.content, 'rb') as f:
+            ...     img = f.read()
+
+            Autocomplete (in IPython/Jupyter):
+            >>> folio.data.<TAB>  # Shows: results, classifier, embeddings, ...
+        """
+        return DataAccessor(self)
+
+    @property
     def path(self) -> str:
         """Get the absolute path to the bundle directory.
 
@@ -988,8 +1241,116 @@ For more information, see the [datafolio documentation](https://github.com/seung
         total_items = sum(len(v) for v in contents.values())
         return f"DataFolio(bundle_dir='{self._bundle_dir}', items={total_items})"
 
+    def _format_timestamp(self, iso_timestamp: str) -> str:
+        """Format an ISO timestamp into a human-readable string using local timezone.
+
+        Args:
+            iso_timestamp: ISO format timestamp string
+
+        Returns:
+            Human-readable timestamp in local time (e.g., "Today at 2:34 PM EST")
+
+        Examples:
+            >>> self._format_timestamp("2024-01-15T14:34:56.789Z")
+            'January 15, 2024 at 2:34 PM EST'
+        """
+        from datetime import datetime
+
+        try:
+            # Parse ISO timestamp (in UTC)
+            dt = datetime.fromisoformat(iso_timestamp.replace("Z", "+00:00"))
+
+            # Convert to local timezone
+            dt_local = dt.astimezone()
+
+            # Get current time in local timezone for comparison
+            now = datetime.now().astimezone()
+
+            # Check if today or yesterday
+            dt_date = dt_local.date()
+            now_date = now.date()
+
+            time_str = dt_local.strftime("%I:%M %p %Z").lstrip(
+                "0"
+            )  # Remove leading zero from hour
+
+            if dt_date == now_date:
+                return f"Today at {time_str}"
+            elif (now_date - dt_date).days == 1:
+                return f"Yesterday at {time_str}"
+            else:
+                date_str = dt_local.strftime("%B %d, %Y")
+                return f"{date_str} at {time_str}"
+
+        except (ValueError, AttributeError):
+            # If parsing fails, return the original
+            return iso_timestamp
+
+    def _format_metadata_value(self, value: Any, max_length: int = 60) -> str:
+        """Format a metadata value for display with smart truncation.
+
+        Args:
+            value: The metadata value to format
+            max_length: Maximum length for string values before truncation
+
+        Returns:
+            Formatted string representation
+
+        Examples:
+            >>> self._format_metadata_value("short")
+            'short'
+            >>> self._format_metadata_value("a" * 100)
+            'aaaaaaaaaa... (90 more chars)'
+            >>> self._format_metadata_value([1, 2, 3])
+            '[1, 2, 3]'
+            >>> self._format_metadata_value(list(range(20)))
+            '[0, 1, 2, 3, 4, ...] (15 more items)'
+        """
+        # Handle strings
+        if isinstance(value, str):
+            if len(value) <= max_length:
+                return value
+            else:
+                truncated = value[:max_length]
+                remaining = len(value) - max_length
+                return f"{truncated}... ({remaining} more chars)"
+
+        # Handle lists
+        if isinstance(value, list):
+            if len(value) <= 5:
+                return str(value)
+            else:
+                preview = value[:5]
+                remaining = len(value) - 5
+                preview_str = str(preview)[:-1]  # Remove closing bracket
+                return f"{preview_str}, ...] ({remaining} more items)"
+
+        # Handle dicts
+        if isinstance(value, dict):
+            if len(value) <= 3:
+                return str(value)
+            else:
+                # Show first 3 items
+                preview_items = list(value.items())[:3]
+                preview_dict = {k: v for k, v in preview_items}
+                remaining = len(value) - 3
+                preview_str = str(preview_dict)[:-1]  # Remove closing brace
+                return f"{preview_str}, ...}} ({remaining} more fields)"
+
+        # Default: convert to string
+        value_str = str(value)
+        if len(value_str) <= max_length:
+            return value_str
+        else:
+            truncated = value_str[:max_length]
+            remaining = len(value_str) - max_length
+            return f"{truncated}... ({remaining} more chars)"
+
     def describe(
-        self, return_string: bool = False, show_empty: bool = False
+        self,
+        return_string: bool = False,
+        show_empty: bool = False,
+        max_metadata_fields: int = 10,
     ) -> Optional[str]:
         """Generate a human-readable description of all items in the bundle.
 
@@ -998,6 +1359,7 @@ For more information, see the [datafolio documentation](https://github.com/seung
         Args:
             return_string: If True, return the description as a string instead of printing
             show_empty: If True, show empty sections (e.g., "Models (0): (none)")
+            max_metadata_fields: Maximum number of metadata fields to display (default: 10)
 
         Returns:
             None if return_string=False (prints to stdout), otherwise returns the description string
@@ -1024,22 +1386,51 @@ For more information, see the [datafolio documentation](https://github.com/seung
               • results: Model results
             Models (0):
               (none)
+
+            Limit metadata fields shown:
+            >>> folio.describe(max_metadata_fields=5)
         """
         lines = []
         lines.append(f"DataFolio: {self._bundle_dir}")
         lines.append("=" * len(lines[0]))
         lines.append("")
 
-        # Add timestamps if available
+        # Add timestamps if available (with human-readable formatting)
         if "created_at" in self.metadata:
-            lines.append(f"Created: {self.metadata['created_at']}")
+            formatted_created = self._format_timestamp(self.metadata["created_at"])
+            lines.append(f"Created: {formatted_created}")
         if "updated_at" in self.metadata:
-            lines.append(f"Updated: {self.metadata['updated_at']}")
+            formatted_updated = self._format_timestamp(self.metadata["updated_at"])
+            lines.append(f"Updated: {formatted_updated}")
         if "parent_bundle" in self.metadata:
             lines.append(f"Parent: {self.metadata['parent_bundle']}")
         if any(
             k in self.metadata for k in ["created_at", "updated_at", "parent_bundle"]
         ):
+            lines.append("")
+
+        # Add custom metadata section (filter out internal fields)
+        internal_fields = {"created_at", "updated_at", "parent_bundle", "_datafolio"}
+        custom_metadata = {
+            k: v for k, v in self.metadata.items() if k not in internal_fields
+        }
+
+        if custom_metadata:
+            lines.append(f"Metadata ({len(custom_metadata)} fields):")
+            # Sort keys for consistent display
+            sorted_keys = sorted(custom_metadata.keys())
+            displayed_keys = sorted_keys[:max_metadata_fields]
+
+            for key in displayed_keys:
+                value = custom_metadata[key]
+                formatted_value = self._format_metadata_value(value)
+                lines.append(f"  • {key}: {formatted_value}")
+
+            # Show count of remaining fields if any
+            remaining_count = len(custom_metadata) - len(displayed_keys)
+            if remaining_count > 0:
+                lines.append(f"  ... ({remaining_count} more fields)")
+
             lines.append("")
 
         contents = self.list_contents()
@@ -2436,6 +2827,106 @@ For more information, see the [datafolio documentation](https://github.com/seung
                 f"Item '{name}' is not a data item (type: {item_type}). "
                 f"Use get_model() for models or get_artifact_path() for artifacts."
             )
+
+    def delete(self, name: Union[str, list[str]], warn_dependents: bool = True) -> Self:
+        """Delete one or more items from the DataFolio.
+
+        Removes items from the manifest and deletes associated files.
+        Does not enforce lineage - can delete items that other items depend on.
+
+        Args:
+            name: Name(s) of item(s) to delete (string or list of strings)
+            warn_dependents: If True, print warning if deleted items have dependents
+
+        Returns:
+            Self for method chaining
+
+        Raises:
+            KeyError: If any item name doesn't exist
+
+        Examples:
+            Delete single item:
+            >>> folio = DataFolio('experiments/test')
+            >>> folio.delete('old_model')
+
+            Delete multiple items:
+            >>> folio.delete(['temp_data', 'debug_plot', 'old_model'])
+
+            Delete without warnings:
+            >>> folio.delete('item', warn_dependents=False)
+        """
+        import warnings
+
+        # Convert single name to list for uniform processing
+        names_to_delete = [name] if isinstance(name, str) else name
+
+        # Validate all items exist before deleting any
+        for item_name in names_to_delete:
+            if item_name not in self._items:
+                raise KeyError(f"Item '{item_name}' not found in DataFolio")
+
+        # Delete each item
+        for item_name in names_to_delete:
+            item = self._items[item_name]
+            item_type = item.get("item_type")
+
+            # Check for dependents and warn if requested
+            if warn_dependents:
+                dependents = self.get_dependents(item_name)
+                if dependents:
+                    warnings.warn(
+                        f"Deleting '{item_name}' which is used by: {', '.join(dependents)}. "
+                        f"Those items may have broken lineage.",
+                        UserWarning,
+                        stacklevel=2,
+                    )
+
+            # Delete physical file (if it exists)
+            if item_type in (
+                "included_table",
+                "model",
+                "pytorch_model",
+                "numpy_array",
+                "json_data",
+                "artifact",
+            ):
+                # Determine the subdirectory based on type
+                if item_type == "included_table":
+                    subdir = TABLES_DIR
+                elif item_type in ("model", "pytorch_model"):
+                    subdir = MODELS_DIR
+                else:  # numpy_array, json_data, artifact
+                    subdir = ARTIFACTS_DIR
+
+                # Construct file path and delete
+                file_path = self._join_paths(self._bundle_dir, subdir, item["filename"])
+
+                # Delete file (local or cloud)
+                if is_cloud_path(file_path):
+                    # Cloud storage deletion
+                    from cloudfiles import CloudFiles
+
+                    parts = file_path.rsplit("/", 1)
+                    if len(parts) == 2:
+                        dir_path, filename = parts
+                    else:
+                        dir_path = ""
+                        filename = parts[0]
+                    cf = CloudFiles(dir_path) if dir_path else CloudFiles(file_path)
+                    cf.delete(filename)
+                else:
+                    # Local file deletion
+                    file_path_obj = Path(file_path)
+                    if file_path_obj.exists():
+                        file_path_obj.unlink()
+
+            # Remove from items manifest
+            del self._items[item_name]
+
+        # Save updated manifest
+        self._save_items()
+
+        return self
 
     # ==================== Lineage Methods ====================
 
