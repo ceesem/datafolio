@@ -17,6 +17,7 @@ from datafolio.utils import (
     IncludedItem,
     IncludedTable,
     TableReference,
+    TimestampItem,
     is_cloud_path,
     make_bundle_name,
 )
@@ -102,6 +103,7 @@ class ItemProxy:
             - For tables: DataFrame
             - For numpy arrays: numpy array
             - For JSON data: dict/list/scalar
+            - For timestamps: datetime object (UTC-aware)
             - For models: loaded model object
             - For artifacts: file path string (use with open())
 
@@ -109,6 +111,7 @@ class ItemProxy:
             >>> df = folio.data.results.content  # DataFrame
             >>> arr = folio.data.embeddings.content  # numpy array
             >>> cfg = folio.data.config.content  # dict
+            >>> ts = folio.data.event_time.content  # datetime
             >>> model = folio.data.classifier.content  # model object
             >>> with open(folio.data.plot.content, 'rb') as f:  # file path
             ...     img = f.read()
@@ -123,6 +126,8 @@ class ItemProxy:
             return self._folio.get_numpy(self._name)
         elif item_type == "json_data":
             return self._folio.get_json(self._name)
+        elif item_type == "timestamp":
+            return self._folio.get_timestamp(self._name)
         elif item_type in ("model", "pytorch_model"):
             return self._folio.get_model(self._name)
         elif item_type == "artifact":
@@ -401,6 +406,7 @@ class DataFolio:
         if is_existing_bundle:
             # Open existing bundle
             self._bundle_dir = path_str
+            self._bundle_path = Path(self._bundle_dir)
             self._is_new = False
             self._load_manifests()
             # Initialize metadata from file
@@ -429,7 +435,7 @@ class DataFolio:
             else:
                 # Use exact path as provided
                 self._bundle_dir = path_str
-
+            self._bundle_path = Path(self._bundle_dir)
             self._is_new = True
 
             # Initialize metadata with timestamps and version info
@@ -854,6 +860,36 @@ class DataFolio:
         else:
             return np.load(path)
 
+    def _write_timestamp(self, path: str, timestamp: datetime) -> None:
+        """Write timestamp to JSON file (local or cloud).
+
+        Args:
+            path: File path
+            timestamp: datetime object (must be timezone-aware, will be converted to UTC)
+        """
+        # Convert to UTC and create ISO 8601 string
+        utc_timestamp = timestamp.astimezone(timezone.utc)
+        iso_string = utc_timestamp.isoformat()
+
+        # Write as JSON using existing method
+        self._write_json(path, {"iso_string": iso_string})
+
+    def _read_timestamp(self, path: str) -> datetime:
+        """Read timestamp from JSON file (local or cloud).
+
+        Args:
+            path: File path
+
+        Returns:
+            UTC-aware datetime object
+        """
+        # Read JSON using existing method
+        data = self._read_json(path)
+        iso_string = data["iso_string"]
+
+        # Parse ISO 8601 string to datetime
+        return datetime.fromisoformat(iso_string)
+
     def _copy_file(self, src: Union[str, Path], dst: str) -> None:
         """Copy a file (local to local/cloud).
 
@@ -1046,7 +1082,8 @@ For more information, see the [datafolio documentation](https://github.com/ceese
 
         Returns:
             Dictionary with keys 'referenced_tables', 'included_tables', 'numpy_arrays',
-            'json_data', 'models', 'pytorch_models', and 'artifacts', each containing a list of names
+            'json_data', 'timestamps', 'models', 'pytorch_models', and 'artifacts',
+            each containing a list of names
 
         Examples:
             >>> folio = DataFolio('experiments', prefix='test')
@@ -1054,7 +1091,7 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             >>> folio.add_numpy('embeddings', np.array([1, 2, 3]))
             >>> folio.list_contents()
             {'referenced_tables': ['data1'], 'included_tables': [], 'numpy_arrays': ['embeddings'],
-             'json_data': [], 'models': [], 'pytorch_models': [], 'artifacts': []}
+             'json_data': [], 'timestamps': [], 'models': [], 'pytorch_models': [], 'artifacts': []}
         """
         # Filter items by type
         referenced_tables = [
@@ -1077,6 +1114,11 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             for name, item in self._items.items()
             if item.get("item_type") == "json_data"
         ]
+        timestamps = [
+            name
+            for name, item in self._items.items()
+            if item.get("item_type") == "timestamp"
+        ]
         models = [
             name
             for name, item in self._items.items()
@@ -1098,6 +1140,7 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             "included_tables": included_tables,
             "numpy_arrays": numpy_arrays,
             "json_data": json_data,
+            "timestamps": timestamps,
             "models": models,
             "pytorch_models": pytorch_models,
             "artifacts": artifacts,
@@ -1286,6 +1329,30 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             # If parsing fails, return the original
             return iso_timestamp
 
+    def _format_datetime_for_display(self, iso_string: str) -> str:
+        """Format a timestamp item's datetime for display in describe().
+
+        Args:
+            iso_string: ISO 8601 timestamp string (typically in UTC)
+
+        Returns:
+            Human-readable timestamp string (e.g., "2024-01-15 10:30:00 UTC")
+
+        Examples:
+            >>> self._format_datetime_for_display("2024-01-15T10:30:00+00:00")
+            '2024-01-15 10:30:00 UTC'
+        """
+        try:
+            dt = datetime.fromisoformat(iso_string)
+            # Format as: YYYY-MM-DD HH:MM:SS TZ
+            return (
+                dt.strftime("%Y-%m-%d %H:%M:%S %Z")
+                or f"{dt.strftime('%Y-%m-%d %H:%M:%S')} UTC"
+            )
+        except (ValueError, AttributeError):
+            # If parsing fails, return the original
+            return iso_string
+
     def _format_metadata_value(self, value: Any, max_length: int = 60) -> str:
         """Format a metadata value for display with smart truncation.
 
@@ -1345,6 +1412,81 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             truncated = value_str[:max_length]
             remaining = len(value_str) - max_length
             return f"{truncated}... ({remaining} more chars)"
+
+    def _format_filesize(self, size_bytes: int) -> str:
+        """Format file size in bytes to human-readable string.
+
+        Args:
+            size_bytes: File size in bytes
+
+        Returns:
+            Human-readable file size string (e.g., "1.5 MB", "23.4 KB")
+
+        Examples:
+            >>> self._format_filesize(1024)
+            '1.0 KB'
+            >>> self._format_filesize(1536000)
+            '1.5 MB'
+        """
+        units = ["B", "KB", "MB", "GB", "TB"]
+        size = float(size_bytes)
+        unit_index = 0
+
+        while size >= 1024 and unit_index < len(units) - 1:
+            size /= 1024
+            unit_index += 1
+
+        # Format with appropriate precision
+        if unit_index == 0:  # Bytes - no decimal
+            return f"{int(size)} {units[unit_index]}"
+        else:  # Larger units - show one decimal place
+            return f"{size:.1f} {units[unit_index]}"
+
+    def _get_item_filesize(self, item: Dict[str, Any]) -> Optional[int]:
+        """Get the file size for an item if it has an associated file.
+
+        Args:
+            item: Item metadata dictionary
+
+        Returns:
+            File size in bytes, or None if no file exists or size cannot be determined
+
+        Examples:
+            >>> item = {"item_type": "included_table", "filename": "table.parquet"}
+            >>> self._get_item_filesize(item)
+            1024000
+        """
+        import os
+
+        # Only included items have local files
+        if "filename" not in item:
+            return None
+
+        item_type = item.get("item_type", "")
+
+        # Determine the subdirectory based on item type
+        if item_type == "included_table":
+            subdir = TABLES_DIR
+        elif item_type in ["model", "pytorch_model"]:
+            subdir = MODELS_DIR
+        elif item_type in ["artifact", "numpy_array", "json_data"]:
+            subdir = ARTIFACTS_DIR
+        else:
+            return None
+
+        # Construct full path
+        file_path = self._bundle_path / subdir / item["filename"]
+
+        # Get file size if it exists
+        try:
+            if is_cloud_path(str(self._bundle_dir)):
+                # For cloud paths, we can't easily get file size without fetching
+                return None
+            else:
+                # Local path
+                return os.path.getsize(file_path)
+        except (OSError, FileNotFoundError):
+            return None
 
     def describe(
         self,
@@ -1460,6 +1602,10 @@ For more information, see the [datafolio documentation](https://github.com/ceese
                     item = self._items[name]
                     desc = item.get("description", "(no description)")
                     lines.append(f"  • {name}: {desc}")
+                    # Show file size if available
+                    filesize = self._get_item_filesize(item)
+                    if filesize is not None:
+                        lines.append(f"    ↳ size: {self._format_filesize(filesize)}")
                     # Show lineage if present
                     if "inputs" in item and item["inputs"]:
                         lines.append(f"    ↳ inputs: {', '.join(item['inputs'])}")
@@ -1481,6 +1627,10 @@ For more information, see the [datafolio documentation](https://github.com/ceese
                     dtype = item.get("dtype", "unknown")
                     lines.append(f"  • {name}: {desc}")
                     lines.append(f"    ↳ shape: {shape}, dtype: {dtype}")
+                    # Show file size if available
+                    filesize = self._get_item_filesize(item)
+                    if filesize is not None:
+                        lines.append(f"    ↳ size: {self._format_filesize(filesize)}")
                     # Show lineage if present
                     if "inputs" in item and item["inputs"]:
                         lines.append(f"    ↳ inputs: {', '.join(item['inputs'])}")
@@ -1499,6 +1649,10 @@ For more information, see the [datafolio documentation](https://github.com/ceese
                     data_type = item.get("data_type", "unknown")
                     lines.append(f"  • {name}: {desc}")
                     lines.append(f"    ↳ type: {data_type}")
+                    # Show file size if available
+                    filesize = self._get_item_filesize(item)
+                    if filesize is not None:
+                        lines.append(f"    ↳ size: {self._format_filesize(filesize)}")
                     # Show lineage if present
                     if "inputs" in item and item["inputs"]:
                         lines.append(f"    ↳ inputs: {', '.join(item['inputs'])}")
@@ -1515,6 +1669,10 @@ For more information, see the [datafolio documentation](https://github.com/ceese
                     item = self._items[name]
                     desc = item.get("description", "(no description)")
                     lines.append(f"  • {name}: {desc}")
+                    # Show file size if available
+                    filesize = self._get_item_filesize(item)
+                    if filesize is not None:
+                        lines.append(f"    ↳ size: {self._format_filesize(filesize)}")
                     # Show lineage if present
                     if "inputs" in item and item["inputs"]:
                         lines.append(f"    ↳ inputs: {', '.join(item['inputs'])}")
@@ -1538,6 +1696,10 @@ For more information, see the [datafolio documentation](https://github.com/ceese
                     item = self._items[name]
                     desc = item.get("description", "(no description)")
                     lines.append(f"  • {name}: {desc}")
+                    # Show file size if available
+                    filesize = self._get_item_filesize(item)
+                    if filesize is not None:
+                        lines.append(f"    ↳ size: {self._format_filesize(filesize)}")
                     # Show lineage if present
                     if "inputs" in item and item["inputs"]:
                         lines.append(f"    ↳ inputs: {', '.join(item['inputs'])}")
@@ -1572,6 +1734,35 @@ For more information, see the [datafolio documentation](https://github.com/ceese
                     category = item.get("category", "")
                     category_str = f" ({category})" if category else ""
                     lines.append(f"  • {name}{category_str}: {desc}")
+                    # Show file size if available
+                    filesize = self._get_item_filesize(item)
+                    if filesize is not None:
+                        lines.append(f"    ↳ size: {self._format_filesize(filesize)}")
+            else:
+                lines.append("  (none)")
+            lines.append("")
+
+        # Timestamps
+        timestamps = contents["timestamps"]
+        if timestamps or show_empty:
+            lines.append(f"Timestamps ({len(timestamps)}):")
+            if timestamps:
+                for name in timestamps:
+                    item = self._items[name]
+                    desc = item.get("description", "(no description)")
+                    lines.append(f"  • {name}: {desc}")
+                    # Show formatted timestamp
+                    iso_string = item.get("iso_string", "")
+                    if iso_string:
+                        formatted_time = self._format_datetime_for_display(iso_string)
+                        lines.append(f"    ↳ time: {formatted_time}")
+                    # Show file size if available
+                    filesize = self._get_item_filesize(item)
+                    if filesize is not None:
+                        lines.append(f"    ↳ size: {self._format_filesize(filesize)}")
+                    # Show lineage if present
+                    if "inputs" in item and item["inputs"]:
+                        lines.append(f"    ↳ inputs: {', '.join(item['inputs'])}")
             else:
                 lines.append("  (none)")
 
@@ -2699,6 +2890,163 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         # Read JSON (not cached)
         json_path = self._join_paths(self._bundle_dir, ARTIFACTS_DIR, item["filename"])
         return self._read_json(json_path)
+
+    def add_timestamp(
+        self,
+        name: str,
+        timestamp: Union[datetime, int, float],
+        description: Optional[str] = None,
+        overwrite: bool = False,
+        inputs: Optional[list[str]] = None,
+        code: Optional[str] = None,
+    ) -> Self:
+        """Add a timestamp to the bundle.
+
+        Saves timestamp to artifacts/ directory as .json file and updates items.json.
+        Accepts timezone-aware datetime objects or Unix timestamps (int/float).
+        All timestamps are stored in UTC as ISO 8601 strings.
+
+        Args:
+            name: Unique name for this timestamp
+            timestamp: Timezone-aware datetime object or Unix timestamp (int/float).
+                      Naive datetimes will raise ValueError.
+            description: Optional description
+            overwrite: If True, allow overwriting existing timestamp (default: False)
+            inputs: Optional list of items this was derived from
+            code: Optional code snippet that created this timestamp
+
+        Returns:
+            Self for method chaining
+
+        Raises:
+            ValueError: If name already exists and overwrite=False, or if datetime is naive
+            TypeError: If timestamp is not a datetime or numeric type
+
+        Examples:
+            >>> from datetime import datetime, timezone
+            >>> folio = DataFolio('experiments/test')
+            >>>
+            >>> # Add timezone-aware datetime
+            >>> event_time = datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
+            >>> folio.add_timestamp('event_time', event_time, description='Event occurred')
+            >>>
+            >>> # Add Unix timestamp
+            >>> folio.add_timestamp('start_time', 1705318200, description='Start time')
+            >>>
+            >>> # With lineage
+            >>> from datetime import datetime, timezone
+            >>> import pytz
+            >>> eastern = pytz.timezone('US/Eastern')
+            >>> local_time = eastern.localize(datetime(2024, 1, 15, 10, 30, 0))
+            >>> folio.add_timestamp('local_event', local_time,
+            ...     inputs=['event_log'],
+            ...     code='timestamp = event_log.iloc[0]["timestamp"]')
+        """
+        # Validate inputs
+        if not overwrite and name in self._items:
+            raise ValueError(
+                f"Item '{name}' already exists in this DataFolio. Use overwrite=True to replace it."
+            )
+
+        # Convert Unix timestamp to datetime if needed
+        if isinstance(timestamp, (int, float)):
+            # Unix timestamp - convert to UTC datetime
+            dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
+        elif isinstance(timestamp, datetime):
+            # Validate timezone-awareness
+            if timestamp.tzinfo is None:
+                raise ValueError(
+                    "Naive datetime objects are not allowed. "
+                    "Please use timezone-aware datetime objects. "
+                    "Example: datetime.now(timezone.utc) or dt.replace(tzinfo=timezone.utc)"
+                )
+            dt = timestamp
+        else:
+            raise TypeError(
+                f"Expected datetime or Unix timestamp (int/float), got {type(timestamp).__name__}"
+            )
+
+        # Convert to UTC
+        utc_dt = dt.astimezone(timezone.utc)
+        iso_string = utc_dt.isoformat()
+        unix_ts = utc_dt.timestamp()
+
+        # Create metadata
+        filename = f"{name}.json"
+        item: TimestampItem = {
+            "name": name,
+            "filename": filename,
+            "item_type": "timestamp",
+            "iso_string": iso_string,
+            "unix_timestamp": unix_ts,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+        if description is not None:
+            item["description"] = description
+        if inputs is not None:
+            item["inputs"] = inputs
+        if code is not None:
+            item["code"] = code
+
+        self._items[name] = item
+
+        # Write timestamp immediately
+        timestamp_path = self._join_paths(self._bundle_dir, ARTIFACTS_DIR, filename)
+        self._write_timestamp(timestamp_path, utc_dt)
+
+        # Update manifest
+        self._save_items()
+
+        return self
+
+    def get_timestamp(self, name: str, as_unix: bool = False) -> Union[datetime, float]:
+        """Get a timestamp by name.
+
+        Timestamps are NOT cached - always read fresh from disk.
+
+        Args:
+            name: Name of the timestamp
+            as_unix: If True, return Unix timestamp (float); if False, return datetime (default)
+
+        Returns:
+            UTC-aware datetime object (default) or Unix timestamp (if as_unix=True)
+
+        Raises:
+            KeyError: If timestamp name doesn't exist
+            ValueError: If named item is not a timestamp
+
+        Examples:
+            >>> folio = DataFolio('experiments/test')
+            >>>
+            >>> # Get as datetime (default)
+            >>> event_time = folio.get_timestamp('event_time')
+            >>> print(event_time.isoformat())
+            '2024-01-15T10:30:00+00:00'
+            >>>
+            >>> # Get as Unix timestamp
+            >>> unix_time = folio.get_timestamp('event_time', as_unix=True)
+            >>> print(unix_time)
+            1705318200.0
+        """
+        if name not in self._items:
+            raise KeyError(f"Timestamp '{name}' not found in DataFolio")
+
+        item = self._items[name]
+        if item.get("item_type") != "timestamp":
+            raise ValueError(
+                f"Item '{name}' is not a timestamp (type: {item.get('item_type')})"
+            )
+
+        # Read timestamp (not cached)
+        timestamp_path = self._join_paths(
+            self._bundle_dir, ARTIFACTS_DIR, item["filename"]
+        )
+        dt = self._read_timestamp(timestamp_path)
+
+        if as_unix:
+            return dt.timestamp()
+        return dt
 
     def add_data(
         self,

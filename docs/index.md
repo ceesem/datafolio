@@ -10,6 +10,9 @@ DataFolio helps you organize, version, and track your data science experiments b
 - **Model Support**: Save and load scikit-learn and PyTorch models with full metadata tracking
 - **Data Lineage**: Track inputs and dependencies between datasets and models
 - **External References**: Point to data stored externally (S3, local paths) without copying
+- **Autocomplete Access**: IDE-friendly `folio.data.item_name.content` syntax with full autocomplete support
+- **Smart Metadata Display**: Automatic metadata truncation and formatting in `describe()`
+- **Item Management**: Delete items with dependency tracking and warnings
 - **Git-Friendly**: All data stored as standard file formats in a simple directory structure
 - **Type-Safe**: Full type hints and comprehensive error handling
 
@@ -34,8 +37,16 @@ df = folio.get_data('results')           # Returns DataFrame
 arr = folio.get_data('embeddings')       # Returns numpy array
 config = folio.get_data('config')        # Returns dict
 
-# View everything
+# Or use autocomplete-friendly access
+df = folio.data.results.content          # Same as get_data()
+arr = folio.data.embeddings.content
+config = folio.data.config.content
+
+# View everything (including custom metadata)
 folio.describe()
+
+# Clean up temporary items
+folio.delete('temp_data')
 ```
 
 ## Installation
@@ -202,7 +213,7 @@ folio.add_model('model', clf, inputs=['features'])
 
 ### Describe Your Folio
 
-The `describe()` method provides a compact overview of all data:
+The `describe()` method provides a compact overview of all data with smart metadata display:
 
 ```python
 # Print to console
@@ -213,6 +224,9 @@ summary = folio.describe(return_string=True)
 
 # Show empty sections
 folio.describe(show_empty=True)
+
+# Limit metadata fields shown (default: 10)
+folio.describe(max_metadata_fields=5)
 ```
 
 Example output:
@@ -243,7 +257,100 @@ PyTorch Models (1):
   • neural_net: Feedforward network
     ↳ init_args: input_dim=10, hidden_dim=50
     ↳ inputs: features
+
+Metadata (5):
+  • experiment_name: my_experiment
+  • model_version: v2.1
+  • learning_rate: 0.001
+  • tags: ['neural_net', 'classification', 'production'] (list, 3 items)
+  • description: My experiment description that is quite lo... (truncated)
+  ... and 3 more fields
 ```
+
+The metadata section automatically:
+- Filters out internal fields (like `_datafolio`, `created_at`, `updated_at`)
+- Truncates long strings with ellipsis
+- Shows type and count for collections (lists, dicts)
+- Limits display to `max_metadata_fields` (default: 10)
+
+### Delete Items
+
+Remove items from your folio with the `delete()` method:
+
+```python
+# Delete single item
+folio.delete('old_model')
+
+# Delete multiple items
+folio.delete(['temp_data', 'debug_plot', 'old_model'])
+
+# Delete without dependency warnings
+folio.delete('item', warn_dependents=False)
+```
+
+The `delete()` method:
+- Removes items from the manifest and deletes associated files
+- Validates all items exist before deleting any (transaction-like)
+- Warns if deleted items have dependents (but allows deletion)
+- Supports method chaining
+- Works with both single items (string) and multiple items (list)
+
+```python
+# Example: Clean up temporary items
+folio = DataFolio('experiments/test')
+folio.add_data('temp1', [1, 2, 3])
+folio.add_data('temp2', [4, 5, 6])
+folio.add_data('final', [7, 8, 9], inputs=['temp1', 'temp2'])
+
+# Delete temporary data (warns about 'final' dependency)
+folio.delete(['temp1', 'temp2'])
+# Warning: Deleting 'temp1' which is used by: final. Those items may have broken lineage.
+# Warning: Deleting 'temp2' which is used by: final. Those items may have broken lineage.
+
+# Delete without warnings
+folio.delete(['temp1', 'temp2'], warn_dependents=False)
+```
+
+### Autocomplete-Friendly Data Access
+
+Access your data with autocomplete support using the `folio.data` property:
+
+```python
+# Attribute-style access (autocomplete-friendly!)
+df = folio.data.results.content          # Get DataFrame
+desc = folio.data.results.description    # Get description
+type_str = folio.data.results.type       # Get item type
+inputs = folio.data.results.inputs       # Get lineage inputs
+deps = folio.data.results.dependents     # Get dependents
+meta = folio.data.results.metadata       # Get full metadata dict
+
+# Dictionary-style access
+df = folio.data['results'].content
+model = folio.data['classifier'].content
+
+# Works for all data types
+arr = folio.data.embeddings.content      # numpy array
+cfg = folio.data.config.content          # dict
+model = folio.data.classifier.content    # model object
+
+# Artifacts return file path
+with open(folio.data.plot.content, 'rb') as f:
+    img = f.read()
+
+# Path property for referenced tables and artifacts
+external_path = folio.data.raw_data.path  # e.g., 's3://bucket/raw.parquet'
+```
+
+The `ItemProxy` returned by `folio.data.item_name` provides:
+- `.content` - Returns the actual data (DataFrame, array, dict, model, or file path)
+- `.description` - Description string
+- `.type` - Item type ('referenced_table', 'included_table', 'model', etc.)
+- `.path` - File path (for referenced tables and artifacts)
+- `.inputs` - List of input dependencies
+- `.dependents` - List of items that depend on this item
+- `.metadata` - Full metadata dictionary
+
+In IPython/Jupyter, `folio.data.<TAB>` shows all available items with autocomplete!
 
 ## Directory Structure
 
@@ -331,8 +438,21 @@ folio.add_data('metrics', {
     'precision': 0.94
 })
 
-# View summary
+# Add custom metadata to the folio itself
+folio.metadata['experiment_name'] = 'rf_baseline'
+folio.metadata['tags'] = ['classification', 'production']
+folio.metadata['notes'] = 'Baseline random forest model for production deployment'
+
+# View summary (shows data and custom metadata)
 folio.describe()
+
+# Access data with autocomplete
+config = folio.data.config.content
+metrics = folio.data.metrics.content
+trained_model = folio.data.classifier.content
+
+# Clean up intermediate data
+folio.delete('embeddings')
 ```
 
 ### PyTorch Deep Learning Workflow
@@ -394,9 +514,12 @@ loaded_model.eval()
 1. **Use descriptive names**: `add_data('training_features', ...)` not `add_data('data1', ...)`
 2. **Track lineage**: Always specify `inputs` to track data dependencies
 3. **Add descriptions**: Help future you understand what each item contains
-4. **Version control**: Commit your folio directories to git (data is stored efficiently)
-5. **Use references**: For large external datasets, use `reference` to avoid copying
-6. **Check describe()**: Regularly review your folio with `folio.describe()`
+4. **Use custom metadata**: Store experiment context in `folio.metadata` for better tracking
+5. **Leverage autocomplete**: Use `folio.data.item_name.content` for cleaner, more discoverable code
+6. **Clean up regularly**: Use `delete()` to remove temporary or obsolete items
+7. **Version control**: Commit your folio directories to git (data is stored efficiently)
+8. **Use references**: For large external datasets, use `reference` to avoid copying
+9. **Check describe()**: Regularly review your folio with `folio.describe()` to see data and metadata
 
 ## Development
 

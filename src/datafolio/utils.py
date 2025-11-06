@@ -66,6 +66,21 @@ class IncludedItem(TypedDict, total=False):
     created_at: Optional[str]  # ISO 8601 timestamp
 
 
+class TimestampItem(TypedDict, total=False):
+    """Metadata for timestamp items."""
+
+    name: str
+    item_type: str  # 'timestamp'
+    filename: str  # Relative path within bundle (e.g., 'event_time.json')
+    iso_string: str  # ISO 8601 timestamp in UTC (e.g., '2024-01-15T10:30:00+00:00')
+    unix_timestamp: float  # Unix timestamp for quick reference
+    description: Optional[str]
+    # Lineage fields
+    inputs: Optional[list[str]]  # Names of items this was derived from
+    code: Optional[str]  # Code snippet that created this
+    created_at: Optional[str]  # ISO 8601 timestamp of when item was added
+
+
 def is_cloud_path(path: Union[str, Path]) -> bool:
     """Check if a path is a cloud storage path.
 
