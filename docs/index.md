@@ -10,6 +10,7 @@ DataFolio helps you organize, version, and track your data science experiments b
 - **Model Support**: Save and load scikit-learn and PyTorch models with full metadata tracking
 - **Data Lineage**: Track inputs and dependencies between datasets and models
 - **External References**: Point to data stored externally (S3, local paths) without copying
+- **Multi-Instance Sync**: Automatic refresh when multiple notebooks/processes access the same bundle
 - **Autocomplete Access**: IDE-friendly `folio.data.item_name.content` syntax with full autocomplete support
 - **Smart Metadata Display**: Automatic metadata truncation and formatting in `describe()`
 - **Item Management**: Delete items with dependency tracking and warnings
@@ -74,6 +75,28 @@ Supported data types:
 - **Numpy arrays** (`np.ndarray`) → stored as `.npy`
 - **JSON data** (`dict`, `list`, `int`, `float`, `str`, `bool`, `None`) → stored as JSON
 - **External references** → metadata only, data stays in original location
+
+### Multi-Instance Access
+
+DataFolio automatically keeps multiple instances synchronized when accessing the same bundle:
+
+```python
+# Notebook 1: Create and update bundle
+folio1 = DataFolio('experiments/shared')
+folio1.add_data('results', df)
+
+# Notebook 2: Open same bundle
+folio2 = DataFolio('experiments/shared')
+
+# Notebook 1: Add more data
+folio1.add_data('analysis', new_df)
+
+# Notebook 2: Automatically sees new data!
+folio2.describe()  # Shows both 'results' and 'analysis'
+analysis = folio2.get_data('analysis')  # Works immediately ✅
+```
+
+All read operations (`describe()`, `list_contents()`, `get_*()` methods, and `folio.data` accessors) automatically refresh from disk when changes are detected, ensuring you always see the latest data without manual intervention.
 
 ### Data Types
 
@@ -520,6 +543,7 @@ loaded_model.eval()
 7. **Version control**: Commit your folio directories to git (data is stored efficiently)
 8. **Use references**: For large external datasets, use `reference` to avoid copying
 9. **Check describe()**: Regularly review your folio with `folio.describe()` to see data and metadata
+10. **Share across notebooks**: Multiple DataFolio instances can safely access the same bundle - changes are automatically detected and synchronized
 
 ## Development
 

@@ -116,6 +116,9 @@ class ItemProxy:
             >>> with open(folio.data.plot.content, 'rb') as f:  # file path
             ...     img = f.read()
         """
+        # Auto-refresh before accessing
+        self._folio._refresh_if_needed()
+
         item = self._folio._items[self._name]
         item_type = item.get("item_type")
 
@@ -142,6 +145,9 @@ class ItemProxy:
         Returns:
             Description string or None if not set
         """
+        # Auto-refresh before accessing
+        self._folio._refresh_if_needed()
+
         item = self._folio._items[self._name]
         return item.get("description")
 
@@ -153,6 +159,9 @@ class ItemProxy:
             Item type string ('referenced_table', 'included_table', 'model',
             'pytorch_model', 'numpy_array', 'json_data', 'artifact')
         """
+        # Auto-refresh before accessing
+        self._folio._refresh_if_needed()
+
         item = self._folio._items[self._name]
         return item.get("item_type", "unknown")
 
@@ -169,6 +178,9 @@ class ItemProxy:
             >>> folio.data.external_data.path  # 's3://bucket/data.parquet'
             >>> folio.data.plot.path  # '/path/to/bundle/artifacts/plot.png'
         """
+        # Auto-refresh before accessing
+        self._folio._refresh_if_needed()
+
         item = self._folio._items[self._name]
         item_type = item.get("item_type")
 
@@ -204,10 +216,16 @@ class ItemProxy:
         Returns:
             Dictionary containing all item metadata
         """
+        # Auto-refresh before accessing
+        self._folio._refresh_if_needed()
+
         return dict(self._folio._items[self._name])
 
     def __repr__(self) -> str:
         """Return string representation."""
+        # Auto-refresh before accessing
+        self._folio._refresh_if_needed()
+
         item = self._folio._items[self._name]
         item_type = item.get("item_type", "unknown")
         desc = item.get("description", "")
@@ -248,6 +266,9 @@ class DataAccessor:
                 f"'{type(self).__name__}' object has no attribute '{name}'"
             )
 
+        # Auto-refresh before accessing
+        self._folio._refresh_if_needed()
+
         if name not in self._folio._items:
             raise AttributeError(
                 f"Item '{name}' not found in DataFolio. "
@@ -268,6 +289,9 @@ class DataAccessor:
         Raises:
             KeyError: If item doesn't exist
         """
+        # Auto-refresh before accessing
+        self._folio._refresh_if_needed()
+
         if name not in self._folio._items:
             raise KeyError(f"Item '{name}' not found in DataFolio")
 
@@ -279,6 +303,9 @@ class DataAccessor:
         Returns:
             Sorted list of all item names
         """
+        # Auto-refresh before accessing
+        self._folio._refresh_if_needed()
+
         # Include item names for autocomplete
         return sorted(self._folio._items.keys())
 
@@ -393,6 +420,9 @@ class DataFolio:
 
         # Store random suffix setting for collision retry
         self._use_random_suffix = random_suffix
+
+        # Auto-refresh tracking for multi-instance consistency
+        self._auto_refresh_enabled: bool = True  # Can be disabled if needed
 
         # Check if path is an existing bundle (has metadata.json or items.json)
         path_str = str(path)
@@ -1075,6 +1105,95 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         path = self._join_paths(self._bundle_dir, ITEMS_FILE)
         self._write_json(path, list(self._items.values()))
 
+        # Update metadata timestamp when items change
+        # This allows other instances to detect staleness
+        if hasattr(self, "metadata"):
+            from datetime import datetime, timezone
+
+            # Use super() to update without triggering another save
+            super(MetadataDict, self.metadata).__setitem__(
+                "updated_at", datetime.now(timezone.utc).isoformat()
+            )
+            self._save_metadata()
+
+    # ==================== Auto-Refresh Methods ====================
+
+    def _check_if_stale(self) -> bool:
+        """Check if the in-memory state is stale compared to disk/cloud.
+
+        Returns:
+            True if manifests should be reloaded, False otherwise
+        """
+        if not self._auto_refresh_enabled:
+            return False
+
+        # Read the remote metadata.json to get its updated_at timestamp
+        metadata_path = self._join_paths(self._bundle_dir, METADATA_FILE)
+        if not self._exists(metadata_path):
+            # Metadata file doesn't exist - nothing to refresh
+            return False
+
+        try:
+            remote_metadata = self._read_json(metadata_path)
+            remote_updated_at = remote_metadata.get("updated_at")
+            local_updated_at = self.metadata.get("updated_at")
+
+            # If either is missing, can't compare - assume fresh
+            if remote_updated_at is None or local_updated_at is None:
+                return False
+
+            # Compare timestamps - if different, we're stale
+            return remote_updated_at != local_updated_at
+
+        except Exception:
+            # If we can't read/parse metadata, assume fresh to avoid errors
+            return False
+
+    def _refresh_if_needed(self) -> None:
+        """Refresh manifests from disk/cloud if they've been updated externally."""
+        if self._check_if_stale():
+            self.refresh()
+
+    def refresh(self) -> Self:
+        """Explicitly refresh manifests from disk/cloud.
+
+        This reloads items.json and metadata.json from the bundle directory,
+        syncing the in-memory state with any external updates.
+
+        Useful when working with multiple DataFolio instances pointing to
+        the same bundle, or when the bundle is updated by another process.
+
+        Returns:
+            Self for method chaining
+
+        Examples:
+            Explicit refresh after external update:
+            >>> folio1 = DataFolio('experiments/shared')
+            >>> folio2 = DataFolio('experiments/shared')
+            >>> folio1.add_table('results', df)
+            >>> folio2.refresh()  # Manually sync
+            >>> assert 'results' in folio2.list_contents()['included_tables']
+
+            Auto-refresh (happens automatically):
+            >>> folio1.add_table('results', df)
+            >>> # folio2 auto-refreshes on next read operation
+            >>> assert 'results' in folio2.list_contents()['included_tables']
+        """
+        # Reload manifests from disk/cloud
+        self._load_manifests()
+
+        # Sync the MetadataDict with new values
+        if hasattr(self, "metadata") and isinstance(self.metadata, MetadataDict):
+            # Update existing MetadataDict without triggering saves
+            # Use super() to bypass auto-save behavior
+            super(MetadataDict, self.metadata).clear()
+            super(MetadataDict, self.metadata).update(self._metadata_raw)
+        else:
+            # Initial creation (shouldn't happen in refresh, but defensive)
+            self.metadata = MetadataDict(self, **self._metadata_raw)
+
+        return self
+
     # ==================== Public API Methods ====================
 
     def list_contents(self) -> Dict[str, list[str]]:
@@ -1093,6 +1212,9 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             {'referenced_tables': ['data1'], 'included_tables': [], 'numpy_arrays': ['embeddings'],
              'json_data': [], 'timestamps': [], 'models': [], 'pytorch_models': [], 'artifacts': []}
         """
+        # Auto-refresh if bundle was updated externally
+        self._refresh_if_needed()
+
         # Filter items by type
         referenced_tables = [
             name
@@ -1532,6 +1654,9 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             Limit metadata fields shown:
             >>> folio.describe(max_metadata_fields=5)
         """
+        # Auto-refresh if bundle was updated externally
+        self._refresh_if_needed()
+
         lines = []
         lines.append(f"DataFolio: {self._bundle_dir}")
         lines.append("=" * len(lines[0]))
@@ -1966,6 +2091,9 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             >>> retrieved = folio.get_table('test')
             >>> assert len(retrieved) == 3
         """
+        # Auto-refresh if bundle was updated externally
+        self._refresh_if_needed()
+
         # Check if item exists
         if name not in self._items:
             raise KeyError(f"Table '{name}' not found in DataFolio")
@@ -2053,6 +2181,9 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             >>> info['table_format']
             'parquet'
         """
+        # Auto-refresh if bundle was updated externally
+        self._refresh_if_needed()
+
         if name not in self._items:
             raise KeyError(f"Table '{name}' not found in DataFolio")
 
@@ -2087,6 +2218,9 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             >>> info['description']
             'Random forest classifier'
         """
+        # Auto-refresh if bundle was updated externally
+        self._refresh_if_needed()
+
         if name not in self._items:
             raise KeyError(f"Model '{name}' not found in DataFolio")
 
@@ -2123,6 +2257,9 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             >>> info['description']
             'Loss curve'
         """
+        # Auto-refresh if bundle was updated externally
+        self._refresh_if_needed()
+
         if name not in self._items:
             raise KeyError(f"Artifact '{name}' not found in DataFolio")
 
@@ -2329,6 +2466,9 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             >>> sklearn_model = folio.get_model('classifier')
             >>> pytorch_model = folio.get_model('neural_net', model_class=MyModel)
         """
+        # Auto-refresh if bundle was updated externally
+        self._refresh_if_needed()
+
         if name not in self._items:
             raise KeyError(f"Model '{name}' not found in DataFolio")
 
@@ -2644,6 +2784,9 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             >>> folio = DataFolio('experiments/test-blue-happy-falcon')
             >>> path = folio.get_artifact_path('plot')
         """
+        # Auto-refresh if bundle was updated externally
+        self._refresh_if_needed()
+
         if name not in self._items:
             raise KeyError(f"Artifact '{name}' not found in DataFolio")
 
@@ -2763,6 +2906,9 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             >>> embeddings = folio.get_numpy('embeddings')
             >>> print(embeddings.shape)
         """
+        # Auto-refresh if bundle was updated externally
+        self._refresh_if_needed()
+
         if name not in self._items:
             raise KeyError(f"Array '{name}' not found in DataFolio")
 
@@ -2878,6 +3024,9 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             >>> config = folio.get_json('config')
             >>> print(config['learning_rate'])
         """
+        # Auto-refresh if bundle was updated externally
+        self._refresh_if_needed()
+
         if name not in self._items:
             raise KeyError(f"JSON data '{name}' not found in DataFolio")
 
@@ -3029,6 +3178,9 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             >>> print(unix_time)
             1705318200.0
         """
+        # Auto-refresh if bundle was updated externally
+        self._refresh_if_needed()
+
         if name not in self._items:
             raise KeyError(f"Timestamp '{name}' not found in DataFolio")
 
@@ -3296,6 +3448,9 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             >>> inputs = folio.get_inputs('predictions')
             >>> # Returns: ['test_data', 'classifier']
         """
+        # Auto-refresh if bundle was updated externally
+        self._refresh_if_needed()
+
         if item_name not in self._items:
             raise KeyError(f"Item '{item_name}' not found in DataFolio")
 
@@ -3326,6 +3481,9 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             >>> dependents = folio.get_dependents('classifier')
             >>> # Returns items that used 'classifier' as input
         """
+        # Auto-refresh if bundle was updated externally
+        self._refresh_if_needed()
+
         if item_name not in self._items:
             raise KeyError(f"Item '{item_name}' not found in DataFolio")
 
@@ -3352,6 +3510,9 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             >>> graph = folio.get_lineage_graph()
             >>> # Returns: {'predictions': ['test_data', 'classifier'], ...}
         """
+        # Auto-refresh if bundle was updated externally
+        self._refresh_if_needed()
+
         graph = {}
         for name in self._items.keys():
             graph[name] = self.get_inputs(name)

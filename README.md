@@ -1,417 +1,292 @@
-# datafolio
+# DataFolio
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-112%20passing-brightgreen.svg)](tests/)
-[![Coverage](https://img.shields.io/badge/coverage-83%25-green.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-265%20passing-brightgreen.svg)](tests/)
+[![Coverage](https://img.shields.io/badge/coverage-69%25-green.svg)](tests/)
 
-**Lightweight metadata tracking for exploratory data analysis workflows.**
+**A lightweight, filesystem-based data versioning and experiment tracking library for Python.**
 
-`datafolio` helps you bundle analysis artifacts (metadata, models, plots) with references to large datasets, making it easy to track provenance and reproduce experiments without copying huge files.
+DataFolio helps you organize, version, and track your data science experiments by storing datasets, models, and artifacts in a simple, transparent directory structure. Everything is saved as plain files (Parquet, JSON, pickle) that you can inspect, version with git, or backup to any storage system.
 
-## The Problem
+## Features
 
-Research workflows involve:
-- 🗂️ Multiple linked dataframes (some large in datalakes, some small intermediate results)
-- 🤖 Trained models (sklearn, xgboost, etc.)
-- 📊 Metadata (parameters, timestamps, data versions)
-- 📈 Artifacts (plots, configs, reports)
-
-**But:** pandas doesn't handle metadata well (`.attrs` is fragile), and we need to package related artifacts together without copying large datasets.
-
-## The Solution
-
-`datafolio` creates lightweight bundles (tarfiles) that contain:
-- ✅ **Metadata** - Analysis parameters, timestamps, arbitrary key-value data
-- ✅ **Data references** - Paths to external data (S3, GCS, local) - *not copied*
-- ✅ **Included data** - Small dataframes/results *are* copied into bundle
-- ✅ **Models** - Trained models serialized with joblib
-- ✅ **Artifacts** - Plots, configs, any files
-
-**Key features:**
-- 🪶 **Lightweight** - Large datasets referenced by path, not copied
-- ⚡ **Lazy loading** - Files extracted only when accessed
-- ☁️ **Cloud-native** - Works with S3, GCS, Azure
-- 🔗 **Unified API** - Same interface for included and referenced data
-- 🐍 **Simple** - Feels like saving/loading dataframes
-
-## Installation
-
-```bash
-# Basic installation
-pip install datafolio
-
-# With cloud storage support (S3, GCS, Azure)
-pip install datafolio[cloud]
-
-# With Delta Lake support
-pip install datafolio[delta]
-
-# Everything
-pip install datafolio[all]
-```
-
-Or with `uv`:
-```bash
-uv pip install datafolio[all]
-```
+- **Universal Data Management**: Single `add_data()` method automatically handles DataFrames, numpy arrays, dicts, lists, and scalars
+- **Model Support**: Save and load scikit-learn and PyTorch models with full metadata tracking
+- **Data Lineage**: Track inputs and dependencies between datasets and models
+- **External References**: Point to data stored externally (S3, local paths) without copying
+- **Multi-Instance Sync**: Automatic refresh when multiple notebooks/processes access the same bundle
+- **Autocomplete Access**: IDE-friendly `folio.data.item_name.content` syntax with full autocomplete support
+- **Smart Metadata Display**: Automatic metadata truncation and formatting in `describe()`
+- **Item Management**: Delete items with dependency tracking and warnings
+- **Git-Friendly**: All data stored as standard file formats in a simple directory structure
+- **Type-Safe**: Full type hints and comprehensive error handling
 
 ## Quick Start
 
 ```python
 from datafolio import DataFolio
 import pandas as pd
+import numpy as np
 
-# Create a bundle
-folio = DataFolio(metadata={
-    'experiment': 'protein_analysis_2024',
-    'model_version': 'v2.1',
-    'parameters': {'learning_rate': 0.01}
-})
+# Create a new folio
+folio = DataFolio('experiments/my_experiment')
 
-# Reference large dataset (path only, not copied!)
-folio.reference_table(
-    'training_data',
-    path='s3://my-datalake/features/v3.parquet',
-    table_format='parquet',
-    num_rows=10_000_000
-)
+# Add any type of data with a single method
+folio.add_data('results', df)                          # DataFrame
+folio.add_data('embeddings', np.array([1, 2, 3]))    # Numpy array
+folio.add_data('config', {'lr': 0.01})                # Dict/JSON
+folio.add_data('accuracy', 0.95)                      # Scalar
 
-# Include small results
-results_df = pd.DataFrame({'metric': ['accuracy'], 'value': [0.95]})
-folio.add_table('results', results_df)
+# Retrieve data (automatically returns correct type)
+df = folio.get_data('results')           # Returns DataFrame
+arr = folio.get_data('embeddings')       # Returns numpy array
+config = folio.get_data('config')        # Returns dict
 
-# Include model
-folio.add_model('classifier', trained_model)
+# Or use autocomplete-friendly access
+df = folio.data.results.content          # Same as get_data()
+arr = folio.data.embeddings.content
+config = folio.data.config.content
 
-# Include artifacts
-folio.add_artifact('loss_curve', 'plots/training.png', category='plots')
+# View everything (including custom metadata)
+folio.describe()
 
-# Save (local or cloud)
-folio.save('analysis.tar.gz')
-# or: folio.save('s3://my-bucket/analysis.tar.gz')
+# Clean up temporary items
+folio.delete('temp_data')
+```
 
-# Load later
-loaded = DataFolio.load('analysis.tar.gz')
-results = loaded.get_table('results')        # From bundle
-training = loaded.get_table('training_data') # From S3!
-model = loaded.get_model('classifier')
+## Installation
+
+```bash
+pip install datafolio
 ```
 
 ## Core Concepts
 
-### Two Modes for Data
+### Generic Data Methods
 
-**1. Reference (path only, not copied)** - For large datasets
+The `add_data()` and `get_data()` methods provide a unified interface for all data types:
+
 ```python
-folio.reference_table(
-    'big_data',
-    path='s3://datalake/data.parquet',
-    table_format='parquet',
-    num_rows=1_000_000
-)
+# add_data() automatically detects type and uses the appropriate method
+folio.add_data('my_data', data)  # Works with DataFrame, array, dict, list, scalar
+
+# get_data() automatically detects stored type and returns correct format
+data = folio.get_data('my_data')  # Returns original type
 ```
 
-**2. Include (copied into bundle)** - For small results
+Supported data types:
+
+- **DataFrames** (`pd.DataFrame`) → stored as Parquet
+- **Numpy arrays** (`np.ndarray`) → stored as `.npy`
+- **JSON data** (`dict`, `list`, `int`, `float`, `str`, `bool`, `None`) → stored as JSON
+- **External references** → metadata only, data stays in original location
+
+### Multi-Instance Access
+
+DataFolio automatically keeps multiple instances synchronized when accessing the same bundle:
+
 ```python
-results_df = pd.DataFrame({'metric': ['acc'], 'value': [0.95]})
-folio.add_table('results', results_df)
+# Notebook 1: Create and update bundle
+folio1 = DataFolio('experiments/shared')
+folio1.add_data('results', df)
+
+# Notebook 2: Open same bundle
+folio2 = DataFolio('experiments/shared')
+
+# Notebook 1: Add more data
+folio1.add_data('analysis', new_df)
+
+# Notebook 2: Automatically sees new data!
+folio2.describe()  # Shows both 'results' and 'analysis'
+analysis = folio2.get_data('analysis')  # Works immediately ✅
 ```
 
-**Unified retrieval:**
+All read operations (`describe()`, `list_contents()`, `get_*()` methods, and `folio.data` accessors) automatically refresh from disk when changes are detected, ensuring you always see the latest data without manual intervention.
+
+### Data Lineage
+
+Track dependencies between datasets and models:
+
 ```python
-# Same API for both!
-df1 = folio.get_table('big_data')  # Reads from S3
-df2 = folio.get_table('results')   # Extracts from bundle
+# Create dependency chain
+folio.reference_table('raw', reference='s3://bucket/raw.parquet')
+folio.add_table('clean', cleaned_df, inputs=['raw'])
+folio.add_table('features', feature_df, inputs=['clean'])
+folio.add_model('model', clf, inputs=['features'])
+
+# Lineage is preserved in metadata and shown in describe()
 ```
 
-### Bundle Structure
+### Autocomplete-Friendly Access
 
+Access your data with autocomplete support using the `folio.data` property:
+
+```python
+# Attribute-style access (autocomplete-friendly!)
+df = folio.data.results.content          # Get DataFrame
+desc = folio.data.results.description    # Get description
+type_str = folio.data.results.type       # Get item type
+inputs = folio.data.results.inputs       # Get lineage inputs
+
+# Works for all data types
+arr = folio.data.embeddings.content      # numpy array
+cfg = folio.data.config.content          # dict
+model = folio.data.classifier.content    # model object
 ```
-analysis.tar.gz (2-3 KB)
-├── metadata/
-│   ├── metadata.json          # Your analysis metadata
-│   ├── data_references.json   # External data paths
-│   ├── included_data.json     # Manifest of included tables
-│   └── included_items.json    # Models & artifacts manifest
+
+In IPython/Jupyter, `folio.data.<TAB>` shows all available items with autocomplete!
+
+## Directory Structure
+
+DataFolio creates a transparent directory structure:
+
+```text
+experiments/my_experiment/
+├── metadata.json              # Folio metadata
+├── items.json                 # Unified manifest
 ├── tables/
-│   └── results.parquet        # Small included dataframes
+│   └── results.parquet       # DataFrame storage
 ├── models/
-│   └── classifier.joblib      # Trained models
+│   └── classifier.joblib     # Sklearn models
 └── artifacts/
-    └── loss_curve.png         # Plots, configs, etc.
+    ├── embeddings.npy        # Numpy arrays
+    ├── config.json           # JSON data
+    └── plot.png              # Any file type
 ```
 
-## Usage Examples
+## Examples
 
-### Basic Workflow
+### Complete ML Workflow
 
 ```python
 from datafolio import DataFolio
 import pandas as pd
-
-# Create and populate
-folio = DataFolio(metadata={'experiment': 'exp_001'})
-df = pd.DataFrame({'a': [1, 2, 3]})
-folio.add_table('results', df)
-folio.save('experiment.tar.gz')
-
-# Load and use
-loaded = DataFolio.load('experiment.tar.gz')
-print(loaded.metadata)
-df = loaded.get_table('results')
-```
-
-### Mixed Local and Cloud Data
-
-```python
-folio = DataFolio(metadata={'date': '2024-01-15'})
-
-# Reference cloud datasets (not copied)
-folio.reference_table('features', path='s3://lake/features.parquet')
-folio.reference_table('labels', path='s3://lake/labels.parquet')
-
-# Include small outputs
-summary = pd.DataFrame({'stat': ['mean', 'std'], 'value': [42.5, 12.3]})
-folio.add_table('summary', summary)
-
-# Save bundle (small - just summary and metadata)
-folio.save('experiment.tar.gz')
-
-# Load and access everything
-loaded = DataFolio.load('experiment.tar.gz')
-features = loaded.get_table('features')  # Reads from S3
-summary = loaded.get_table('summary')     # From bundle
-```
-
-### Complete Analysis Bundle
-
-```python
-from datafolio import DataFolio
+import numpy as np
 from sklearn.ensemble import RandomForestClassifier
-import pandas as pd
 
-# Train a model
-X_train = pd.read_parquet('s3://data/train.parquet')
-y_train = pd.read_csv('s3://data/labels.csv')
-model = RandomForestClassifier()
-model.fit(X_train, y_train)
+# Initialize
+folio = DataFolio('experiments/classifier_v1')
 
-# Create bundle
-folio = DataFolio(metadata={
-    'experiment': 'rf_classification',
-    'timestamp': '2024-01-15T10:30:00',
-    'hyperparameters': {
-        'n_estimators': 100,
-        'max_depth': 10
-    }
+# Reference external data
+folio.add_data('raw', reference='s3://bucket/raw.csv',
+    description='Raw training data from database')
+
+# Add processed data
+folio.add_data('clean', cleaned_df,
+    description='Cleaned and preprocessed data',
+    inputs=['raw'])
+
+# Add features
+folio.add_data('features', feature_df,
+    description='Engineered features',
+    inputs=['clean'])
+
+# Train and save model
+clf = RandomForestClassifier(n_estimators=100)
+clf.fit(X_train, y_train)
+
+folio.add_model('classifier', clf,
+    description='Random forest classifier',
+    inputs=['features'])
+
+# Save metrics
+folio.add_data('metrics', {
+    'accuracy': 0.95,
+    'f1': 0.92,
+    'precision': 0.94
 })
 
-# Reference training data
-folio.reference_table(
-    'training_data',
-    path='s3://data/train.parquet',
-    table_format='parquet',
-    num_rows=len(X_train)
-)
+# Add custom metadata to the folio itself
+folio.metadata['experiment_name'] = 'rf_baseline'
+folio.metadata['tags'] = ['classification', 'production']
 
-# Include predictions
-predictions = model.predict(X_test)
-pred_df = pd.DataFrame({'pred': predictions, 'true': y_test})
-folio.add_table('predictions', pred_df)
+# View summary (shows data and custom metadata)
+folio.describe()
 
-# Include model
-folio.add_model('rf_model', model)
-
-# Include plots
-folio.add_artifact('confusion_matrix', 'plots/cm.png', category='plots')
-folio.add_artifact('config', 'config.yaml', category='configs')
-
-# Save to cloud
-folio.save('s3://my-bucket/experiments/exp_001.tar.gz')
-
-# Later: Reproduce
-loaded = DataFolio.load('s3://my-bucket/experiments/exp_001.tar.gz')
-print(loaded.metadata['hyperparameters'])
-model = loaded.get_model('rf_model')
-training_data = loaded.get_table('training_data')
+# Access data with autocomplete
+config = folio.data.config.content
+metrics = folio.data.metrics.content
+trained_model = folio.data.classifier.content
 ```
 
-### Cross-Notebook Sharing
+### PyTorch Deep Learning
 
-**Notebook 1: Training**
 ```python
+import torch
+import torch.nn as nn
 from datafolio import DataFolio
 
-folio = DataFolio(metadata={'stage': 'training'})
-folio.reference_table('data', path='s3://lake/data.parquet')
-folio.add_model('model', trained_model)
-folio.save('models/model_v1.tar.gz')
-```
+# Define model
+class CNN(nn.Module):
+    def __init__(self, num_classes=10):
+        super().__init__()
+        self.conv1 = nn.Conv2d(3, 32, 3)
+        self.fc = nn.Linear(32 * 30 * 30, num_classes)
 
-**Notebook 2: Evaluation**
-```python
-from datafolio import DataFolio
+    def forward(self, x):
+        x = torch.relu(self.conv1(x))
+        x = x.view(x.size(0), -1)
+        return self.fc(x)
 
-# Load the bundle from training
-folio = DataFolio.load('models/model_v1.tar.gz')
+# Create folio
+folio = DataFolio('experiments/cnn_v1')
 
-# Access everything
-model = folio.get_model('model')
-data = folio.get_table('data')
+# Save training config
+config = {
+    'num_classes': 10,
+    'learning_rate': 0.001,
+    'batch_size': 32,
+    'epochs': 50
+}
+folio.add_data('config', config)
 
-# Evaluate
-results = evaluate(model, data)
+# Train model
+model = CNN(num_classes=config['num_classes'])
+# ... training code ...
 
-# Create new bundle with results
-eval_folio = DataFolio(metadata={
-    'stage': 'evaluation',
-    'parent': folio.metadata
-})
-eval_folio.add_table('eval_results', results)
-eval_folio.save('models/eval_v1.tar.gz')
-```
+# Save model
+folio.add_pytorch('cnn', model,
+    description='CNN for image classification',
+    init_args={'num_classes': 10},
+    save_class=True)
 
-## API Reference
+# Save training history
+history = {
+    'train_loss': [0.5, 0.3, 0.2],
+    'val_loss': [0.6, 0.4, 0.3],
+    'val_acc': [0.7, 0.8, 0.85]
+}
+folio.add_data('history', history)
 
-### DataFolio
-
-**Constructor:**
-```python
-DataFolio(metadata: Optional[Dict[str, Any]] = None)
-```
-
-**Data Methods:**
-- `reference_table(name, path, table_format='parquet', ...)` - Reference external data
-- `add_table(name, data, description=None)` - Include DataFrame in bundle
-- `get_table(name)` - Retrieve table (works for both types)
-- `get_data_path(name)` - Get path to referenced data
-
-**Model Methods:**
-- `add_model(name, model, description=None)` - Include trained model
-- `get_model(name)` - Load model from bundle
-
-**Artifact Methods:**
-- `add_artifact(name, path, category=None, description=None)` - Include file
-- `get_artifact_path(name)` - Get path to artifact
-
-**Bundle Methods:**
-- `save(path, compression='gz')` - Save bundle (local or cloud)
-- `load(path, lazy=True)` - Load bundle (classmethod)
-- `list_contents()` - Show what's in the bundle
-
-### Supported Formats
-
-**Data formats:**
-- Parquet (via pyarrow)
-- CSV (via pandas)
-- Delta Lake (optional, via deltalake)
-
-**Storage backends:**
-- Local filesystem
-- Amazon S3 (`s3://`)
-- Google Cloud Storage (`gs://`)
-- Azure Blob Storage (`az://`)
-
-## Cloud Storage
-
-See [CLOUD_STORAGE.md](CLOUD_STORAGE.md) for detailed cloud storage documentation.
-
-**Quick cloud example:**
-```python
-from datafolio import DataFolio
-
-# Save to S3
-folio = DataFolio(metadata={'exp': 'test'})
-folio.save('s3://my-bucket/experiments/test.tar.gz')
-
-# Load from S3
-loaded = DataFolio.load('s3://my-bucket/experiments/test.tar.gz')
-```
-
-**Requirements:**
-```bash
-pip install datafolio[cloud]
+# Later: load and use
+loaded_model = folio.get_pytorch('cnn', model_class=CNN)
+loaded_model.eval()
 ```
 
 ## Best Practices
 
-### ✅ Do's
-
-1. **Reference large datasets, include small results**
-   ```python
-   # Good
-   folio.reference_table('features', path='s3://data/features.parquet')  # 10GB
-   folio.add_table('metrics', metrics_df)  # 10 rows
-   ```
-
-2. **Store rich metadata**
-   ```python
-   folio = DataFolio(metadata={
-       'experiment_id': 'exp_001',
-       'timestamp': datetime.now().isoformat(),
-       'git_commit': get_git_commit(),
-       'parameters': {...},
-       'data_versions': {...}
-   })
-   ```
-
-3. **Use method chaining**
-   ```python
-   folio.reference_table('data1', path='s3://...') \
-        .add_table('results', df) \
-        .add_model('model', model)
-   ```
-
-4. **Organize cloud storage**
-   ```python
-   # Use structured paths
-   path = f's3://bucket/{project}/{experiment_id}/bundle.tar.gz'
-   ```
-
-### ❌ Don'ts
-
-1. **Don't include large datasets in bundles**
-   ```python
-   # Bad - bundle will be huge!
-   huge_df = pd.read_parquet('10GB_file.parquet')
-   folio.add_table('data', huge_df)  # ❌ Don't do this!
-
-   # Good - just store the path
-   folio.reference_table('data', path='10GB_file.parquet')  # ✅
-   ```
-
-2. **Don't lose references**
-   ```python
-   # Bad - referenced file might move/delete
-   folio.reference_table('data', path='/tmp/data.parquet')  # ❌
-
-   # Good - use stable storage
-   folio.reference_table('data', path='s3://bucket/data.parquet')  # ✅
-   ```
-
-3. **Don't skip metadata**
-   ```python
-   # Bad - no context
-   folio = DataFolio()  # ❌
-
-   # Good - rich metadata
-   folio = DataFolio(metadata={...})  # ✅
-   ```
+1. **Use descriptive names**: `add_data('training_features', ...)` not `add_data('data1', ...)`
+2. **Track lineage**: Always specify `inputs` to track data dependencies
+3. **Add descriptions**: Help future you understand what each item contains
+4. **Use custom metadata**: Store experiment context in `folio.metadata` for better tracking
+5. **Leverage autocomplete**: Use `folio.data.item_name.content` for cleaner, more discoverable code
+6. **Clean up regularly**: Use `delete()` to remove temporary or obsolete items
+7. **Version control**: Commit your folio directories to git (data is stored efficiently)
+8. **Use references**: For large external datasets, use `reference` to avoid copying
+9. **Check describe()**: Regularly review your folio with `folio.describe()` to see data and metadata
+10. **Share across notebooks**: Multiple DataFolio instances can safely access the same bundle - changes are automatically detected and synchronized
 
 ## Development
 
 ```bash
 # Clone the repo
-git clone https://github.com/your-org/datafolio.git
+git clone https://github.com/caseysm/datafolio.git
 cd datafolio
 
 # Install with dev dependencies
 uv sync
 
 # Run tests
-poe test
-
-# Run tests with coverage
 poe test
 
 # Preview documentation
@@ -424,20 +299,9 @@ uv run ruff check src/ tests/
 poe bump patch  # or minor, major
 ```
 
-## Testing
+## Documentation
 
-```bash
-# Run full test suite
-poe test
-
-# Run specific test file
-uv run pytest tests/test_readers.py -v
-
-# Run with coverage report
-uv run pytest --cov=datafolio --cov-report=html tests/
-```
-
-**Test coverage: 83%** (112 tests passing)
+For complete API documentation and detailed guides, see the [full documentation](docs/index.md).
 
 ## Requirements
 
@@ -446,10 +310,7 @@ uv run pytest --cov=datafolio --cov-report=html tests/
 - pyarrow >= 14.0.0
 - joblib >= 1.3.0
 - orjson >= 3.9.0
-
-**Optional:**
-- cloud-files >= 4.0.0 (for cloud storage)
-- deltalake >= 0.15.0 (for Delta Lake support)
+- cloudpickle >= 3.0.0
 
 ## License
 
@@ -458,6 +319,7 @@ MIT License - see [LICENSE](LICENSE) file for details.
 ## Contributing
 
 Contributions welcome! Please:
+
 1. Fork the repository
 2. Create a feature branch
 3. Add tests for new functionality
@@ -465,39 +327,6 @@ Contributions welcome! Please:
 5. Submit a pull request
 
 See [CLAUDE.md](CLAUDE.md) for development guidelines.
-
-## Related Projects
-
-- **pandas** - Data manipulation
-- **joblib** - Model serialization
-- **cloud-files** - Cloud storage I/O
-- **DVC** - Data version control (heavier, git-based)
-- **MLflow** - ML experiment tracking (heavier, server-based)
-
-**datafolio is lighter-weight:** No servers, no databases, just tarfiles with metadata.
-
-## FAQ
-
-**Q: Why not just use pickle?**
-A: Pickle is fragile across Python versions and doesn't handle metadata or large dataset references well.
-
-**Q: Why not MLflow?**
-A: MLflow requires a server and is heavier. datafolio is just tarfiles - no infrastructure needed.
-
-**Q: Can I version control the bundles?**
-A: Small bundles (< 100MB) can be versioned with git. Large bundles should go in cloud storage.
-
-**Q: What about data lineage?**
-A: Store lineage info in metadata:
-```python
-folio = DataFolio(metadata={
-    'derived_from': previous_folio.metadata,
-    'transformations': ['filter', 'aggregate']
-})
-```
-
-**Q: Does it work with Polars/Dask?**
-A: Currently pandas only. Convert to pandas before adding to bundle.
 
 ---
 
