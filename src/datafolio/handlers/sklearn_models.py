@@ -190,11 +190,15 @@ class SklearnHandler(BaseHandler):
         # Write model to storage
         folio._storage.write_joblib(filepath, model)
 
+        # Calculate checksum
+        checksum = folio._storage.calculate_checksum(filepath)
+
         # Build comprehensive metadata
         metadata = {
             "name": name,
             "item_type": self.item_type,
             "filename": filename,
+            "checksum": checksum,
             "model_type": type(model).__name__,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }

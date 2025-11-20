@@ -16,7 +16,9 @@
 - **8 handler classes:** Each data type in separate, focused module
 - **Supporting modules:** metadata.py, accessors.py, display.py, base/, storage/
 - **8 data types:** referenced_table, included_table, numpy_array, json_data, model, pytorch_model, artifact, timestamp
-- **Test coverage:** 296 passing tests, 67% coverage
+- **Test coverage:** 417 passing tests, 79% coverage
+- **Handler tests:** 108 comprehensive unit tests for handlers, storage, and components
+- **100% coverage modules:** metadata.py, timestamps.py, categories.py, handlers/__init__.py, base/registry.py
 - **Status:** ✅ Refactor complete, all tests passing, fully backward compatible
 
 ### Target State (✅ ACHIEVED)
@@ -248,8 +250,12 @@ delete_file(path)  # New method for handler.delete()
 - [x] 4.4.2: Implement `PyTorchHandler` class (handles 'pytorch_model' item_type)
 - [x] 4.4.3: Handle PyTorch serialization (state_dict)
 - [x] 4.4.4: Update `add_pytorch()` and `get_pytorch()` to delegate
-- [x] 4.4.5: Simplified get() - requires model_class parameter
-- [x] 4.4.6: Run PyTorch model tests
+- [x] 4.4.5: Enhanced get() with comprehensive reconstruction logic ✅
+  - [x] Supports `reconstruct=False` to return state_dict only
+  - [x] Supports reconstruction with provided `model_class`
+  - [x] Supports auto-reconstruction from metadata
+  - [x] Supports dill-serialized class reconstruction
+- [x] 4.4.6: Run PyTorch model tests (26/26 passing) ✅
 
 #### 4.5: ArtifactHandler ✅
 
@@ -403,17 +409,31 @@ delete_file(path)  # New method for handler.delete()
 ### Phase 7: Testing & Documentation
 **Goal:** Comprehensive testing and documentation updates
 
+**Status:** 🔄 In Progress - PyTorch Handler Testing Complete
+
 **Tasks:**
 
 #### 7.1: Unit Tests for New Components
-- [ ] 7.1.1: Add tests for BaseHandler interface
-- [ ] 7.1.2: Add tests for HandlerRegistry
-- [ ] 7.1.3: Add tests for StorageBackend
-- [ ] 7.1.4: Add tests for each handler (7 handlers)
-- [ ] 7.1.5: Add tests for MetadataDict
-- [ ] 7.1.6: Add tests for DataAccessor and ItemProxy
-- [ ] 7.1.7: Add tests for display formatting
-- [ ] 7.1.8: Add tests for lineage utilities
+- [x] 7.1.1: Add tests for BaseHandler interface ✅ (13 tests in test_base_handler.py)
+- [x] 7.1.2: Add tests for HandlerRegistry ✅ (covered in test_base_handler.py)
+- [x] 7.1.3: Add tests for StorageBackend ✅ (48 tests in test_storage_backend.py, 91% coverage)
+- [x] 7.1.4: Add tests for PyTorchHandler ✅ (22 unit tests in test_handlers_pytorch.py, 89% coverage)
+  - [x] Created comprehensive unit tests for PyTorchHandler (2025-11-20)
+  - [x] Fixed import error handling tests
+  - [x] Enhanced handler with full model reconstruction logic
+  - [x] Fixed integration with folio.add_pytorch() and folio.get_pytorch()
+  - [x] All 26 PyTorch integration tests passing
+  - [x] Fixed test_delete_model in test_folio_basic.py
+- [ ] 7.1.5: Add tests for remaining handlers (6 handlers)
+- [x] 7.1.6: Add tests for MetadataDict ✅ (25 unit tests in test_metadata.py, 100% coverage)
+  - [x] Created comprehensive unit tests for MetadataDict (2025-11-20)
+  - [x] Tests cover all methods: __init__, __setitem__, __delitem__, update, clear, setdefault
+  - [x] Tests verify auto-save functionality and timestamp management
+  - [x] Tests verify dict-like behavior and edge cases
+  - [x] Coverage improved from 52% → 100%
+- [ ] 7.1.7: Add tests for DataAccessor and ItemProxy
+- [ ] 7.1.8: Add tests for display formatting
+- [ ] 7.1.9: Add tests for lineage utilities
 
 #### 7.2: Integration Tests
 - [ ] 7.2.1: Test handler auto-detection with all types
@@ -615,7 +635,7 @@ If major issues arise:
 
 ## Progress Tracking
 
-### Current Status: ✅ Phase 6 Complete - Core Refactor Finished!
+### Current Status: ✅ Phase 6 Complete + PyTorch Handler Testing Complete!
 
 **Completed Phases:**
 
@@ -666,6 +686,23 @@ If major issues arise:
   - Reduced folio.py from 3,659 → 764 lines (79% reduction!)
   - All 296 tests passing, 67% coverage
 
+- 🔄 **Phase 7.1: Handler & Component Unit Tests** (In Progress, Started 2025-11-20)
+  - Created comprehensive test_handlers_pytorch.py with 22 unit tests (89% coverage)
+  - Enhanced PyTorchHandler.get() with full model reconstruction logic:
+    - Support for `reconstruct=False` (return state_dict only)
+    - Support for reconstruction with provided `model_class`
+    - Support for auto-reconstruction from metadata
+    - Support for dill-serialized class reconstruction
+  - Fixed folio.add_pytorch() to pass init_args and save_class to handler
+  - Fixed folio.get_pytorch() to pass reconstruct parameter to handler
+  - Fixed test_delete_model to use real sklearn model instead of unpicklable local class
+  - Created test_storage_backend.py with 48 comprehensive tests (91% coverage)
+  - Created test_metadata.py with 25 comprehensive unit tests (100% coverage)
+    - Tests cover all MetadataDict methods and auto-save functionality
+    - Improved coverage from 52% → 100%
+  - All 417 tests passing, 79% coverage (up from 67%)
+  - Components at 100% coverage: metadata.py, timestamps.py, categories.py, handlers/__init__.py
+
 **Remaining Optional Phases:**
 
 - Phase 7: Testing & Documentation (Optional - coverage and docs improvements)
@@ -675,6 +712,13 @@ If major issues arise:
 **Summary:**
 
 🎉 **Core refactor complete!** The handler-based architecture is fully implemented, tested, and production-ready. The codebase is now modular, maintainable, and extensible.
+
+📊 **Latest Update (2025-11-20):**
+- Added comprehensive unit tests for PyTorch handler (22 tests, 89% coverage)
+- Added comprehensive unit tests for MetadataDict (25 tests, 100% coverage)
+- Added comprehensive unit tests for StorageBackend (48 tests, 91% coverage)
+- **All 417 tests passing with 79% overall coverage**
+- **5 modules at 100% coverage:** metadata.py, timestamps.py, categories.py, handlers/__init__.py, base/registry.py
 
 ---
 
@@ -718,7 +762,7 @@ If major issues arise:
 | handlers/arrays.py | 0 | ~150 | 35 | ✅ Compact |
 | handlers/json_data.py | 0 | ~120 | 37 | ✅ Compact |
 | handlers/sklearn_models.py | 0 | ~200 | 77 | ✅ Compact |
-| handlers/pytorch_models.py | 0 | ~300 | 38 | ✅ Compact |
+| handlers/pytorch_models.py | 0 | ~300 | 76 | ✅ Enhanced with full reconstruction |
 | handlers/artifacts.py | 0 | ~120 | 37 | ✅ Compact |
 | handlers/timestamps.py | 0 | ~150 | 36 | ✅ Compact |
 | handlers/__init__.py | 0 | N/A | 25 | ✅ Registration |
@@ -738,6 +782,8 @@ If major issues arise:
 |---------|------|--------|---------|
 | 1.0 | 2025-11-19 | Claude Code | Initial plan created |
 | 2.0 | 2025-11-20 | Claude Code | Updated with Phase 4, 5, 6 completion. Core refactor finished! |
+| 2.1 | 2025-11-20 | Claude Code | Updated with Phase 7.1 (PyTorch) completion. 392/392 tests passing, 78% coverage. |
+| 2.2 | 2025-11-20 | Claude Code | Updated with Phase 7.1 (MetadataDict) completion. 417/417 tests passing, 79% coverage. MetadataDict now at 100% coverage. |
 
 ---
 

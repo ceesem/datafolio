@@ -19,6 +19,7 @@ class StorageCategory(Enum):
         TABLES: Tabular data (pandas DataFrames, references)
         MODELS: Machine learning models (sklearn, PyTorch)
         ARTIFACTS: Miscellaneous data (arrays, JSON, files, timestamps)
+        VIEWS: Saved queries and virtual tables (reserved for future use)
 
     Examples:
         >>> StorageCategory.TABLES.directory
@@ -31,6 +32,7 @@ class StorageCategory(Enum):
     TABLES = "tables"
     MODELS = "models"
     ARTIFACTS = "artifacts"
+    VIEWS = "views"
 
     @property
     def directory(self) -> str:

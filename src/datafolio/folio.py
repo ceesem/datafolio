@@ -1,5 +1,6 @@
 """Main DataFolio class for bundling analysis artifacts."""
 
+import contextlib
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
@@ -122,6 +123,9 @@ class DataFolio:
 
         # Auto-refresh tracking for multi-instance consistency
         self._auto_refresh_enabled: bool = True  # Can be disabled if needed
+
+        # Batch mode flag
+        self._batch_mode = False
 
         # Check if path is an existing bundle (has metadata.json or items.json)
         path_str = str(path)
@@ -805,6 +809,9 @@ For more information, see the [datafolio documentation](https://github.com/ceese
 
     def _save_items(self) -> None:
         """Save unified items.json manifest."""
+        if self._batch_mode:
+            return
+
         path = self._storage.join_paths(self._bundle_dir, ITEMS_FILE)
         self._storage.write_json(path, list(self._items.values()))
 
@@ -896,6 +903,87 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             self.metadata = MetadataDict(self, **self._metadata_raw)
 
         return self
+
+    @contextlib.contextmanager
+    def batch(self):
+        """Context manager for batch operations.
+
+        Delays saving items.json until the context exits. This is useful
+        when adding many items at once to avoid repeated disk I/O.
+
+        Examples:
+            >>> with folio.batch():
+            ...     for i in range(100):
+            ...         folio.add_numpy(f'array_{i}', arr)
+            # items.json saved once at end of block
+        """
+        self._batch_mode = True
+        try:
+            yield
+        finally:
+            self._batch_mode = False
+            self._save_items()
+
+    def validate(self) -> Dict[str, bool]:
+        """Validate existence and integrity of all items.
+
+        Checks if:
+        1. Included items exist in the bundle
+        2. Referenced items exist at their external path
+        3. Checksums match (for included single files)
+
+        Returns:
+            Dict mapping item names to validation status (True if valid)
+
+        Examples:
+            >>> status = folio.validate()
+            >>> if not all(status.values()):
+            ...     print("Bundle corrupted!")
+        """
+        results = {}
+        for name, item in self._items.items():
+            item_type = item.get("item_type")
+            is_valid = False
+
+            if item_type == "referenced_table":
+                # For references, just check existence
+                path = item.get("path")
+                if path:
+                    is_valid = self._storage.exists(path)
+            elif "filename" in item:
+                # For included items, check existence in bundle
+                # Get handler to find subdir
+                handler = get_registry().get(item_type)
+                subdir = handler.get_storage_subdir()
+                filepath = self._storage.join_paths(
+                    self._bundle_dir, subdir, item["filename"]
+                )
+                is_valid = self._storage.exists(filepath)
+
+                # Check checksum if available and file exists
+                if is_valid and "checksum" in item:
+                    current_checksum = self._storage.calculate_checksum(filepath)
+                    if current_checksum != item["checksum"]:
+                        is_valid = False
+
+            results[name] = is_valid
+
+        return results
+
+    def is_valid(self) -> bool:
+        """Check if the entire bundle is valid.
+
+        Convenience method that runs validate() and returns True only if
+        all items pass validation.
+
+        Returns:
+            True if all items are valid, False otherwise
+
+        Examples:
+            >>> if not folio.is_valid():
+            ...     print("Bundle corrupted!")
+        """
+        return all(self.validate().values())
 
     # ==================== Public API Methods ====================
 
@@ -1363,8 +1451,8 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         """Get metadata about a table (referenced or included).
 
         Returns the manifest entry containing information like:
-        - For referenced tables: path, table_format, num_rows, version, description
-        - For included tables: filename, num_rows, num_cols, columns, dtypes, description
+        - For referenced tables: path, table_format, is_directory, num_rows, version, description
+        - For included tables: filename, table_format, is_directory, num_rows, num_cols, columns, dtypes, description
 
         Args:
             name: Name of the table
@@ -1754,18 +1842,22 @@ For more information, see the [datafolio documentation](https://github.com/ceese
 
         # Handler builds metadata and writes model
         metadata = handler.add(
-            self, name, model, description=description, inputs=inputs
+            self,
+            name,
+            model,
+            description=description,
+            inputs=inputs,
+            init_args=init_args,
+            save_class=save_class,
         )
 
         # Add extra fields not handled by base handler
         if hyperparameters is not None:
             metadata["hyperparameters"] = hyperparameters
-        if init_args is not None:
-            metadata["init_args"] = init_args
         if code is not None:
             metadata["code"] = code
         if save_class:
-            metadata["has_serialized_class"] = save_class
+            metadata["has_serialized_class"] = True
 
         self._items[name] = metadata
         self._save_items()
@@ -1827,7 +1919,7 @@ For more information, see the [datafolio documentation](https://github.com/ceese
 
         registry = get_registry()
         handler = registry.get("pytorch_model")
-        return handler.get(self, name, model_class=model_class)
+        return handler.get(self, name, model_class=model_class, reconstruct=reconstruct)
 
     def add_artifact(
         self,

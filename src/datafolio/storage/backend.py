@@ -40,6 +40,9 @@ class StorageBackend:
             >>> storage.exists('/path/to/file.json')
             True
         """
+        if path.startswith("file://"):
+            return Path(path[7:]).exists()
+
         if is_cloud_path(path):
             # For cloud, we'll try to list contents
             try:
@@ -47,6 +50,7 @@ class StorageBackend:
 
                 cf = CloudFiles(path)
                 # Try to list - if it works, directory exists
+                # Note: This might be imperfect for single files depending on backend
                 list(cf.list())
                 return True
             except:
@@ -148,6 +152,36 @@ class StorageBackend:
             import shutil
 
             shutil.copy2(src, dst)
+
+    def calculate_checksum(self, path: str) -> Optional[str]:
+        """Calculate MD5 checksum of a file (local or cloud).
+
+        Args:
+            path: File path
+
+        Returns:
+            MD5 hex string, or None if path is a directory or calculation fails
+        """
+        import hashlib
+
+        if is_cloud_path(path):
+            # For cloud, getting checksum might be expensive (downloading)
+            # or we might trust the ETag if available.
+            # For now, let's skip checksum for cloud files to avoid massive downloads
+            # unless we can get it from metadata.
+            return None
+        else:
+            p = Path(path)
+            if p.is_dir():
+                return None
+            if not p.exists():
+                return None
+
+            hash_md5 = hashlib.md5()
+            with open(p, "rb") as f:
+                for chunk in iter(lambda: f.read(4096), b""):
+                    hash_md5.update(chunk)
+            return hash_md5.hexdigest()
 
     # =========================================================================
     # JSON I/O

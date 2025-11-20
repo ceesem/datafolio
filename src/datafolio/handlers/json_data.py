@@ -104,11 +104,15 @@ class JsonHandler(BaseHandler):
         # Write data to storage
         folio._storage.write_json(filepath, data)
 
+        # Calculate checksum
+        checksum = folio._storage.calculate_checksum(filepath)
+
         # Build comprehensive metadata
         metadata = {
             "name": name,
             "item_type": self.item_type,
             "filename": filename,
+            "checksum": checksum,
             "data_type": type(data).__name__,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }

@@ -96,6 +96,9 @@ class ArtifactHandler(BaseHandler):
         # Copy file to storage
         folio._storage.copy_file(str(source_path), dest_path)
 
+        # Calculate checksum
+        checksum = folio._storage.calculate_checksum(dest_path)
+
         # Get file size
         file_size = source_path.stat().st_size
 
@@ -104,7 +107,8 @@ class ArtifactHandler(BaseHandler):
             "name": name,
             "item_type": self.item_type,
             "filename": filename,
-            "original_path": str(source_path.absolute()),
+            "checksum": checksum,
+            "original_path": str(source_path),
             "file_size": file_size,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }

@@ -96,11 +96,17 @@ class PandasHandler(BaseHandler):
         # Write data to storage
         folio._storage.write_parquet(filepath, data)
 
+        # Calculate checksum
+        checksum = folio._storage.calculate_checksum(filepath)
+
         # Build comprehensive metadata
         metadata = {
             "name": name,
             "item_type": self.item_type,
             "filename": filename,
+            "table_format": table_format,
+            "is_directory": False,
+            "checksum": checksum,
             "num_rows": len(data),
             "num_cols": len(data.columns),
             "columns": list(data.columns),
@@ -193,10 +199,29 @@ class ReferenceTableHandler(BaseHandler):
         Returns:
             Metadata dict for this reference
         """
-        from datafolio.utils import resolve_path
+        from datafolio.utils import is_cloud_path, resolve_path
 
         # Resolve path (handles local/cloud)
         resolved_path = resolve_path(reference)
+
+        # Check if directory
+        is_directory = False
+
+        # Handle local paths (including file://)
+        check_path = resolved_path
+        if check_path.startswith("file://"):
+            check_path = check_path[7:]
+
+        if not is_cloud_path(check_path):
+            import os
+
+            is_directory = os.path.isdir(check_path)
+        else:
+            # For cloud paths, we can't easily check isdir without network calls
+            # Heuristic: if it ends with '/', treat as directory
+            # Or if table_format implies directory (like 'delta')
+            if resolved_path.endswith("/") or table_format in ("delta", "iceberg"):
+                is_directory = True
 
         # Build metadata
         metadata = {
@@ -204,13 +229,18 @@ class ReferenceTableHandler(BaseHandler):
             "item_type": self.item_type,
             "path": resolved_path,
             "table_format": table_format,
+            "is_directory": is_directory,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
 
         # Optionally read metadata (can be slow for large files)
-        if kwargs.get("read_metadata", False):
-            df = folio._storage.read_table(resolved_path, table_format)
-            metadata["num_rows"] = len(df)
+        if kwargs.get("read_metadata", False) and not is_directory:
+            try:
+                df = folio._storage.read_table(resolved_path, table_format)
+                metadata["num_rows"] = len(df)
+            except Exception:
+                # Don't fail add() if we can't read the remote file
+                pass
 
         # Add optional fields
         if description:
