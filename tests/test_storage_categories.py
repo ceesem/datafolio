@@ -27,9 +27,9 @@ class TestStorageCategory:
         assert StorageCategory.ARTIFACTS.directory == "artifacts"
 
     def test_all_categories_exist(self):
-        """Test that all three standard categories exist."""
+        """Test that all standard categories exist (including reserved VIEWS)."""
         categories = {cat.name for cat in StorageCategory}
-        assert categories == {"TABLES", "MODELS", "ARTIFACTS"}
+        assert categories == {"TABLES", "MODELS", "ARTIFACTS", "VIEWS"}
 
 
 class TestItemTypeMapping:

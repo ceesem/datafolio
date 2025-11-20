@@ -136,16 +136,10 @@ def test_extended_checksums(tmp_path):
     assert "checksum" in folio._items["config"]
     assert folio.validate()["config"] is True
 
-    # Test Sklearn (using a simple class to avoid sklearn dependency if not present,
-    # though SklearnHandler handles any joblib object)
-    class SimpleModel:
-        def fit(self, X, y):
-            pass
+    # Test Sklearn model
+    from sklearn.linear_model import LogisticRegression
 
-        def predict(self, X):
-            return X
-
-    model = SimpleModel()
+    model = LogisticRegression()
     folio.add_model("model", model)
     assert "checksum" in folio._items["model"]
     assert folio.validate()["model"] is True
