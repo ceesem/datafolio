@@ -1,8 +1,8 @@
 # DataFolio
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-265%20passing-brightgreen.svg)](tests/)
-[![Coverage](https://img.shields.io/badge/coverage-69%25-green.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-423%20passing-brightgreen.svg)](tests/)
+[![Coverage](https://img.shields.io/badge/coverage-79%25-green.svg)](tests/)
 
 **A lightweight, filesystem-based data versioning and experiment tracking library for Python.**
 

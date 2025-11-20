@@ -323,13 +323,10 @@ class TestDelete:
 
     def test_delete_model(self, tmp_path):
         """Test deleting a model."""
-
-        class DummyModel:
-            def __init__(self):
-                self.param = 42
+        from sklearn.linear_model import LinearRegression
 
         folio = DataFolio(tmp_path / "test")
-        model = DummyModel()
+        model = LinearRegression()
         folio.add_model("clf", model)
 
         # Delete model

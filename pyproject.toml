@@ -29,6 +29,8 @@ dev = [
     "ipykernel",
     "bump-my-version",
     "poethepoet",
+    "torch",
+    "scikit-learn",
  ]
 docs = [
     "mkdocs",

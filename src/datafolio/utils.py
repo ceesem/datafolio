@@ -24,6 +24,7 @@ class TableReference(TypedDict, total=False):
     item_type: str  # 'referenced_table'
     path: str
     table_format: str  # 'parquet', 'delta', 'csv'
+    is_directory: bool  # True if path points to a directory (e.g. Delta table)
     num_rows: Optional[int]
     version: Optional[int]  # For Delta tables
     description: Optional[str]
@@ -39,6 +40,9 @@ class IncludedTable(TypedDict, total=False):
     name: str
     item_type: str  # 'included_table'
     filename: str  # Relative path within bundle
+    table_format: str  # 'parquet'
+    is_directory: bool  # False for included tables (usually)
+    checksum: str  # MD5 checksum
     num_rows: int
     num_cols: int
     columns: list[str]
@@ -57,6 +61,7 @@ class IncludedItem(TypedDict, total=False):
     name: str
     item_type: str  # 'model' or 'artifact'
     filename: str  # Relative path within bundle
+    checksum: str  # MD5 checksum
     category: Optional[str]  # For artifacts: 'plots', 'configs', etc.
     description: Optional[str]
     # Lineage fields (primarily for models)
