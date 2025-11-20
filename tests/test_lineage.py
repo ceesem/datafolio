@@ -484,41 +484,50 @@ class TestDescribeMetadataDisplay:
 
     def test_format_metadata_value_strings(self, tmp_path):
         """Test _format_metadata_value for different string lengths."""
+        from datafolio.display import DisplayFormatter
+
         folio = DataFolio(tmp_path / "test")
+        formatter = DisplayFormatter(folio)
 
         # Short string - no truncation
-        short = folio._format_metadata_value("hello")
+        short = formatter._format_metadata_value("hello")
         assert short == "hello"
         assert "..." not in short
 
         # Long string - truncated
-        long = folio._format_metadata_value("a" * 100, max_length=60)
+        long = formatter._format_metadata_value("a" * 100, max_length=60)
         assert "..." in long
         assert "40 more chars" in long
 
     def test_format_metadata_value_lists(self, tmp_path):
         """Test _format_metadata_value for lists."""
+        from datafolio.display import DisplayFormatter
+
         folio = DataFolio(tmp_path / "test")
+        formatter = DisplayFormatter(folio)
 
         # Short list - no truncation
-        short = folio._format_metadata_value([1, 2, 3])
+        short = formatter._format_metadata_value([1, 2, 3])
         assert short == "[1, 2, 3]"
 
         # Long list - truncated
-        long = folio._format_metadata_value(list(range(20)))
+        long = formatter._format_metadata_value(list(range(20)))
         assert "..." in long
         assert "15 more items" in long
 
     def test_format_metadata_value_dicts(self, tmp_path):
         """Test _format_metadata_value for dicts."""
+        from datafolio.display import DisplayFormatter
+
         folio = DataFolio(tmp_path / "test")
+        formatter = DisplayFormatter(folio)
 
         # Small dict - no truncation
-        small = folio._format_metadata_value({"a": 1, "b": 2})
+        small = formatter._format_metadata_value({"a": 1, "b": 2})
         assert "..." not in small
 
         # Large dict - truncated
-        large = folio._format_metadata_value({f"key_{i}": i for i in range(10)})
+        large = formatter._format_metadata_value({f"key_{i}": i for i in range(10)})
         assert "..." in large
         assert "7 more fields" in large
 

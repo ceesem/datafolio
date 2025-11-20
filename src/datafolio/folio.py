@@ -7,6 +7,13 @@ from typing import Any, Dict, Optional, Union
 import cloudfiles
 from typing_extensions import Self
 
+# Import handlers to trigger auto-registration
+import datafolio.handlers  # noqa: F401
+from datafolio.accessors import DataAccessor, ItemProxy
+from datafolio.base.registry import get_registry
+from datafolio.display import DisplayFormatter
+from datafolio.metadata import MetadataDict
+from datafolio.storage import StorageBackend
 from datafolio.utils import (
     ARTIFACTS_DIR,
     ITEMS_FILE,
@@ -23,317 +30,6 @@ from datafolio.utils import (
 )
 
 from .utils import resolve_path
-
-
-class MetadataDict(dict):
-    """Dictionary that auto-saves to file on any modification."""
-
-    def __init__(self, parent: "DataFolio", *args, **kwargs):
-        """Initialize MetadataDict with parent reference.
-
-        Args:
-            parent: Parent DataFolio instance for callbacks
-            *args: Positional arguments for dict
-            **kwargs: Keyword arguments for dict
-        """
-        # Initialize parent AFTER super().__init__() to avoid triggering saves during initialization
-        super().__init__(*args, **kwargs)
-        self._parent = parent
-
-    def __setitem__(self, key: str, value: Any) -> None:
-        """Set item and trigger save."""
-        super().__setitem__(key, value)
-        if hasattr(self, "_parent"):  # Skip during initialization
-            # Update timestamp (avoid infinite loop by not triggering for 'updated_at')
-            if key != "updated_at":
-                super().__setitem__(
-                    "updated_at", datetime.now(timezone.utc).isoformat()
-                )
-            self._parent._save_metadata()
-
-    def __delitem__(self, key: str) -> None:
-        """Delete item and trigger save."""
-        super().__delitem__(key)
-        super().__setitem__("updated_at", datetime.now(timezone.utc).isoformat())
-        self._parent._save_metadata()
-
-    def update(self, *args, **kwargs) -> None:
-        """Update dict and trigger save."""
-        super().update(*args, **kwargs)
-        super().__setitem__("updated_at", datetime.now(timezone.utc).isoformat())
-        self._parent._save_metadata()
-
-    def clear(self) -> None:
-        """Clear dict and trigger save."""
-        super().clear()
-        super().__setitem__("updated_at", datetime.now(timezone.utc).isoformat())
-        self._parent._save_metadata()
-
-    def setdefault(self, key: str, default: Any = None) -> Any:
-        """Set default and trigger save if key was added."""
-        had_key = key in self
-        result = super().setdefault(key, default)
-        if not had_key:
-            super().__setitem__("updated_at", datetime.now(timezone.utc).isoformat())
-            self._parent._save_metadata()
-        return result
-
-
-class ItemProxy:
-    """Proxy for accessing a single item with autocomplete-friendly properties.
-
-    Provides convenient property-based access to item data and metadata.
-    """
-
-    def __init__(self, folio: "DataFolio", name: str):
-        """Initialize ItemProxy.
-
-        Args:
-            folio: Parent DataFolio instance
-            name: Name of the item
-        """
-        self._folio = folio
-        self._name = name
-
-    @property
-    def content(self) -> Any:
-        """Get the content of this item.
-
-        Returns:
-            - For tables: DataFrame
-            - For numpy arrays: numpy array
-            - For JSON data: dict/list/scalar
-            - For timestamps: datetime object (UTC-aware)
-            - For models: loaded model object
-            - For artifacts: file path string (use with open())
-
-        Examples:
-            >>> df = folio.data.results.content  # DataFrame
-            >>> arr = folio.data.embeddings.content  # numpy array
-            >>> cfg = folio.data.config.content  # dict
-            >>> ts = folio.data.event_time.content  # datetime
-            >>> model = folio.data.classifier.content  # model object
-            >>> with open(folio.data.plot.content, 'rb') as f:  # file path
-            ...     img = f.read()
-        """
-        # Auto-refresh before accessing
-        self._folio._refresh_if_needed()
-
-        item = self._folio._items[self._name]
-        item_type = item.get("item_type")
-
-        # Dispatch to appropriate getter
-        if item_type in ("referenced_table", "included_table"):
-            return self._folio.get_table(self._name)
-        elif item_type == "numpy_array":
-            return self._folio.get_numpy(self._name)
-        elif item_type == "json_data":
-            return self._folio.get_json(self._name)
-        elif item_type == "timestamp":
-            return self._folio.get_timestamp(self._name)
-        elif item_type in ("model", "pytorch_model"):
-            return self._folio.get_model(self._name)
-        elif item_type == "artifact":
-            return self._folio.get_artifact_path(self._name)
-        else:
-            raise ValueError(f"Unknown item type: {item_type}")
-
-    @property
-    def description(self) -> Optional[str]:
-        """Get the description of this item.
-
-        Returns:
-            Description string or None if not set
-        """
-        # Auto-refresh before accessing
-        self._folio._refresh_if_needed()
-
-        item = self._folio._items[self._name]
-        return item.get("description")
-
-    @property
-    def type(self) -> str:
-        """Get the type of this item.
-
-        Returns:
-            Item type string ('referenced_table', 'included_table', 'model',
-            'pytorch_model', 'numpy_array', 'json_data', 'artifact')
-        """
-        # Auto-refresh before accessing
-        self._folio._refresh_if_needed()
-
-        item = self._folio._items[self._name]
-        return item.get("item_type", "unknown")
-
-    @property
-    def path(self) -> Optional[str]:
-        """Get the file path for this item.
-
-        Returns:
-            - For referenced tables: external file path
-            - For artifacts: artifact file path
-            - For other types: None
-
-        Examples:
-            >>> folio.data.external_data.path  # 's3://bucket/data.parquet'
-            >>> folio.data.plot.path  # '/path/to/bundle/artifacts/plot.png'
-        """
-        # Auto-refresh before accessing
-        self._folio._refresh_if_needed()
-
-        item = self._folio._items[self._name]
-        item_type = item.get("item_type")
-
-        if item_type == "referenced_table":
-            return item.get("path")
-        elif item_type == "artifact":
-            return self._folio.get_artifact_path(self._name)
-        else:
-            return None
-
-    @property
-    def inputs(self) -> list[str]:
-        """Get the list of items this item depends on (lineage).
-
-        Returns:
-            List of item names that were used to create this item
-        """
-        return self._folio.get_inputs(self._name)
-
-    @property
-    def dependents(self) -> list[str]:
-        """Get the list of items that depend on this item (lineage).
-
-        Returns:
-            List of item names that use this item as input
-        """
-        return self._folio.get_dependents(self._name)
-
-    @property
-    def metadata(self) -> Dict[str, Any]:
-        """Get the full metadata dictionary for this item.
-
-        Returns:
-            Dictionary containing all item metadata
-        """
-        # Auto-refresh before accessing
-        self._folio._refresh_if_needed()
-
-        return dict(self._folio._items[self._name])
-
-    def __repr__(self) -> str:
-        """Return string representation."""
-        # Auto-refresh before accessing
-        self._folio._refresh_if_needed()
-
-        item = self._folio._items[self._name]
-        item_type = item.get("item_type", "unknown")
-        desc = item.get("description", "")
-        desc_str = f": {desc}" if desc else ""
-        return f"ItemProxy('{self._name}', type='{item_type}'{desc_str})"
-
-
-class DataAccessor:
-    """Accessor for autocomplete-friendly item access.
-
-    Supports both attribute-style (folio.data.my_item) and
-    dictionary-style (folio.data['my_item']) access.
-    """
-
-    def __init__(self, folio: "DataFolio"):
-        """Initialize DataAccessor.
-
-        Args:
-            folio: Parent DataFolio instance
-        """
-        self._folio = folio
-
-    def __getattr__(self, name: str) -> ItemProxy:
-        """Get item by attribute access.
-
-        Args:
-            name: Item name
-
-        Returns:
-            ItemProxy for the item
-
-        Raises:
-            AttributeError: If item doesn't exist
-        """
-        if name.startswith("_"):
-            # Allow access to private attributes
-            raise AttributeError(
-                f"'{type(self).__name__}' object has no attribute '{name}'"
-            )
-
-        # Auto-refresh before accessing
-        self._folio._refresh_if_needed()
-
-        if name not in self._folio._items:
-            raise AttributeError(
-                f"Item '{name}' not found in DataFolio. "
-                f"Available items: {', '.join(sorted(self._folio._items.keys()))}"
-            )
-
-        return ItemProxy(self._folio, name)
-
-    def __getitem__(self, name: str) -> ItemProxy:
-        """Get item by dictionary access.
-
-        Args:
-            name: Item name
-
-        Returns:
-            ItemProxy for the item
-
-        Raises:
-            KeyError: If item doesn't exist
-        """
-        # Auto-refresh before accessing
-        self._folio._refresh_if_needed()
-
-        if name not in self._folio._items:
-            raise KeyError(f"Item '{name}' not found in DataFolio")
-
-        return ItemProxy(self._folio, name)
-
-    def __dir__(self) -> list[str]:
-        """Return list of item names for autocomplete.
-
-        Returns:
-            Sorted list of all item names
-        """
-        # Auto-refresh before accessing
-        self._folio._refresh_if_needed()
-
-        # Include item names for autocomplete
-        return sorted(self._folio._items.keys())
-
-    def __repr__(self) -> str:
-        """Return string representation.
-
-        Returns:
-            String showing available items
-        """
-        items = sorted(self._folio._items.keys())
-        if not items:
-            return "DataAccessor(no items)"
-
-        # Group by type
-        contents = self._folio.list_contents()
-        lines = ["DataAccessor:"]
-
-        for category, item_list in [
-            ("Tables", contents["referenced_tables"] + contents["included_tables"]),
-            ("Models", contents["models"] + contents["pytorch_models"]),
-            ("Numpy Arrays", contents["numpy_arrays"]),
-            ("JSON Data", contents["json_data"]),
-            ("Artifacts", contents["artifacts"]),
-        ]:
-            if item_list:
-                lines.append(f"  {category}: {', '.join(sorted(item_list))}")
-
-        return "\n".join(lines)
 
 
 class DataFolio:
@@ -411,6 +107,9 @@ class DataFolio:
             ...     metadata={'date': '2024-01-15', 'scientist': 'Dr. Smith'}
             ... )
         """
+        # Storage backend for all I/O operations
+        self._storage = StorageBackend()
+
         # Unified items dictionary - all items stored here with item_type
         self._items: Dict[str, Union[TableReference, IncludedTable, IncludedItem]] = {}
 
@@ -426,11 +125,11 @@ class DataFolio:
 
         # Check if path is an existing bundle (has metadata.json or items.json)
         path_str = str(path)
-        metadata_path = self._join_paths(path_str, METADATA_FILE)
-        items_path = self._join_paths(path_str, ITEMS_FILE)
+        metadata_path = self._storage.join_paths(path_str, METADATA_FILE)
+        items_path = self._storage.join_paths(path_str, ITEMS_FILE)
 
-        is_existing_bundle = self._exists(path_str) and (
-            self._exists(metadata_path) or self._exists(items_path)
+        is_existing_bundle = self._storage.exists(path_str) and (
+            self._storage.exists(metadata_path) or self._storage.exists(items_path)
         )
 
         if is_existing_bundle:
@@ -453,7 +152,9 @@ class DataFolio:
                     parent = "/".join(parts[:-1])
                     bundle_name = make_bundle_name(last_component)
                     self._bundle_dir = (
-                        self._join_paths(parent, bundle_name) if parent else bundle_name
+                        self._storage.join_paths(parent, bundle_name)
+                        if parent
+                        else bundle_name
                     )
                 else:
                     # Local path
@@ -902,7 +603,7 @@ class DataFolio:
         iso_string = utc_timestamp.isoformat()
 
         # Write as JSON using existing method
-        self._write_json(path, {"iso_string": iso_string})
+        self._storage.write_json(path, {"iso_string": iso_string})
 
     def _read_timestamp(self, path: str) -> datetime:
         """Read timestamp from JSON file (local or cloud).
@@ -914,7 +615,7 @@ class DataFolio:
             UTC-aware datetime object
         """
         # Read JSON using existing method
-        data = self._read_json(path)
+        data = self._storage.read_json(path)
         iso_string = data["iso_string"]
 
         # Parse ISO 8601 string to datetime
@@ -987,7 +688,7 @@ array = folio.get_numpy('array_name')
 For more information, see the [datafolio documentation](https://github.com/ceesem/datafolio).
 """
 
-        readme_path = self._join_paths(self._bundle_dir, "README.md")
+        readme_path = self._storage.join_paths(self._bundle_dir, "README.md")
 
         # Write README based on storage type
         if is_cloud_path(self._bundle_dir):
@@ -1014,7 +715,7 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             max_retries: Maximum number of retries on name collision
         """
         # Check if directory already exists
-        if self._exists(self._bundle_dir):
+        if self._storage.exists(self._bundle_dir):
             if self._use_random_suffix:
                 # Try to create directory, retry with new random name on collision
                 for _ in range(max_retries):
@@ -1032,7 +733,9 @@ For more information, see the [datafolio documentation](https://github.com/ceese
                             base_name = last_component
                         new_name = make_bundle_name(base_name)
                         self._bundle_dir = (
-                            self._join_paths(parent, new_name) if parent else new_name
+                            self._storage.join_paths(parent, new_name)
+                            if parent
+                            else new_name
                         )
                     else:
                         parent = Path(self._bundle_dir).parent
@@ -1046,7 +749,7 @@ For more information, see the [datafolio documentation](https://github.com/ceese
                         self._bundle_dir = str(parent / new_name)
 
                     # Check if new name is available
-                    if not self._exists(self._bundle_dir):
+                    if not self._storage.exists(self._bundle_dir):
                         break
                 else:
                     raise RuntimeError(
@@ -1060,10 +763,10 @@ For more information, see the [datafolio documentation](https://github.com/ceese
                 )
 
         # Create directory structure
-        self._mkdir(self._bundle_dir)
-        self._mkdir(self._join_paths(self._bundle_dir, TABLES_DIR))
-        self._mkdir(self._join_paths(self._bundle_dir, MODELS_DIR))
-        self._mkdir(self._join_paths(self._bundle_dir, ARTIFACTS_DIR))
+        self._storage.mkdir(self._bundle_dir)
+        self._storage.mkdir(self._storage.join_paths(self._bundle_dir, TABLES_DIR))
+        self._storage.mkdir(self._storage.join_paths(self._bundle_dir, MODELS_DIR))
+        self._storage.mkdir(self._storage.join_paths(self._bundle_dir, ARTIFACTS_DIR))
 
         # Write initial manifests and README
         self._save_metadata()
@@ -1073,16 +776,16 @@ For more information, see the [datafolio documentation](https://github.com/ceese
     def _load_manifests(self) -> None:
         """Load all manifest files from existing bundle."""
         # Read metadata.json
-        metadata_path = self._join_paths(self._bundle_dir, METADATA_FILE)
-        if self._exists(metadata_path):
-            self._metadata_raw = self._read_json(metadata_path)
+        metadata_path = self._storage.join_paths(self._bundle_dir, METADATA_FILE)
+        if self._storage.exists(metadata_path):
+            self._metadata_raw = self._storage.read_json(metadata_path)
         else:
             self._metadata_raw = {}
 
         # Read unified items.json
-        items_path = self._join_paths(self._bundle_dir, ITEMS_FILE)
-        if self._exists(items_path):
-            items_list = self._read_json(items_path)
+        items_path = self._storage.join_paths(self._bundle_dir, ITEMS_FILE)
+        if self._storage.exists(items_path):
+            items_list = self._storage.read_json(items_path)
             self._items = {item["name"]: item for item in items_list}
         else:
             self._items = {}
@@ -1091,19 +794,19 @@ For more information, see the [datafolio documentation](https://github.com/ceese
 
     def _save_metadata(self) -> None:
         """Save metadata.json."""
-        path = self._join_paths(self._bundle_dir, METADATA_FILE)
+        path = self._storage.join_paths(self._bundle_dir, METADATA_FILE)
         # Convert MetadataDict to regular dict for serialization
         data = (
             dict(self.metadata)
             if isinstance(self.metadata, MetadataDict)
             else self.metadata
         )
-        self._write_json(path, data)
+        self._storage.write_json(path, data)
 
     def _save_items(self) -> None:
         """Save unified items.json manifest."""
-        path = self._join_paths(self._bundle_dir, ITEMS_FILE)
-        self._write_json(path, list(self._items.values()))
+        path = self._storage.join_paths(self._bundle_dir, ITEMS_FILE)
+        self._storage.write_json(path, list(self._items.values()))
 
         # Update metadata timestamp when items change
         # This allows other instances to detect staleness
@@ -1128,13 +831,13 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             return False
 
         # Read the remote metadata.json to get its updated_at timestamp
-        metadata_path = self._join_paths(self._bundle_dir, METADATA_FILE)
-        if not self._exists(metadata_path):
+        metadata_path = self._storage.join_paths(self._bundle_dir, METADATA_FILE)
+        if not self._storage.exists(metadata_path):
             # Metadata file doesn't exist - nothing to refresh
             return False
 
         try:
-            remote_metadata = self._read_json(metadata_path)
+            remote_metadata = self._storage.read_json(metadata_path)
             remote_updated_at = remote_metadata.get("updated_at")
             local_updated_at = self.metadata.get("updated_at")
 
@@ -1406,210 +1109,6 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         total_items = sum(len(v) for v in contents.values())
         return f"DataFolio(bundle_dir='{self._bundle_dir}', items={total_items})"
 
-    def _format_timestamp(self, iso_timestamp: str) -> str:
-        """Format an ISO timestamp into a human-readable string using local timezone.
-
-        Args:
-            iso_timestamp: ISO format timestamp string
-
-        Returns:
-            Human-readable timestamp in local time (e.g., "Today at 2:34 PM EST")
-
-        Examples:
-            >>> self._format_timestamp("2024-01-15T14:34:56.789Z")
-            'January 15, 2024 at 2:34 PM EST'
-        """
-        from datetime import datetime
-
-        try:
-            # Parse ISO timestamp (in UTC)
-            dt = datetime.fromisoformat(iso_timestamp.replace("Z", "+00:00"))
-
-            # Convert to local timezone
-            dt_local = dt.astimezone()
-
-            # Get current time in local timezone for comparison
-            now = datetime.now().astimezone()
-
-            # Check if today or yesterday
-            dt_date = dt_local.date()
-            now_date = now.date()
-
-            time_str = dt_local.strftime("%I:%M %p %Z").lstrip(
-                "0"
-            )  # Remove leading zero from hour
-
-            if dt_date == now_date:
-                return f"Today at {time_str}"
-            elif (now_date - dt_date).days == 1:
-                return f"Yesterday at {time_str}"
-            else:
-                date_str = dt_local.strftime("%B %d, %Y")
-                return f"{date_str} at {time_str}"
-
-        except (ValueError, AttributeError):
-            # If parsing fails, return the original
-            return iso_timestamp
-
-    def _format_datetime_for_display(self, iso_string: str) -> str:
-        """Format a timestamp item's datetime for display in describe().
-
-        Args:
-            iso_string: ISO 8601 timestamp string (typically in UTC)
-
-        Returns:
-            Human-readable timestamp string (e.g., "2024-01-15 10:30:00 UTC")
-
-        Examples:
-            >>> self._format_datetime_for_display("2024-01-15T10:30:00+00:00")
-            '2024-01-15 10:30:00 UTC'
-        """
-        try:
-            dt = datetime.fromisoformat(iso_string)
-            # Format as: YYYY-MM-DD HH:MM:SS TZ
-            return (
-                dt.strftime("%Y-%m-%d %H:%M:%S %Z")
-                or f"{dt.strftime('%Y-%m-%d %H:%M:%S')} UTC"
-            )
-        except (ValueError, AttributeError):
-            # If parsing fails, return the original
-            return iso_string
-
-    def _format_metadata_value(self, value: Any, max_length: int = 60) -> str:
-        """Format a metadata value for display with smart truncation.
-
-        Args:
-            value: The metadata value to format
-            max_length: Maximum length for string values before truncation
-
-        Returns:
-            Formatted string representation
-
-        Examples:
-            >>> self._format_metadata_value("short")
-            'short'
-            >>> self._format_metadata_value("a" * 100)
-            'aaaaaaaaaa... (90 more chars)'
-            >>> self._format_metadata_value([1, 2, 3])
-            '[1, 2, 3]'
-            >>> self._format_metadata_value(list(range(20)))
-            '[0, 1, 2, 3, 4, ...] (15 more items)'
-        """
-        # Handle strings
-        if isinstance(value, str):
-            if len(value) <= max_length:
-                return value
-            else:
-                truncated = value[:max_length]
-                remaining = len(value) - max_length
-                return f"{truncated}... ({remaining} more chars)"
-
-        # Handle lists
-        if isinstance(value, list):
-            if len(value) <= 5:
-                return str(value)
-            else:
-                preview = value[:5]
-                remaining = len(value) - 5
-                preview_str = str(preview)[:-1]  # Remove closing bracket
-                return f"{preview_str}, ...] ({remaining} more items)"
-
-        # Handle dicts
-        if isinstance(value, dict):
-            if len(value) <= 3:
-                return str(value)
-            else:
-                # Show first 3 items
-                preview_items = list(value.items())[:3]
-                preview_dict = {k: v for k, v in preview_items}
-                remaining = len(value) - 3
-                preview_str = str(preview_dict)[:-1]  # Remove closing brace
-                return f"{preview_str}, ...}} ({remaining} more fields)"
-
-        # Default: convert to string
-        value_str = str(value)
-        if len(value_str) <= max_length:
-            return value_str
-        else:
-            truncated = value_str[:max_length]
-            remaining = len(value_str) - max_length
-            return f"{truncated}... ({remaining} more chars)"
-
-    def _format_filesize(self, size_bytes: int) -> str:
-        """Format file size in bytes to human-readable string.
-
-        Args:
-            size_bytes: File size in bytes
-
-        Returns:
-            Human-readable file size string (e.g., "1.5 MB", "23.4 KB")
-
-        Examples:
-            >>> self._format_filesize(1024)
-            '1.0 KB'
-            >>> self._format_filesize(1536000)
-            '1.5 MB'
-        """
-        units = ["B", "KB", "MB", "GB", "TB"]
-        size = float(size_bytes)
-        unit_index = 0
-
-        while size >= 1024 and unit_index < len(units) - 1:
-            size /= 1024
-            unit_index += 1
-
-        # Format with appropriate precision
-        if unit_index == 0:  # Bytes - no decimal
-            return f"{int(size)} {units[unit_index]}"
-        else:  # Larger units - show one decimal place
-            return f"{size:.1f} {units[unit_index]}"
-
-    def _get_item_filesize(self, item: Dict[str, Any]) -> Optional[int]:
-        """Get the file size for an item if it has an associated file.
-
-        Args:
-            item: Item metadata dictionary
-
-        Returns:
-            File size in bytes, or None if no file exists or size cannot be determined
-
-        Examples:
-            >>> item = {"item_type": "included_table", "filename": "table.parquet"}
-            >>> self._get_item_filesize(item)
-            1024000
-        """
-        import os
-
-        # Only included items have local files
-        if "filename" not in item:
-            return None
-
-        item_type = item.get("item_type", "")
-
-        # Determine the subdirectory based on item type
-        if item_type == "included_table":
-            subdir = TABLES_DIR
-        elif item_type in ["model", "pytorch_model"]:
-            subdir = MODELS_DIR
-        elif item_type in ["artifact", "numpy_array", "json_data"]:
-            subdir = ARTIFACTS_DIR
-        else:
-            return None
-
-        # Construct full path
-        file_path = self._bundle_path / subdir / item["filename"]
-
-        # Get file size if it exists
-        try:
-            if is_cloud_path(str(self._bundle_dir)):
-                # For cloud paths, we can't easily get file size without fetching
-                return None
-            else:
-                # Local path
-                return os.path.getsize(file_path)
-        except (OSError, FileNotFoundError):
-            return None
-
     def describe(
         self,
         return_string: bool = False,
@@ -1620,286 +1119,14 @@ For more information, see the [datafolio documentation](https://github.com/ceese
 
         Includes lineage information showing inputs and dependencies.
 
-        Args:
-            return_string: If True, return the description as a string instead of printing
-            show_empty: If True, show empty sections (e.g., "Models (0): (none)")
-            max_metadata_fields: Maximum number of metadata fields to display (default: 10)
-
-        Returns:
-            None if return_string=False (prints to stdout), otherwise returns the description string
-
-        Examples:
-            Print description (default):
-            >>> folio = DataFolio('experiments/test')
-            >>> folio.describe()
-            DataFolio: experiments/test
-            ===========================
-            Tables (2):
-              • raw_data (reference): Training data
-              • results: Model results
-                ↳ inputs: raw_data
-
-            Get description as string:
-            >>> folio = DataFolio('experiments/test')
-            >>> text = folio.describe(return_string=True)
-
-            Show empty sections:
-            >>> folio.describe(show_empty=True)
-            Tables (2):
-              • raw_data: Training data
-              • results: Model results
-            Models (0):
-              (none)
-
-            Limit metadata fields shown:
-            >>> folio.describe(max_metadata_fields=5)
+        See DisplayFormatter.describe() for full documentation.
         """
-        # Auto-refresh if bundle was updated externally
-        self._refresh_if_needed()
-
-        lines = []
-        lines.append(f"DataFolio: {self._bundle_dir}")
-        lines.append("=" * len(lines[0]))
-        lines.append("")
-
-        # Add timestamps if available (with human-readable formatting)
-        if "created_at" in self.metadata:
-            formatted_created = self._format_timestamp(self.metadata["created_at"])
-            lines.append(f"Created: {formatted_created}")
-        if "updated_at" in self.metadata:
-            formatted_updated = self._format_timestamp(self.metadata["updated_at"])
-            lines.append(f"Updated: {formatted_updated}")
-        if "parent_bundle" in self.metadata:
-            lines.append(f"Parent: {self.metadata['parent_bundle']}")
-        if any(
-            k in self.metadata for k in ["created_at", "updated_at", "parent_bundle"]
-        ):
-            lines.append("")
-
-        # Add custom metadata section (filter out internal fields)
-        internal_fields = {"created_at", "updated_at", "parent_bundle", "_datafolio"}
-        custom_metadata = {
-            k: v for k, v in self.metadata.items() if k not in internal_fields
-        }
-
-        if custom_metadata:
-            lines.append(f"Metadata ({len(custom_metadata)} fields):")
-            # Sort keys for consistent display
-            sorted_keys = sorted(custom_metadata.keys())
-            displayed_keys = sorted_keys[:max_metadata_fields]
-
-            for key in displayed_keys:
-                value = custom_metadata[key]
-                formatted_value = self._format_metadata_value(value)
-                lines.append(f"  • {key}: {formatted_value}")
-
-            # Show count of remaining fields if any
-            remaining_count = len(custom_metadata) - len(displayed_keys)
-            if remaining_count > 0:
-                lines.append(f"  ... ({remaining_count} more fields)")
-
-            lines.append("")
-
-        contents = self.list_contents()
-
-        # Combine referenced and included tables
-        ref_tables = contents["referenced_tables"]
-        inc_tables = contents["included_tables"]
-        all_tables = ref_tables + inc_tables
-
-        if all_tables or show_empty:
-            lines.append(f"Tables ({len(all_tables)}):")
-            if all_tables:
-                # Show referenced tables first
-                for name in ref_tables:
-                    item = self._items[name]
-                    desc = item.get("description", "(no description)")
-                    lines.append(f"  • {name} (reference): {desc}")
-                    # Show path for referenced tables
-                    if "path" in item:
-                        lines.append(f"    ↳ path: {item['path']}")
-                    # Show lineage if present
-                    if "inputs" in item and item["inputs"]:
-                        lines.append(f"    ↳ inputs: {', '.join(item['inputs'])}")
-
-                # Then included tables
-                for name in inc_tables:
-                    item = self._items[name]
-                    desc = item.get("description", "(no description)")
-                    lines.append(f"  • {name}: {desc}")
-                    # Show file size if available
-                    filesize = self._get_item_filesize(item)
-                    if filesize is not None:
-                        lines.append(f"    ↳ size: {self._format_filesize(filesize)}")
-                    # Show lineage if present
-                    if "inputs" in item and item["inputs"]:
-                        lines.append(f"    ↳ inputs: {', '.join(item['inputs'])}")
-                    if "models" in item and item["models"]:
-                        lines.append(f"    ↳ models: {', '.join(item['models'])}")
-            else:
-                lines.append("  (none)")
-            lines.append("")
-
-        # Numpy arrays
-        numpy_arrays = contents["numpy_arrays"]
-        if numpy_arrays or show_empty:
-            lines.append(f"Numpy Arrays ({len(numpy_arrays)}):")
-            if numpy_arrays:
-                for name in numpy_arrays:
-                    item = self._items[name]
-                    desc = item.get("description", "(no description)")
-                    shape = item.get("shape", "unknown")
-                    dtype = item.get("dtype", "unknown")
-                    lines.append(f"  • {name}: {desc}")
-                    lines.append(f"    ↳ shape: {shape}, dtype: {dtype}")
-                    # Show file size if available
-                    filesize = self._get_item_filesize(item)
-                    if filesize is not None:
-                        lines.append(f"    ↳ size: {self._format_filesize(filesize)}")
-                    # Show lineage if present
-                    if "inputs" in item and item["inputs"]:
-                        lines.append(f"    ↳ inputs: {', '.join(item['inputs'])}")
-            else:
-                lines.append("  (none)")
-            lines.append("")
-
-        # JSON data
-        json_data = contents["json_data"]
-        if json_data or show_empty:
-            lines.append(f"JSON Data ({len(json_data)}):")
-            if json_data:
-                for name in json_data:
-                    item = self._items[name]
-                    desc = item.get("description", "(no description)")
-                    data_type = item.get("data_type", "unknown")
-                    lines.append(f"  • {name}: {desc}")
-                    lines.append(f"    ↳ type: {data_type}")
-                    # Show file size if available
-                    filesize = self._get_item_filesize(item)
-                    if filesize is not None:
-                        lines.append(f"    ↳ size: {self._format_filesize(filesize)}")
-                    # Show lineage if present
-                    if "inputs" in item and item["inputs"]:
-                        lines.append(f"    ↳ inputs: {', '.join(item['inputs'])}")
-            else:
-                lines.append("  (none)")
-            lines.append("")
-
-        # Models
-        models = contents["models"]
-        if models or show_empty:
-            lines.append(f"Models ({len(models)}):")
-            if models:
-                for name in models:
-                    item = self._items[name]
-                    desc = item.get("description", "(no description)")
-                    lines.append(f"  • {name}: {desc}")
-                    # Show file size if available
-                    filesize = self._get_item_filesize(item)
-                    if filesize is not None:
-                        lines.append(f"    ↳ size: {self._format_filesize(filesize)}")
-                    # Show lineage if present
-                    if "inputs" in item and item["inputs"]:
-                        lines.append(f"    ↳ inputs: {', '.join(item['inputs'])}")
-                    if "hyperparameters" in item and item["hyperparameters"]:
-                        # Show a few key hyperparameters
-                        hps = item["hyperparameters"]
-                        hp_str = ", ".join(f"{k}={v}" for k, v in list(hps.items())[:3])
-                        if len(hps) > 3:
-                            hp_str += f", ... ({len(hps) - 3} more)"
-                        lines.append(f"    ↳ hyperparameters: {hp_str}")
-            else:
-                lines.append("  (none)")
-            lines.append("")
-
-        # PyTorch Models
-        pytorch_models = contents["pytorch_models"]
-        if pytorch_models or show_empty:
-            lines.append(f"PyTorch Models ({len(pytorch_models)}):")
-            if pytorch_models:
-                for name in pytorch_models:
-                    item = self._items[name]
-                    desc = item.get("description", "(no description)")
-                    lines.append(f"  • {name}: {desc}")
-                    # Show file size if available
-                    filesize = self._get_item_filesize(item)
-                    if filesize is not None:
-                        lines.append(f"    ↳ size: {self._format_filesize(filesize)}")
-                    # Show lineage if present
-                    if "inputs" in item and item["inputs"]:
-                        lines.append(f"    ↳ inputs: {', '.join(item['inputs'])}")
-                    if "hyperparameters" in item and item["hyperparameters"]:
-                        # Show a few key hyperparameters
-                        hps = item["hyperparameters"]
-                        hp_str = ", ".join(f"{k}={v}" for k, v in list(hps.items())[:3])
-                        if len(hps) > 3:
-                            hp_str += f", ... ({len(hps) - 3} more)"
-                        lines.append(f"    ↳ hyperparameters: {hp_str}")
-                    if "init_args" in item and item["init_args"]:
-                        # Show init args
-                        init_args = item["init_args"]
-                        init_str = ", ".join(
-                            f"{k}={v}" for k, v in list(init_args.items())[:3]
-                        )
-                        if len(init_args) > 3:
-                            init_str += f", ... ({len(init_args) - 3} more)"
-                        lines.append(f"    ↳ init_args: {init_str}")
-            else:
-                lines.append("  (none)")
-            lines.append("")
-
-        # Artifacts
-        artifacts = contents["artifacts"]
-        if artifacts or show_empty:
-            lines.append(f"Artifacts ({len(artifacts)}):")
-            if artifacts:
-                for name in artifacts:
-                    item = self._items[name]
-                    desc = item.get("description", "(no description)")
-                    category = item.get("category", "")
-                    category_str = f" ({category})" if category else ""
-                    lines.append(f"  • {name}{category_str}: {desc}")
-                    # Show file size if available
-                    filesize = self._get_item_filesize(item)
-                    if filesize is not None:
-                        lines.append(f"    ↳ size: {self._format_filesize(filesize)}")
-            else:
-                lines.append("  (none)")
-            lines.append("")
-
-        # Timestamps
-        timestamps = contents["timestamps"]
-        if timestamps or show_empty:
-            lines.append(f"Timestamps ({len(timestamps)}):")
-            if timestamps:
-                for name in timestamps:
-                    item = self._items[name]
-                    desc = item.get("description", "(no description)")
-                    lines.append(f"  • {name}: {desc}")
-                    # Show formatted timestamp
-                    iso_string = item.get("iso_string", "")
-                    if iso_string:
-                        formatted_time = self._format_datetime_for_display(iso_string)
-                        lines.append(f"    ↳ time: {formatted_time}")
-                    # Show file size if available
-                    filesize = self._get_item_filesize(item)
-                    if filesize is not None:
-                        lines.append(f"    ↳ size: {self._format_filesize(filesize)}")
-                    # Show lineage if present
-                    if "inputs" in item and item["inputs"]:
-                        lines.append(f"    ↳ inputs: {', '.join(item['inputs'])}")
-            else:
-                lines.append("  (none)")
-
-        # Build final output
-        output = "\n".join(lines)
-
-        # Print or return based on parameter
-        if return_string:
-            return output
-        else:
-            print(output)
-            return None
+        formatter = DisplayFormatter(self)
+        return formatter.describe(
+            return_string=return_string,
+            show_empty=show_empty,
+            max_metadata_fields=max_metadata_fields,
+        )
 
     def reference_table(
         self,
@@ -1941,7 +1168,7 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             ...     num_rows=1_000_000
             ... )
         """
-        from datafolio.utils import resolve_path, validate_table_format
+        from datafolio.utils import validate_table_format
 
         # Validate inputs
         if name in self._items:
@@ -1949,30 +1176,29 @@ For more information, see the [datafolio documentation](https://github.com/ceese
 
         validate_table_format(table_format)
 
-        # Resolve path (cloud paths remain as-is)
-        resolved_path = resolve_path(path, make_absolute=True)
+        # Get handler and delegate metadata creation
+        registry = get_registry()
+        handler = registry.get("referenced_table")
 
-        # Create reference metadata
-        ref: TableReference = {
-            "name": name,
-            "item_type": "referenced_table",
-            "path": resolved_path,
-            "table_format": table_format,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
+        # Handler builds metadata (path resolution happens in handler)
+        metadata = handler.add(
+            self,
+            name,
+            str(path),
+            description=description,
+            inputs=inputs,
+            table_format=table_format,
+        )
 
+        # Add extra fields not handled by base handler
         if num_rows is not None:
-            ref["num_rows"] = num_rows
+            metadata["num_rows"] = num_rows
         if version is not None:
-            ref["version"] = version
-        if description is not None:
-            ref["description"] = description
-        if inputs is not None:
-            ref["inputs"] = inputs
+            metadata["version"] = version
         if code is not None:
-            ref["code"] = code
+            metadata["code"] = code
 
-        self._items[name] = ref
+        self._items[name] = metadata
 
         # Write immediately
         self._save_items()
@@ -2021,44 +1247,32 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             ...     models=['classifier'],
             ...     code='pred = model.predict(X_test)')
         """
-        import pandas as pd
-
         # Validate inputs
         if not overwrite and name in self._items:
             raise ValueError(
                 f"Item '{name}' already exists in this DataFolio. Use overwrite=True to replace it."
             )
 
-        if not isinstance(data, pd.DataFrame):
-            raise TypeError(f"Expected pandas DataFrame, got {type(data).__name__}")
+        # Get handler and delegate storage + metadata creation
+        registry = get_registry()
+        handler = registry.get("included_table")
 
-        # Create metadata
-        filename = f"{name}.parquet"
-        included: IncludedTable = {
-            "name": name,
-            "item_type": "included_table",
-            "filename": filename,
-            "num_rows": len(data),
-            "num_cols": len(data.columns),
-            "columns": list(data.columns),
-            "dtypes": {col: str(dtype) for col, dtype in data.dtypes.items()},
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
+        # Handler builds metadata and writes data
+        metadata = handler.add(
+            self,
+            name,
+            data,
+            description=description,
+            inputs=inputs,
+        )
 
-        if description is not None:
-            included["description"] = description
-        if inputs is not None:
-            included["inputs"] = inputs
+        # Add extra fields not handled by base handler
         if models is not None:
-            included["models"] = models
+            metadata["models"] = models
         if code is not None:
-            included["code"] = code
+            metadata["code"] = code
 
-        self._items[name] = included
-
-        # Write parquet file immediately
-        table_path = self._join_paths(self._bundle_dir, TABLES_DIR, filename)
-        self._write_parquet(table_path, data)
+        self._items[name] = metadata
 
         # Update manifest
         self._save_items()
@@ -2101,25 +1315,14 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         item = self._items[name]
         item_type = item.get("item_type")
 
-        # Handle included table
-        if item_type == "included_table":
-            table_path = self._join_paths(
-                self._bundle_dir, TABLES_DIR, item["filename"]
-            )
-            return self._read_parquet(table_path)
-
-        # Handle referenced table
-        elif item_type == "referenced_table":
-            from datafolio.readers import read_table
-
-            table_format = item["table_format"]
-            path = item["path"]
-
-            # Read the table (not cached)
-            return read_table(path, table_format=table_format)
-
-        else:
+        # Validate it's a table
+        if item_type not in ("included_table", "referenced_table"):
             raise ValueError(f"Item '{name}' is not a table (type: {item_type})")
+
+        # Get handler and delegate to it
+        registry = get_registry()
+        handler = registry.get(item_type)
+        return handler.get(self, name)
 
     def get_data_path(self, name: str) -> str:
         """Get the path to a referenced table.
@@ -2318,31 +1521,24 @@ For more information, see the [datafolio documentation](https://github.com/ceese
                 f"Item '{name}' already exists in this DataFolio. Use overwrite=True to replace it."
             )
 
-        # Create metadata
-        filename = f"{name}.joblib"
-        item: IncludedItem = {
-            "name": name,
-            "filename": filename,
-            "item_type": "model",
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
+        # Get handler and delegate storage + metadata creation
+        from datafolio.base.registry import get_registry
 
-        if description is not None:
-            item["description"] = description
-        if inputs is not None:
-            item["inputs"] = inputs
+        registry = get_registry()
+        handler = registry.get("model")
+
+        # Handler builds metadata and writes model
+        metadata = handler.add(
+            self, name, model, description=description, inputs=inputs
+        )
+
+        # Add extra fields not handled by base handler
         if hyperparameters is not None:
-            item["hyperparameters"] = hyperparameters
+            metadata["hyperparameters"] = hyperparameters
         if code is not None:
-            item["code"] = code
+            metadata["code"] = code
 
-        self._items[name] = item
-
-        # Write model immediately
-        model_path = self._join_paths(self._bundle_dir, MODELS_DIR, filename)
-        self._write_joblib(model_path, model)
-
-        # Update manifest
+        self._items[name] = metadata
         self._save_items()
 
         return self
@@ -2435,9 +1631,12 @@ For more information, see the [datafolio documentation](https://github.com/ceese
                 f"Item '{name}' is not a sklearn model (type: {item.get('item_type')})"
             )
 
-        # Read model (not cached)
-        model_path = self._join_paths(self._bundle_dir, MODELS_DIR, item["filename"])
-        return self._read_joblib(model_path)
+        # Delegate to handler
+        from datafolio.base.registry import get_registry
+
+        registry = get_registry()
+        handler = registry.get("model")
+        return handler.get(self, name)
 
     def get_model(self, name: str, **kwargs) -> Any:
         """Get a model by name with automatic type detection.
@@ -2547,38 +1746,28 @@ For more information, see the [datafolio documentation](https://github.com/ceese
                 f"Item '{name}' already exists in this DataFolio. Use overwrite=True to replace it."
             )
 
-        # Create metadata
-        filename = f"{name}.pt"
-        item: IncludedItem = {
-            "name": name,
-            "filename": filename,
-            "item_type": "pytorch_model",
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
+        # Get handler and delegate storage + metadata creation
+        from datafolio.base.registry import get_registry
 
-        if description is not None:
-            item["description"] = description
-        if inputs is not None:
-            item["inputs"] = inputs
-        if hyperparameters is not None:
-            item["hyperparameters"] = hyperparameters
-        if init_args is not None:
-            item["init_args"] = init_args
-        if code is not None:
-            item["code"] = code
+        registry = get_registry()
+        handler = registry.get("pytorch_model")
 
-        # Store metadata about whether class was serialized
-        item["has_serialized_class"] = save_class
-
-        self._items[name] = item
-
-        # Write model immediately
-        model_path = self._join_paths(self._bundle_dir, MODELS_DIR, filename)
-        self._write_pytorch(
-            model_path, model, init_args=init_args, save_class=save_class
+        # Handler builds metadata and writes model
+        metadata = handler.add(
+            self, name, model, description=description, inputs=inputs
         )
 
-        # Update manifest
+        # Add extra fields not handled by base handler
+        if hyperparameters is not None:
+            metadata["hyperparameters"] = hyperparameters
+        if init_args is not None:
+            metadata["init_args"] = init_args
+        if code is not None:
+            metadata["code"] = code
+        if save_class:
+            metadata["has_serialized_class"] = save_class
+
+        self._items[name] = metadata
         self._save_items()
 
         return self
@@ -2633,71 +1822,12 @@ For more information, see the [datafolio documentation](https://github.com/ceese
                 f"Item '{name}' is not a PyTorch model (type: {item.get('item_type')})"
             )
 
-        # Read model bundle (not cached)
-        model_path = self._join_paths(self._bundle_dir, MODELS_DIR, item["filename"])
-        bundle = self._read_pytorch(model_path)
+        # Delegate to handler
+        from datafolio.base.registry import get_registry
 
-        # Extract state_dict
-        state_dict = bundle["state_dict"]
-
-        # If not reconstructing, just return state_dict
-        if not reconstruct:
-            return state_dict
-
-        # Attempt reconstruction
-        metadata = bundle.get("metadata", {})
-        init_args = item.get("init_args", {})
-
-        # Option 1: User provided model_class
-        if model_class is not None:
-            try:
-                model = model_class(**init_args)
-                model.load_state_dict(state_dict)
-                return model
-            except Exception as e:
-                raise RuntimeError(
-                    f"Failed to reconstruct model with provided model_class: {e}"
-                )
-
-        # Option 2: Try to import from module.class metadata
-        model_module = metadata.get("model_module")
-        model_class_name = metadata.get("model_class")
-
-        if model_module and model_class_name:
-            try:
-                import importlib
-
-                module = importlib.import_module(model_module)
-                model_cls = getattr(module, model_class_name)
-                model = model_cls(**init_args)
-                model.load_state_dict(state_dict)
-                return model
-            except (ImportError, AttributeError) as e:
-                # Fall through to try dill
-                pass
-
-        # Option 3: Try to use dill-serialized class
-        if "serialized_class" in bundle and bundle["serialized_class"] is not None:
-            try:
-                import dill
-
-                model_cls = dill.loads(bundle["serialized_class"])
-                model = model_cls(**init_args)
-                model.load_state_dict(state_dict)
-                return model
-            except Exception as e:
-                raise RuntimeError(
-                    f"Failed to reconstruct model from serialized class: {e}"
-                )
-
-        # No reconstruction method worked
-        raise RuntimeError(
-            f"Cannot auto-reconstruct model '{name}'. Try one of:\n"
-            f"1. Provide model_class: folio.get_pytorch('{name}', model_class=YourModelClass)\n"
-            f"2. Get state_dict only: folio.get_pytorch('{name}', reconstruct=False)\n"
-            f"3. Ensure model class '{model_class_name}' from '{model_module}' is importable\n"
-            f"4. Re-save model with save_class=True to enable automatic reconstruction"
-        )
+        registry = get_registry()
+        handler = registry.get("pytorch_model")
+        return handler.get(self, name, model_class=model_class)
 
     def add_artifact(
         self,
@@ -2731,38 +1861,26 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             >>> # Update with overwrite
             >>> folio.add_artifact('loss_curve', 'plots/updated_loss.png', category='plots', overwrite=True)
         """
-        from pathlib import Path
-
         # Validate inputs
         if not overwrite and name in self._items:
             raise ValueError(
                 f"Item '{name}' already exists in this DataFolio. Use overwrite=True to replace it."
             )
 
-        path_obj = Path(path)
-        if not path_obj.exists():
-            raise FileNotFoundError(f"Artifact file not found: {path}")
+        # Get handler and delegate storage + metadata creation
+        from datafolio.base.registry import get_registry
 
-        # Create metadata
-        filename = f"{name}{path_obj.suffix}"
-        item: IncludedItem = {
-            "name": name,
-            "filename": filename,
-            "item_type": "artifact",
-        }
+        registry = get_registry()
+        handler = registry.get("artifact")
 
+        # Handler builds metadata and copies file
+        metadata = handler.add(self, name, str(path), description=description)
+
+        # Add extra fields not handled by base handler
         if category is not None:
-            item["category"] = category
-        if description is not None:
-            item["description"] = description
+            metadata["category"] = category
 
-        self._items[name] = item
-
-        # Copy artifact immediately
-        artifact_path = self._join_paths(self._bundle_dir, ARTIFACTS_DIR, filename)
-        self._copy_file(path_obj, artifact_path)
-
-        # Update manifest
+        self._items[name] = metadata
         self._save_items()
 
         return self
@@ -2796,8 +1914,12 @@ For more information, see the [datafolio documentation](https://github.com/ceese
                 f"Item '{name}' is not an artifact (type: {item.get('item_type')})"
             )
 
-        # Return path to artifact in bundle
-        return self._join_paths(self._bundle_dir, ARTIFACTS_DIR, item["filename"])
+        # Delegate to handler
+        from datafolio.base.registry import get_registry
+
+        registry = get_registry()
+        handler = registry.get("artifact")
+        return handler.get(self, name)
 
     def add_numpy(
         self,
@@ -2839,46 +1961,30 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             ...     inputs=['test_data'],
             ...     code='predictions = model.predict(X)')
         """
-        try:
-            import numpy as np
-        except ImportError:
-            raise ImportError(
-                "NumPy is required to save numpy arrays. "
-                "Install with: pip install numpy"
-            )
-
         # Validate inputs
         if not overwrite and name in self._items:
             raise ValueError(
                 f"Item '{name}' already exists in this DataFolio. Use overwrite=True to replace it."
             )
 
-        if not isinstance(array, np.ndarray):
-            raise TypeError(f"Expected numpy array, got {type(array).__name__}")
+        # Get handler and delegate storage + metadata creation
+        registry = get_registry()
+        handler = registry.get("numpy_array")
 
-        # Create metadata
-        filename = f"{name}.npy"
-        item: IncludedItem = {
-            "name": name,
-            "filename": filename,
-            "item_type": "numpy_array",
-            "shape": list(array.shape),
-            "dtype": str(array.dtype),
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
+        # Handler builds metadata and writes data
+        metadata = handler.add(
+            self,
+            name,
+            array,
+            description=description,
+            inputs=inputs,
+        )
 
-        if description is not None:
-            item["description"] = description
-        if inputs is not None:
-            item["inputs"] = inputs
+        # Add extra fields not handled by base handler
         if code is not None:
-            item["code"] = code
+            metadata["code"] = code
 
-        self._items[name] = item
-
-        # Write array immediately
-        array_path = self._join_paths(self._bundle_dir, ARTIFACTS_DIR, filename)
-        self._write_numpy(array_path, array)
+        self._items[name] = metadata
 
         # Update manifest
         self._save_items()
@@ -2918,9 +2024,10 @@ For more information, see the [datafolio documentation](https://github.com/ceese
                 f"Item '{name}' is not a numpy array (type: {item.get('item_type')})"
             )
 
-        # Read array (not cached)
-        array_path = self._join_paths(self._bundle_dir, ARTIFACTS_DIR, item["filename"])
-        return self._read_numpy(array_path)
+        # Get handler and delegate to it
+        registry = get_registry()
+        handler = registry.get("numpy_array")
+        return handler.get(self, name)
 
     def add_json(
         self,
@@ -2967,39 +2074,20 @@ For more information, see the [datafolio documentation](https://github.com/ceese
                 f"Item '{name}' already exists in this DataFolio. Use overwrite=True to replace it."
             )
 
-        # Check if data is JSON-serializable
-        import orjson
+        # Get handler and delegate storage + metadata creation
+        from datafolio.base.registry import get_registry
 
-        try:
-            # Test serialization
-            orjson.dumps(data)
-        except (TypeError, ValueError) as e:
-            raise TypeError(f"Data is not JSON-serializable: {e}")
+        registry = get_registry()
+        handler = registry.get("json_data")
 
-        # Create metadata
-        filename = f"{name}.json"
-        item: IncludedItem = {
-            "name": name,
-            "filename": filename,
-            "item_type": "json_data",
-            "data_type": type(data).__name__,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
+        # Handler builds metadata and writes data
+        metadata = handler.add(self, name, data, description=description, inputs=inputs)
 
-        if description is not None:
-            item["description"] = description
-        if inputs is not None:
-            item["inputs"] = inputs
+        # Add extra fields not handled by base handler
         if code is not None:
-            item["code"] = code
+            metadata["code"] = code
 
-        self._items[name] = item
-
-        # Write JSON immediately
-        json_path = self._join_paths(self._bundle_dir, ARTIFACTS_DIR, filename)
-        self._write_json(json_path, data)
-
-        # Update manifest
+        self._items[name] = metadata
         self._save_items()
 
         return self
@@ -3036,9 +2124,12 @@ For more information, see the [datafolio documentation](https://github.com/ceese
                 f"Item '{name}' is not JSON data (type: {item.get('item_type')})"
             )
 
-        # Read JSON (not cached)
-        json_path = self._join_paths(self._bundle_dir, ARTIFACTS_DIR, item["filename"])
-        return self._read_json(json_path)
+        # Delegate to handler
+        from datafolio.base.registry import get_registry
+
+        registry = get_registry()
+        handler = registry.get("json_data")
+        return handler.get(self, name)
 
     def add_timestamp(
         self,
@@ -3097,54 +2188,22 @@ For more information, see the [datafolio documentation](https://github.com/ceese
                 f"Item '{name}' already exists in this DataFolio. Use overwrite=True to replace it."
             )
 
-        # Convert Unix timestamp to datetime if needed
-        if isinstance(timestamp, (int, float)):
-            # Unix timestamp - convert to UTC datetime
-            dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
-        elif isinstance(timestamp, datetime):
-            # Validate timezone-awareness
-            if timestamp.tzinfo is None:
-                raise ValueError(
-                    "Naive datetime objects are not allowed. "
-                    "Please use timezone-aware datetime objects. "
-                    "Example: datetime.now(timezone.utc) or dt.replace(tzinfo=timezone.utc)"
-                )
-            dt = timestamp
-        else:
-            raise TypeError(
-                f"Expected datetime or Unix timestamp (int/float), got {type(timestamp).__name__}"
-            )
+        # Get handler and delegate storage + metadata creation
+        from datafolio.base.registry import get_registry
 
-        # Convert to UTC
-        utc_dt = dt.astimezone(timezone.utc)
-        iso_string = utc_dt.isoformat()
-        unix_ts = utc_dt.timestamp()
+        registry = get_registry()
+        handler = registry.get("timestamp")
 
-        # Create metadata
-        filename = f"{name}.json"
-        item: TimestampItem = {
-            "name": name,
-            "filename": filename,
-            "item_type": "timestamp",
-            "iso_string": iso_string,
-            "unix_timestamp": unix_ts,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
+        # Handler builds metadata and writes data
+        metadata = handler.add(
+            self, name, timestamp, description=description, inputs=inputs
+        )
 
-        if description is not None:
-            item["description"] = description
-        if inputs is not None:
-            item["inputs"] = inputs
+        # Add extra fields not handled by base handler
         if code is not None:
-            item["code"] = code
+            metadata["code"] = code
 
-        self._items[name] = item
-
-        # Write timestamp immediately
-        timestamp_path = self._join_paths(self._bundle_dir, ARTIFACTS_DIR, filename)
-        self._write_timestamp(timestamp_path, utc_dt)
-
-        # Update manifest
+        self._items[name] = metadata
         self._save_items()
 
         return self
@@ -3190,15 +2249,12 @@ For more information, see the [datafolio documentation](https://github.com/ceese
                 f"Item '{name}' is not a timestamp (type: {item.get('item_type')})"
             )
 
-        # Read timestamp (not cached)
-        timestamp_path = self._join_paths(
-            self._bundle_dir, ARTIFACTS_DIR, item["filename"]
-        )
-        dt = self._read_timestamp(timestamp_path)
+        # Delegate to handler
+        from datafolio.base.registry import get_registry
 
-        if as_unix:
-            return dt.timestamp()
-        return dt
+        registry = get_registry()
+        handler = registry.get("timestamp")
+        return handler.get(self, name, as_unix=as_unix)
 
     def add_data(
         self,
@@ -3255,33 +2311,38 @@ For more information, see the [datafolio documentation](https://github.com/ceese
                 name, reference, description=description, **kwargs
             )
 
-        # Type detection and dispatch
-        try:
-            import pandas as pd
+        # Auto-detect handler using registry
+        from datafolio.base.registry import detect_handler, get_handler
 
-            if isinstance(data, pd.DataFrame):
-                return self.add_table(name, data, description=description, **kwargs)
-        except ImportError:
-            pass
+        handler = detect_handler(data)
 
-        try:
-            import numpy as np
+        # Fallback: primitives (int, float, str, bool, None) -> JSON handler
+        # These don't auto-detect to avoid conflicts, but add_data() accepts them
+        if handler is None and isinstance(data, (int, float, str, bool, type(None))):
+            handler = get_handler("json_data")
 
-            if isinstance(data, np.ndarray):
-                return self.add_numpy(name, data, description=description, **kwargs)
-        except ImportError:
-            pass
+        if handler is None:
+            raise TypeError(
+                f"Unsupported data type: {type(data).__name__}. "
+                f"No handler found for this type. "
+                f"Supported types: pandas.DataFrame, numpy.ndarray, torch.nn.Module, "
+                f"sklearn models, dict, list, datetime, file paths, or JSON scalars. "
+                f"Use explicit add_*() methods for more control."
+            )
 
-        # Check if JSON-serializable (dict, list, scalar)
-        if isinstance(data, (dict, list, int, float, str, bool, type(None))):
-            return self.add_json(name, data, description=description, **kwargs)
-
-        # Unsupported type
-        raise TypeError(
-            f"Unsupported data type: {type(data).__name__}. "
-            f"Supported types: pandas.DataFrame, numpy.ndarray, dict, list, or JSON scalars. "
-            f"For other file types, use add_artifact()."
+        # Use handler to add data
+        metadata = handler.add(
+            folio=self,
+            name=name,
+            data=data,
+            description=description,
+            inputs=kwargs.get("inputs"),
+            **kwargs,
         )
+        self._items[name] = metadata
+        self._save_items()
+
+        return self
 
     def get_data(self, name: str) -> Any:
         """Generic data getter that returns any data type.
@@ -3315,17 +2376,32 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         item = self._items[name]
         item_type = item.get("item_type")
 
-        # Dispatch based on item type
-        if item_type in ("referenced_table", "included_table"):
-            return self.get_table(name)
-        elif item_type == "numpy_array":
-            return self.get_numpy(name)
-        elif item_type == "json_data":
-            return self.get_json(name)
-        else:
+        # Only allow "data" types - not models or artifacts
+        data_types = (
+            "referenced_table",
+            "included_table",
+            "numpy_array",
+            "json_data",
+            "timestamp",
+        )
+        if item_type not in data_types:
             raise ValueError(
                 f"Item '{name}' is not a data item (type: {item_type}). "
                 f"Use get_model() for models or get_artifact_path() for artifacts."
+            )
+
+        # Get handler from registry and use it to retrieve data
+        from datafolio.base.registry import get_handler
+
+        try:
+            handler = get_handler(item_type)
+            return handler.get(folio=self, name=name)
+        except KeyError:
+            # No handler registered for this type
+            raise ValueError(
+                f"Item '{name}' has unknown type '{item_type}'. "
+                f"No handler registered for this type. "
+                f"Use type-specific get methods if available."
             )
 
     def delete(self, name: Union[str, list[str]], warn_dependents: bool = True) -> Self:
@@ -3381,44 +2457,16 @@ For more information, see the [datafolio documentation](https://github.com/ceese
                         stacklevel=2,
                     )
 
-            # Delete physical file (if it exists)
-            if item_type in (
-                "included_table",
-                "model",
-                "pytorch_model",
-                "numpy_array",
-                "json_data",
-                "artifact",
-            ):
-                # Determine the subdirectory based on type
-                if item_type == "included_table":
-                    subdir = TABLES_DIR
-                elif item_type in ("model", "pytorch_model"):
-                    subdir = MODELS_DIR
-                else:  # numpy_array, json_data, artifact
-                    subdir = ARTIFACTS_DIR
+            # Delete physical file using handler
+            from datafolio.base.registry import get_handler
 
-                # Construct file path and delete
-                file_path = self._join_paths(self._bundle_dir, subdir, item["filename"])
-
-                # Delete file (local or cloud)
-                if is_cloud_path(file_path):
-                    # Cloud storage deletion
-                    from cloudfiles import CloudFiles
-
-                    parts = file_path.rsplit("/", 1)
-                    if len(parts) == 2:
-                        dir_path, filename = parts
-                    else:
-                        dir_path = ""
-                        filename = parts[0]
-                    cf = CloudFiles(dir_path) if dir_path else CloudFiles(file_path)
-                    cf.delete(filename)
-                else:
-                    # Local file deletion
-                    file_path_obj = Path(file_path)
-                    if file_path_obj.exists():
-                        file_path_obj.unlink()
+            try:
+                handler = get_handler(item_type)
+                handler.delete(folio=self, name=item_name)
+            except KeyError:
+                # No handler for this type - skip file deletion
+                # (e.g., unknown/legacy item types)
+                pass
 
             # Remove from items manifest
             del self._items[item_name]
@@ -3600,10 +2648,10 @@ For more information, see the [datafolio documentation](https://github.com/ceese
 
             elif item_type == "included_table":
                 # Copy the parquet file
-                src_path = self._join_paths(
+                src_path = self._storage.join_paths(
                     self._bundle_dir, TABLES_DIR, item["filename"]
                 )
-                dst_path = self._join_paths(
+                dst_path = self._storage.join_paths(
                     new_folio._bundle_dir, TABLES_DIR, item["filename"]
                 )
                 if not is_cloud_path(src_path):
@@ -3619,10 +2667,10 @@ For more information, see the [datafolio documentation](https://github.com/ceese
 
             elif item_type == "model":
                 # Copy the model file
-                src_path = self._join_paths(
+                src_path = self._storage.join_paths(
                     self._bundle_dir, MODELS_DIR, item["filename"]
                 )
-                dst_path = self._join_paths(
+                dst_path = self._storage.join_paths(
                     new_folio._bundle_dir, MODELS_DIR, item["filename"]
                 )
                 if not is_cloud_path(src_path):
@@ -3637,10 +2685,10 @@ For more information, see the [datafolio documentation](https://github.com/ceese
 
             elif item_type == "artifact":
                 # Copy the artifact file
-                src_path = self._join_paths(
+                src_path = self._storage.join_paths(
                     self._bundle_dir, ARTIFACTS_DIR, item["filename"]
                 )
-                dst_path = self._join_paths(
+                dst_path = self._storage.join_paths(
                     new_folio._bundle_dir, ARTIFACTS_DIR, item["filename"]
                 )
                 if not is_cloud_path(src_path):
