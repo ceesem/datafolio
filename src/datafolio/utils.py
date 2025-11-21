@@ -14,6 +14,7 @@ ARTIFACTS_DIR = "artifacts"
 
 METADATA_FILE = "metadata.json"
 ITEMS_FILE = "items.json"  # Unified manifest for all items
+SNAPSHOTS_FILE = "snapshots.json"  # Snapshot manifest
 
 
 # TypedDict for unified items manifest
@@ -32,6 +33,9 @@ class TableReference(TypedDict, total=False):
     inputs: Optional[list[str]]  # Names of items this was derived from
     code: Optional[str]  # Code snippet that created this
     created_at: Optional[str]  # ISO 8601 timestamp
+    # Snapshot fields (using @snapshot naming scheme)
+    in_snapshots: list[str]  # List of snapshot names referencing this version
+    is_current: bool  # True if this is the current/working version
 
 
 class IncludedTable(TypedDict, total=False):
@@ -53,6 +57,9 @@ class IncludedTable(TypedDict, total=False):
     models: Optional[list[str]]  # Names of models used to create this
     code: Optional[str]  # Code snippet that created this
     created_at: Optional[str]  # ISO 8601 timestamp
+    # Snapshot fields (using @snapshot naming scheme)
+    in_snapshots: list[str]  # List of snapshot names referencing this version
+    is_current: bool  # True if this is the current/working version
 
 
 class IncludedItem(TypedDict, total=False):
@@ -69,6 +76,9 @@ class IncludedItem(TypedDict, total=False):
     hyperparameters: Optional[dict[str, Any]]  # Model hyperparameters
     code: Optional[str]  # Training code snippet
     created_at: Optional[str]  # ISO 8601 timestamp
+    # Snapshot fields (using @snapshot naming scheme)
+    in_snapshots: list[str]  # List of snapshot names referencing this version
+    is_current: bool  # True if this is the current/working version
 
 
 class TimestampItem(TypedDict, total=False):
@@ -84,6 +94,69 @@ class TimestampItem(TypedDict, total=False):
     inputs: Optional[list[str]]  # Names of items this was derived from
     code: Optional[str]  # Code snippet that created this
     created_at: Optional[str]  # ISO 8601 timestamp of when item was added
+    # Snapshot fields (using @snapshot naming scheme)
+    in_snapshots: list[str]  # List of snapshot names referencing this version
+    is_current: bool  # True if this is the current/working version
+
+
+# Snapshot-related TypedDicts
+class GitInfo(TypedDict, total=False):
+    """Git repository information for a snapshot."""
+
+    commit: str  # Full commit hash
+    commit_short: str  # Short commit hash (first 7 chars)
+    branch: str  # Current branch name
+    remote: Optional[str]  # Remote URL
+    dirty: bool  # True if there are uncommitted changes
+    uncommitted_files: list[str]  # List of modified/untracked files
+
+
+class EnvironmentInfo(TypedDict, total=False):
+    """Python environment information for a snapshot."""
+
+    python_version: str  # Python version (e.g., '3.11.5')
+    platform: str  # Platform string (e.g., 'Linux-5.15.0-x86_64')
+    uv_lock_hash: Optional[str]  # Hash of uv.lock file if present
+    requirements: Optional[str]  # Contents of requirements.txt or similar
+
+
+class ExecutionInfo(TypedDict, total=False):
+    """Execution information for reproducing a snapshot."""
+
+    entry_point: str  # Command to run (e.g., 'python train.py --config config.json')
+    working_dir: str  # Working directory when snapshot was created
+
+
+class SnapshotMetadata(TypedDict, total=False):
+    """Metadata for a single snapshot."""
+
+    name: str  # Snapshot name (unique identifier)
+    timestamp: str  # ISO 8601 timestamp of snapshot creation
+    description: Optional[str]  # Human-readable description
+    tags: list[str]  # Tags for organization
+
+    # Item versions at snapshot time
+    item_versions: dict[str, int]  # Map of item_name → version_number
+
+    # Metadata state at snapshot time
+    metadata_snapshot: dict[str, Any]  # Full copy of metadata dict
+
+    # Environment capture
+    git: Optional[GitInfo]  # Git repository state
+    environment: Optional[EnvironmentInfo]  # Python environment state
+    execution: Optional[ExecutionInfo]  # Reproduction instructions
+
+
+class SnapshotsManifest(TypedDict):
+    """Top-level structure for snapshots.json."""
+
+    snapshots: dict[str, SnapshotMetadata]  # Map of snapshot_name → metadata
+
+
+class ItemsManifest(TypedDict):
+    """Top-level structure for items.json (simplified snapshot approach)."""
+
+    items: list[Union[TableReference, IncludedTable, IncludedItem, TimestampItem]]
 
 
 def is_cloud_path(path: Union[str, Path]) -> bool:
@@ -436,3 +509,93 @@ def make_bundle_name(prefix: Optional[str] = None) -> str:
     if prefix:
         return f"{prefix}-{random_suffix}"
     return random_suffix
+
+
+def validate_item_name(name: str) -> None:
+    """Validate that an item name is safe for use with snapshots.
+
+    The '@' symbol is reserved as a delimiter for snapshot versioning
+    (e.g., 'model@v1.0.joblib'), so it cannot appear in item names.
+
+    Args:
+        name: Item name to validate
+
+    Raises:
+        ValueError: If name contains '@' symbol or is invalid
+
+    Examples:
+        >>> validate_item_name('my_model')  # OK
+        >>> validate_item_name('model-v1')  # OK
+        >>> validate_item_name('my@model')  # Raises ValueError
+        Traceback (most recent call last):
+            ...
+        ValueError: Item name 'my@model' cannot contain '@' symbol (reserved for snapshots)
+    """
+    if not name:
+        raise ValueError("Item name cannot be empty")
+
+    if not isinstance(name, str):
+        raise TypeError(f"Item name must be a string, got {type(name).__name__}")
+
+    # Strip whitespace for validation
+    name_stripped = name.strip()
+    if name != name_stripped:
+        raise ValueError(
+            f"Item name '{name}' cannot have leading or trailing whitespace"
+        )
+
+    # Check for @ symbol (reserved for snapshot delimiter)
+    if "@" in name:
+        raise ValueError(
+            f"Item name '{name}' cannot contain '@' symbol (reserved for snapshots)"
+        )
+
+    # Check reasonable length
+    if len(name) > 255:
+        raise ValueError(f"Item name '{name}' is too long (max 255 characters)")
+
+
+def validate_snapshot_name(name: str) -> None:
+    """Validate that a snapshot name is filesystem-safe.
+
+    Snapshot names must be filesystem-safe and cannot contain '@' symbol.
+    Only alphanumeric characters, dots, underscores, and hyphens are allowed.
+
+    Args:
+        name: Snapshot name to validate
+
+    Raises:
+        ValueError: If name contains invalid characters
+
+    Examples:
+        >>> validate_snapshot_name('v1.0')  # OK
+        >>> validate_snapshot_name('baseline-2024')  # OK
+        >>> validate_snapshot_name('v1@test')  # Raises ValueError
+        Traceback (most recent call last):
+            ...
+        ValueError: Snapshot name 'v1@test' can only contain alphanumeric, dots, underscores, and hyphens
+    """
+    if not name:
+        raise ValueError("Snapshot name cannot be empty")
+
+    if not isinstance(name, str):
+        raise TypeError(f"Snapshot name must be a string, got {type(name).__name__}")
+
+    # Strip whitespace for validation
+    name_stripped = name.strip()
+    if name != name_stripped:
+        raise ValueError(
+            f"Snapshot name '{name}' cannot have leading or trailing whitespace"
+        )
+
+    # Check for filesystem-safe characters
+    import re
+
+    if not re.match(r"^[a-zA-Z0-9._-]+$", name):
+        raise ValueError(
+            f"Snapshot name '{name}' can only contain alphanumeric, dots, underscores, and hyphens"
+        )
+
+    # Check reasonable length
+    if len(name) > 100:
+        raise ValueError(f"Snapshot name '{name}' is too long (max 100 characters)")
