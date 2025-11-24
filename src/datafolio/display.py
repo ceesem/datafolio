@@ -127,6 +127,51 @@ class DisplayFormatter:
 
             lines.append("")
 
+        # Add snapshots section
+        snapshots = self._folio.list_snapshots()
+        if snapshots or show_empty:
+            lines.append(f"Snapshots ({len(snapshots)}):")
+            if snapshots:
+                # Show up to 5 most recent snapshots
+                for snap in snapshots[:5]:
+                    name = snap["name"]
+                    desc = snap.get("description", "(no description)")
+                    timestamp = self._format_timestamp(snap.get("timestamp", ""))
+                    num_items = snap.get("num_items", 0)
+                    lines.append(f"  • {name}: {desc}")
+                    lines.append(f"    ↳ created: {timestamp}, items: {num_items}")
+                    if snap.get("tags"):
+                        tags_str = ", ".join(snap["tags"])
+                        lines.append(f"    ↳ tags: {tags_str}")
+
+                if len(snapshots) > 5:
+                    lines.append(f"  ... ({len(snapshots) - 5} more snapshots)")
+            else:
+                lines.append("  (none)")
+            lines.append("")
+
+        # Show which snapshots items belong to (if any snapshots exist)
+        if snapshots:
+            # Count items by snapshot membership
+            items_in_snapshots = {}
+            for item_name, item in self._folio._items.items():
+                in_snaps = item.get("in_snapshots", [])
+                if in_snaps:
+                    items_in_snapshots[item_name] = in_snaps
+
+            if items_in_snapshots:
+                lines.append(f"Snapshot Membership ({len(items_in_snapshots)} items):")
+                for item_name in sorted(items_in_snapshots.keys())[:10]:
+                    snaps = items_in_snapshots[item_name]
+                    snaps_str = ", ".join(snaps[:3])
+                    if len(snaps) > 3:
+                        snaps_str += f", ... ({len(snaps) - 3} more)"
+                    lines.append(f"  • {item_name}: {snaps_str}")
+
+                if len(items_in_snapshots) > 10:
+                    lines.append(f"  ... ({len(items_in_snapshots) - 10} more items)")
+                lines.append("")
+
         contents = self._folio.list_contents()
 
         # Combine referenced and included tables

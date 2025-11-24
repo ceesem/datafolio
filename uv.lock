@@ -625,11 +625,13 @@ name = "datafolio"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "click" },
     { name = "cloud-files" },
     { name = "joblib" },
     { name = "orjson" },
     { name = "pandas" },
     { name = "pyarrow" },
+    { name = "rich" },
 ]
 
 [package.dev-dependencies]
@@ -657,11 +659,13 @@ profile = [
 
 [package.metadata]
 requires-dist = [
+    { name = "click", specifier = ">=8.1.0" },
     { name = "cloud-files", specifier = ">=5.8.1" },
     { name = "joblib", specifier = ">=1.3.0" },
     { name = "orjson", specifier = ">=3.9.0" },
     { name = "pandas", specifier = ">=2.0.0" },
     { name = "pyarrow", specifier = ">=14.0.0" },
+    { name = "rich", specifier = ">=13.0.0" },
 ]
 
 [package.metadata.requires-dev]

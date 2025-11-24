@@ -41,6 +41,9 @@ class MetadataDict(dict):
 
     def __setitem__(self, key: str, value: Any) -> None:
         """Set item and trigger save."""
+        if hasattr(self, "_parent") and self._parent._read_only:
+            raise RuntimeError("Cannot modify metadata of a read-only DataFolio")
+
         super().__setitem__(key, value)
         if hasattr(self, "_parent"):  # Skip during initialization
             # Update timestamp (avoid infinite loop by not triggering for 'updated_at')
@@ -52,18 +55,27 @@ class MetadataDict(dict):
 
     def __delitem__(self, key: str) -> None:
         """Delete item and trigger save."""
+        if hasattr(self, "_parent") and self._parent._read_only:
+            raise RuntimeError("Cannot modify metadata of a read-only DataFolio")
+
         super().__delitem__(key)
         super().__setitem__("updated_at", datetime.now(timezone.utc).isoformat())
         self._parent._save_metadata()
 
     def update(self, *args, **kwargs) -> None:
         """Update dict and trigger save."""
+        if hasattr(self, "_parent") and self._parent._read_only:
+            raise RuntimeError("Cannot modify metadata of a read-only DataFolio")
+
         super().update(*args, **kwargs)
         super().__setitem__("updated_at", datetime.now(timezone.utc).isoformat())
         self._parent._save_metadata()
 
     def clear(self) -> None:
         """Clear dict and trigger save."""
+        if hasattr(self, "_parent") and self._parent._read_only:
+            raise RuntimeError("Cannot modify metadata of a read-only DataFolio")
+
         super().clear()
         super().__setitem__("updated_at", datetime.now(timezone.utc).isoformat())
         self._parent._save_metadata()
@@ -73,6 +85,10 @@ class MetadataDict(dict):
         had_key = key in self
         result = super().setdefault(key, default)
         if not had_key:
+            if hasattr(self, "_parent") and self._parent._read_only:
+                # Need to remove the key we just added since we're read-only
+                super().__delitem__(key)
+                raise RuntimeError("Cannot modify metadata of a read-only DataFolio")
             super().__setitem__("updated_at", datetime.now(timezone.utc).isoformat())
             self._parent._save_metadata()
         return result

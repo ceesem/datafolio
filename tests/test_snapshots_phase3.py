@@ -195,13 +195,13 @@ class TestSnapshotContextCapture:
     """Tests for environment/git/execution context capture."""
 
     def test_snapshot_captures_environment(self, tmp_path):
-        """Test that environment info is captured."""
+        """Test that environment info is captured when explicitly enabled."""
         folio = DataFolio(tmp_path / "test-bundle")
         df = pd.DataFrame({"a": [1, 2, 3]})
         folio.add_table("data", df)
 
-        # Create snapshot
-        folio.create_snapshot("v1.0")
+        # Create snapshot with environment capture enabled
+        folio.create_snapshot("v1.0", capture_environment=True)
 
         snapshot = folio._snapshots["v1.0"]
         assert "environment" in snapshot

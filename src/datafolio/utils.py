@@ -106,9 +106,8 @@ class GitInfo(TypedDict, total=False):
     commit: str  # Full commit hash
     commit_short: str  # Short commit hash (first 7 chars)
     branch: str  # Current branch name
-    remote: Optional[str]  # Remote URL
-    dirty: bool  # True if there are uncommitted changes
-    uncommitted_files: list[str]  # List of modified/untracked files
+    remote: Optional[str]  # Remote URL (sanitized - credentials removed)
+    dirty: bool  # True if there are uncommitted changes (but not which files)
 
 
 class EnvironmentInfo(TypedDict, total=False):
