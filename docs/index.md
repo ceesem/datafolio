@@ -16,6 +16,8 @@ DataFolio helps you organize, version, and track your data science experiments b
 - **Item Management**: Delete items with dependency tracking and warnings
 - **Git-Friendly**: All data stored as standard file formats in a simple directory structure
 - **Type-Safe**: Full type hints and comprehensive error handling
+- **Snapshots**: Create immutable checkpoints of experiments with copy-on-write versioning
+- **CLI Tools**: Command-line interface for snapshot management and bundle operations
 
 ## Quick Start
 
@@ -544,6 +546,8 @@ loaded_model.eval()
 8. **Use references**: For large external datasets, use `reference` to avoid copying
 9. **Check describe()**: Regularly review your folio with `folio.describe()` to see data and metadata
 10. **Share across notebooks**: Multiple DataFolio instances can safely access the same bundle - changes are automatically detected and synchronized
+11. **Snapshot before major changes**: Create snapshots before experimenting with new approaches—it's free insurance
+12. **Tag snapshots meaningfully**: Use tags like `baseline`, `production`, `paper` to organize versions
 
 ## Development
 

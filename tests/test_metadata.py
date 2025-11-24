@@ -17,6 +17,7 @@ def mock_folio():
     """Create a mock DataFolio instance."""
     folio = Mock()
     folio._save_metadata = Mock()
+    folio._read_only = False  # Not in read-only mode
     return folio
 
 

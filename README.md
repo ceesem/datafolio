@@ -20,6 +20,8 @@ DataFolio helps you organize, version, and track your data science experiments b
 - **Item Management**: Delete items with dependency tracking and warnings
 - **Git-Friendly**: All data stored as standard file formats in a simple directory structure
 - **Type-Safe**: Full type hints and comprehensive error handling
+- **Snapshots**: Create immutable checkpoints of your experiments with copy-on-write versioning
+- **CLI Tools**: Command-line interface for snapshot management and bundle operations
 
 ## Quick Start
 
@@ -59,6 +61,8 @@ folio.delete('temp_data')
 ```bash
 pip install datafolio
 ```
+
+This includes the `datafolio` command-line tool for snapshot management and bundle operations.
 
 ## Core Concepts
 
@@ -143,16 +147,98 @@ DataFolio creates a transparent directory structure:
 ```text
 experiments/my_experiment/
 ├── metadata.json              # Folio metadata
-├── items.json                 # Unified manifest
+├── items.json                 # Unified manifest with versioning
+├── snapshots.json             # Snapshot registry (when using snapshots)
 ├── tables/
 │   └── results.parquet       # DataFrame storage
 ├── models/
-│   └── classifier.joblib     # Sklearn models
+│   ├── classifier.joblib     # Sklearn model (v1)
+│   └── classifier_v2.joblib  # Version 2 (when snapshot exists)
 └── artifacts/
     ├── embeddings.npy        # Numpy arrays
     ├── config.json           # JSON data
     └── plot.png              # Any file type
 ```
+
+## Snapshots: Version Control for Experiments
+
+Snapshots let you create immutable checkpoints of your experiments, making it easy to track different versions, compare results, and return to previous states without duplicating data.
+
+### Why Snapshots?
+
+**The Problem**: You train a model with 89% accuracy, then experiment with improvements. The new version gets 85%—worse! But you've already overwritten your good model. You need to recreate it from git history.
+
+**The Solution**: Create snapshots before experimenting. Snapshots preserve exact states while sharing unchanged data to save disk space.
+
+### Quick Start with Snapshots
+
+```python
+from datafolio import DataFolio
+
+# Create your experiment
+folio = DataFolio('experiments/classifier')
+folio.add_data('train_data', train_df)
+folio.add_model('model', baseline_model)
+folio.metadata['accuracy'] = 0.89
+
+# Create a snapshot before experimenting
+folio.create_snapshot('v1.0-baseline',
+    description='Baseline random forest model',
+    tags=['baseline', 'production'])
+
+# Experiment freely - the snapshot is preserved
+folio.add_model('model', experimental_model, overwrite=True)
+folio.metadata['accuracy'] = 0.85  # Worse!
+
+# Load the original version
+baseline = DataFolio.load_snapshot('experiments/classifier', 'v1.0-baseline')
+model = baseline.get_model('model')  # Original model with 89% accuracy!
+```
+
+### CLI for Snapshot Management
+
+DataFolio includes a command-line tool for easy snapshot operations:
+
+```bash
+# Create a snapshot
+datafolio snapshot create v1.0 -d "Baseline model" -t baseline
+
+# List all snapshots
+datafolio snapshot list
+
+# Show snapshot details
+datafolio snapshot show v1.0
+
+# Compare two snapshots
+datafolio snapshot compare v1.0 v2.0
+
+# Delete old snapshots and cleanup
+datafolio snapshot delete experimental-v5 --cleanup
+
+# Show reproduction instructions
+datafolio snapshot reproduce v1.0
+```
+
+### Key Features
+
+- **Immutable**: Once created, snapshots never change—guaranteed reproducibility
+- **Space-efficient**: Uses copy-on-write versioning—only changed items create new files
+- **Git integration**: Automatically captures commit hash, branch, and dirty status
+- **Environment tracking**: Records Python version and dependencies for full reproducibility
+- **Metadata preservation**: Snapshots include complete metadata state at that moment
+- **Multiple snapshots**: Load different versions simultaneously for comparison
+
+### Use Cases
+
+**Paper Submission**: Snapshot your exact code, data, and model state when submitting. Months later, you can reproduce those exact results.
+
+**A/B Testing**: Create snapshots for baseline and experimental versions, deploy both, and compare performance metrics.
+
+**Hyperparameter Tuning**: Snapshot each configuration, then compare results to find the best settings.
+
+**Production Deployment**: Tag production-ready snapshots and deploy specific versions with confidence.
+
+For complete snapshot documentation, see [snapshots.md](snapshots.md).
 
 ## Examples
 
@@ -275,6 +361,8 @@ loaded_model.eval()
 8. **Use references**: For large external datasets, use `reference` to avoid copying
 9. **Check describe()**: Regularly review your folio with `folio.describe()` to see data and metadata
 10. **Share across notebooks**: Multiple DataFolio instances can safely access the same bundle - changes are automatically detected and synchronized
+11. **Snapshot before major changes**: Create snapshots before experimenting with new approaches—it's free insurance
+12. **Tag snapshots meaningfully**: Use tags like `baseline`, `production`, `paper` to organize versions
 
 ## Development
 
@@ -310,7 +398,9 @@ For complete API documentation and detailed guides, see the [full documentation]
 - pyarrow >= 14.0.0
 - joblib >= 1.3.0
 - orjson >= 3.9.0
-- cloudpickle >= 3.0.0
+- cloud-files >= 5.8.1
+- click >= 8.1.0 (for CLI)
+- rich >= 13.0.0 (for CLI formatting)
 
 ## License
 

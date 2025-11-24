@@ -386,8 +386,7 @@ bundle/
         "commit_short": "a3f2b8c",
         "branch": "main",
         "remote": "https://github.com/lab/protein-analysis.git",
-        "dirty": false,
-        "uncommitted_files": []
+        "dirty": false
       },
 
       "environment": {
@@ -424,8 +423,7 @@ bundle/
         "commit_short": "b4a3c2d",
         "branch": "experiment/neural-net",
         "remote": "https://github.com/lab/protein-analysis.git",
-        "dirty": true,
-        "uncommitted_files": ["train.py", "models/neural.py"]
+        "dirty": true
       },
 
       "environment": {
@@ -1212,9 +1210,8 @@ def create(ctx, name, message, tag, entry_point, commit, interactive):
     # Check git status
     git_info = folio._capture_git_info()
     if git_info and git_info['dirty']:
-        console.print("\n[yellow]⚠ Warning:[/yellow] Git has uncommitted changes:")
-        for file in git_info['uncommitted_files']:
-            console.print(f"  [yellow]M[/yellow] {file}")
+        console.print("\n[yellow]⚠ Warning:[/yellow] Git has uncommitted changes")
+        console.print("  Consider committing your changes before creating a snapshot")
 
         if not click.confirm('\nContinue anyway?', default=False):
             console.print("[red]Snapshot cancelled[/red]")

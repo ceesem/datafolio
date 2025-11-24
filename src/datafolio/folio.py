@@ -33,6 +33,193 @@ from datafolio.utils import (
 from .utils import resolve_path
 
 
+class SnapshotView:
+    """Read-only view of a specific snapshot.
+
+    Provides access to items and metadata as they existed at snapshot time.
+    Items are read from their versioned files (e.g., data@v1.0.parquet).
+
+    Examples:
+        >>> folio = DataFolio('experiments/my-exp')
+        >>> snapshot = folio.snapshots['v1.0']
+        >>> df = snapshot.get_table('results')  # Read from snapshot version
+        >>> print(snapshot.metadata)  # Get snapshot metadata
+    """
+
+    def __init__(self, folio: "DataFolio", snapshot_name: str):
+        """Initialize snapshot view.
+
+        Args:
+            folio: Parent DataFolio instance
+            snapshot_name: Name of the snapshot to view
+        """
+        self._folio = folio
+        self._name = snapshot_name
+
+        if snapshot_name not in folio._snapshots:
+            raise ValueError(f"Snapshot '{snapshot_name}' not found")
+
+        self._snapshot_meta = folio._snapshots[snapshot_name]
+
+    @property
+    def name(self) -> str:
+        """Get snapshot name."""
+        return self._name
+
+    @property
+    def metadata(self) -> Dict[str, Any]:
+        """Get metadata as it existed at snapshot time."""
+        return self._snapshot_meta.get("metadata_snapshot", {})
+
+    @property
+    def timestamp(self) -> str:
+        """Get snapshot creation timestamp."""
+        return self._snapshot_meta.get("timestamp", "")
+
+    @property
+    def description(self) -> Optional[str]:
+        """Get snapshot description."""
+        return self._snapshot_meta.get("description")
+
+    @property
+    def tags(self) -> list[str]:
+        """Get snapshot tags."""
+        return self._snapshot_meta.get("tags", [])
+
+    @property
+    def item_versions(self) -> Dict[str, int]:
+        """Get item versions in this snapshot."""
+        return self._snapshot_meta.get("item_versions", {})
+
+    def get_table(self, name: str) -> Any:
+        """Get a table as it existed in this snapshot.
+
+        Args:
+            name: Table name
+
+        Returns:
+            Table data (pandas DataFrame)
+
+        Raises:
+            KeyError: If table not in snapshot
+        """
+        if name not in self.item_versions:
+            raise KeyError(f"Table '{name}' not found in snapshot '{self._name}'")
+
+        # Find the snapshot version item
+        snapshot_item = self._find_snapshot_item(name)
+
+        # Use handler to read the data
+        # Handlers expect to find item in folio._items, so temporarily inject it
+        handler = get_registry().get(snapshot_item["item_type"])
+        if handler is None:
+            raise RuntimeError(
+                f"No handler for item type: {snapshot_item['item_type']}"
+            )
+
+        # Temporarily inject snapshot item into _items for handler to find
+        original_item = self._folio._items.get(name)
+        try:
+            self._folio._items[name] = snapshot_item
+            return handler.get(self._folio, name)
+        finally:
+            # Restore original item
+            if original_item is not None:
+                self._folio._items[name] = original_item
+            else:
+                self._folio._items.pop(name, None)
+
+    def _find_snapshot_item(self, name: str) -> Dict[str, Any]:
+        """Find the item metadata for this snapshot.
+
+        Args:
+            name: Item name
+
+        Returns:
+            Item metadata dict
+
+        Raises:
+            KeyError: If item not found
+        """
+        # Check if it's the current version that's in this snapshot
+        if name in self._folio._items:
+            item = self._folio._items[name]
+            if self._name in item.get("in_snapshots", []):
+                return item
+
+        # Otherwise search snapshot versions
+        for item in self._folio._snapshot_versions:
+            if item.get("name") == name and self._name in item.get("in_snapshots", []):
+                return item
+
+        raise KeyError(f"Item '{name}' not found in snapshot '{self._name}'")
+
+
+class SnapshotAccessor:
+    """Dict-like accessor for snapshots.
+
+    Allows accessing snapshots like: folio.snapshots['v1.0']
+    """
+
+    def __init__(self, folio: "DataFolio"):
+        """Initialize accessor.
+
+        Args:
+            folio: Parent DataFolio instance
+        """
+        self._folio = folio
+
+    def __getitem__(self, name: str) -> SnapshotView:
+        """Get a snapshot by name.
+
+        Args:
+            name: Snapshot name
+
+        Returns:
+            SnapshotView for the given snapshot
+
+        Raises:
+            KeyError: If snapshot not found
+        """
+        if name not in self._folio._snapshots:
+            raise KeyError(f"Snapshot '{name}' not found")
+
+        return SnapshotView(self._folio, name)
+
+    def __contains__(self, name: str) -> bool:
+        """Check if snapshot exists.
+
+        Args:
+            name: Snapshot name
+
+        Returns:
+            True if snapshot exists
+        """
+        return name in self._folio._snapshots
+
+    def __iter__(self):
+        """Iterate over snapshot names."""
+        return iter(self._folio._snapshots.keys())
+
+    def __len__(self) -> int:
+        """Get number of snapshots."""
+        return len(self._folio._snapshots)
+
+    def keys(self):
+        """Get snapshot names."""
+        return self._folio._snapshots.keys()
+
+    def values(self):
+        """Get SnapshotView objects for all snapshots."""
+        return [SnapshotView(self._folio, name) for name in self._folio._snapshots]
+
+    def items(self):
+        """Get (name, SnapshotView) pairs."""
+        return [
+            (name, SnapshotView(self._folio, name)) for name in self._folio._snapshots
+        ]
+
+
 class DataFolio:
     """A lightweight bundle for tracking analysis artifacts and metadata.
 
@@ -76,6 +263,7 @@ class DataFolio:
         path: Union[str, Path],
         metadata: Optional[Dict[str, Any]] = None,
         random_suffix: bool = False,
+        read_only: bool = False,
     ):
         """Initialize a new or open an existing DataFolio.
 
@@ -86,6 +274,7 @@ class DataFolio:
             path: Full path to bundle directory (local or cloud)
             metadata: Optional dictionary of analysis metadata (for new bundles)
             random_suffix: If True, append random suffix to bundle name (default: False)
+            read_only: If True, prevent all write operations (default: False)
 
         Examples:
             Create new bundle with exact name:
@@ -107,12 +296,29 @@ class DataFolio:
             ...     'experiments/my-exp',
             ...     metadata={'date': '2024-01-15', 'scientist': 'Dr. Smith'}
             ... )
+
+            Open existing bundle as read-only (for safe inspection):
+            >>> folio = DataFolio('experiments/production-model', read_only=True)
+            >>> model = folio.get_model('classifier')  # OK
+            >>> folio.add_table('new', df)  # Error: read-only
         """
+        # Read-only mode flag
+        self._read_only = read_only
+
+        # Snapshot mode flags (set by load_snapshot())
+        self._in_snapshot_mode = False
+        self._loaded_snapshot: Optional[str] = None
+
         # Storage backend for all I/O operations
         self._storage = StorageBackend()
 
-        # Unified items dictionary - all items stored here with item_type
+        # Unified items dictionary - current versions only (for fast lookup)
         self._items: Dict[str, Union[TableReference, IncludedTable, IncludedItem]] = {}
+
+        # Snapshot versions - non-current versions referenced by snapshots
+        self._snapshot_versions: list[
+            Union[TableReference, IncludedTable, IncludedItem]
+        ] = []
 
         # For storing models/artifacts before writing
         self._models_data: Dict[str, Any] = {}  # Model storage
@@ -126,6 +332,9 @@ class DataFolio:
 
         # Batch mode flag
         self._batch_mode = False
+
+        # Snapshot-related state (Phase 1)
+        self._snapshots: Dict[str, Any] = {}  # Snapshot name → metadata
 
         # Check if path is an existing bundle (has metadata.json or items.json)
         path_str = str(path)
@@ -198,6 +407,19 @@ class DataFolio:
         self._cf = cloudfiles.CloudFiles(resolve_path(self._bundle_dir))
 
     # ==================== Well-factored I/O Helper Functions ====================
+
+    def _check_read_only(self) -> None:
+        """Raise error if folio is in read-only mode.
+
+        Raises:
+            RuntimeError: If folio is in read-only mode with helpful message
+        """
+        if self._read_only:
+            msg = "Cannot modify a read-only DataFolio"
+            if self._in_snapshot_mode and self._loaded_snapshot:
+                msg += f" (loaded from snapshot '{self._loaded_snapshot}')"
+            msg += ". Open without read_only=True to make changes."
+            raise RuntimeError(msg)
 
     def _exists(self, path: str) -> bool:
         """Check if a path exists (local or cloud).
@@ -779,6 +1001,8 @@ For more information, see the [datafolio documentation](https://github.com/ceese
 
     def _load_manifests(self) -> None:
         """Load all manifest files from existing bundle."""
+        from datafolio.utils import SNAPSHOTS_FILE
+
         # Read metadata.json
         metadata_path = self._storage.join_paths(self._bundle_dir, METADATA_FILE)
         if self._storage.exists(metadata_path):
@@ -789,10 +1013,43 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         # Read unified items.json
         items_path = self._storage.join_paths(self._bundle_dir, ITEMS_FILE)
         if self._storage.exists(items_path):
-            items_list = self._storage.read_json(items_path)
-            self._items = {item["name"]: item for item in items_list}
+            items_data = self._storage.read_json(items_path)
+
+            # Handle both old format (list) and new format (dict with items)
+            if isinstance(items_data, list):
+                # Old format: just a list of items (backward compatibility)
+                items_list = items_data
+            else:
+                # New format: dict with items list
+                items_list = items_data.get("items", [])
+
+            # Separate current versions from snapshot versions
+            self._items = {}
+            self._snapshot_versions = []
+
+            for item in items_list:
+                # Initialize snapshot fields for backward compatibility
+                if "in_snapshots" not in item:
+                    item["in_snapshots"] = []
+                if "is_current" not in item:
+                    item["is_current"] = True
+
+                # Separate based on is_current flag
+                if item.get("is_current", True):
+                    self._items[item["name"]] = item
+                else:
+                    self._snapshot_versions.append(item)
         else:
             self._items = {}
+            self._snapshot_versions = []
+
+        # Read snapshots.json (if it exists)
+        snapshots_path = self._storage.join_paths(self._bundle_dir, SNAPSHOTS_FILE)
+        if self._storage.exists(snapshots_path):
+            snapshots_data = self._storage.read_json(snapshots_path)
+            self._snapshots = snapshots_data.get("snapshots", {})
+        else:
+            self._snapshots = {}
 
     # ==================== Manifest Save Methods ====================
 
@@ -808,12 +1065,20 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         self._storage.write_json(path, data)
 
     def _save_items(self) -> None:
-        """Save unified items.json manifest."""
+        """Save unified items.json manifest in simplified snapshot format."""
         if self._batch_mode:
             return
 
         path = self._storage.join_paths(self._bundle_dir, ITEMS_FILE)
-        self._storage.write_json(path, list(self._items.values()))
+
+        # Combine current versions and snapshot versions
+        all_items = list(self._items.values()) + self._snapshot_versions
+
+        # Save in simplified format: dict with items list only
+        items_data = {
+            "items": all_items,
+        }
+        self._storage.write_json(path, items_data)
 
         # Update metadata timestamp when items change
         # This allows other instances to detect staleness
@@ -825,6 +1090,1369 @@ For more information, see the [datafolio documentation](https://github.com/ceese
                 "updated_at", datetime.now(timezone.utc).isoformat()
             )
             self._save_metadata()
+
+    def _save_snapshots(self) -> None:
+        """Save snapshots.json manifest."""
+        from datafolio.utils import SNAPSHOTS_FILE
+
+        if self._batch_mode:
+            return
+
+        path = self._storage.join_paths(self._bundle_dir, SNAPSHOTS_FILE)
+        snapshots_data = {"snapshots": self._snapshots}
+        self._storage.write_json(path, snapshots_data)
+
+    # ==================== Snapshot Context Capture ====================
+
+    def _sanitize_git_remote_url(self, url: str) -> Optional[str]:
+        """Remove credentials from git remote URLs.
+
+        Handles various git URL formats and removes embedded credentials
+        (tokens, username:password) from HTTP(S) URLs while preserving the
+        repository information.
+
+        Args:
+            url: Git remote URL (potentially with embedded credentials)
+
+        Returns:
+            Sanitized URL with credentials removed, or None if sanitization fails
+
+        Examples:
+            >>> _sanitize_git_remote_url('https://token@github.com/user/repo.git')
+            'https://github.com/user/repo.git'
+
+            >>> _sanitize_git_remote_url('https://user:pass@gitlab.com/repo.git')
+            'https://gitlab.com/repo.git'
+
+            >>> _sanitize_git_remote_url('git@github.com:user/repo.git')
+            'git@github.com:user/repo.git'  # SSH format preserved (no credentials)
+
+        Security:
+            This prevents credential leakage when snapshots containing git
+            information are shared with collaborators or made public.
+        """
+        from urllib.parse import urlparse, urlunparse
+
+        if not url:
+            return None
+
+        # Handle SSH format (git@host:path) - safe to keep as-is
+        # SSH URLs don't contain credentials, they use SSH keys
+        if url.startswith("git@") or url.startswith("ssh://"):
+            return url
+
+        # Handle git:// protocol - no credentials possible
+        if url.startswith("git://"):
+            return url
+
+        # Handle file paths - local repositories
+        if url.startswith("/") or url.startswith("file://"):
+            return url
+
+        # Handle HTTP(S) URLs - need to strip credentials if present
+        try:
+            parsed = urlparse(url)
+
+            # If it's http/https and has userinfo (credentials before @)
+            if parsed.scheme in ("http", "https"):
+                # Check if there's an @ in the netloc (indicates userinfo)
+                if "@" in parsed.netloc:
+                    # Extract just the host:port part (everything after @)
+                    host_with_port = parsed.netloc.split("@")[-1]
+
+                    # Rebuild URL without credentials
+                    clean_url = urlunparse(
+                        (
+                            parsed.scheme,
+                            host_with_port,  # Just host:port, no userinfo
+                            parsed.path,
+                            parsed.params,
+                            parsed.query,
+                            parsed.fragment,
+                        )
+                    )
+                    return clean_url
+
+                # No credentials present - return as-is
+                return url
+
+            # Other schemes - return as-is
+            return url
+
+        except Exception:
+            # If parsing fails, safer to return None than risk leaking
+            return None
+
+    def _capture_git_info(self) -> Optional[Dict[str, Any]]:
+        """Capture current git repository state.
+
+        Captures commit hash, branch name, dirty status, and remote URL.
+        Remote URLs are automatically sanitized to remove embedded credentials
+        (tokens, passwords) for security.
+
+        Returns:
+            Git info dict with:
+            - commit: Full commit hash
+            - commit_short: Short (7-char) commit hash
+            - branch: Current branch name
+            - dirty: Whether there are uncommitted changes (bool)
+            - remote: Repository URL (sanitized, credentials removed)
+            Or None if not a git repository
+
+        Security:
+            - Git remote URLs like "https://token@github.com/repo.git" are
+              automatically cleaned to "https://github.com/repo.git"
+            - Uncommitted file list is NOT captured to avoid exposing sensitive
+              filenames (.env, secrets.yaml, etc.)
+        """
+        import subprocess
+        from pathlib import Path
+
+        try:
+            # Check if we're in a git repo
+            result = subprocess.run(
+                ["git", "rev-parse", "--git-dir"],
+                cwd=self._bundle_dir,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode != 0:
+                return None
+
+            # Get commit hash
+            commit_result = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=self._bundle_dir,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            commit = (
+                commit_result.stdout.strip() if commit_result.returncode == 0 else ""
+            )
+            commit_short = commit[:7] if commit else ""
+
+            # Get branch name
+            branch_result = subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                cwd=self._bundle_dir,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            branch = (
+                branch_result.stdout.strip() if branch_result.returncode == 0 else ""
+            )
+
+            # Get remote URL
+            remote_result = subprocess.run(
+                ["git", "config", "--get", "remote.origin.url"],
+                cwd=self._bundle_dir,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            remote = (
+                remote_result.stdout.strip() if remote_result.returncode == 0 else None
+            )
+
+            # Check for uncommitted changes (dirty flag only, no file list for security)
+            status_result = subprocess.run(
+                ["git", "status", "--porcelain"],
+                cwd=self._bundle_dir,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            dirty = (
+                bool(status_result.stdout.strip())
+                if status_result.returncode == 0
+                else False
+            )
+
+            git_info: Dict[str, Any] = {
+                "commit": commit,
+                "commit_short": commit_short,
+                "branch": branch,
+                "dirty": dirty,
+            }
+
+            # Sanitize remote URL to remove any embedded credentials
+            if remote:
+                sanitized_remote = self._sanitize_git_remote_url(remote)
+                if sanitized_remote:  # Only include if sanitization succeeded
+                    git_info["remote"] = sanitized_remote
+
+            return git_info
+
+        except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
+            # Git not available or error occurred
+            return None
+
+    def _capture_environment_info(self) -> Dict[str, Any]:
+        """Capture Python environment information.
+
+        Returns:
+            Environment info dict with Python version, platform, packages
+        """
+        import platform
+        import sys
+        from pathlib import Path
+
+        env_info: Dict[str, Any] = {
+            "python_version": platform.python_version(),
+            "platform": platform.platform(),
+        }
+
+        # Try to capture uv.lock hash if it exists
+        try:
+            import hashlib
+
+            uv_lock = Path.cwd() / "uv.lock"
+            if uv_lock.exists():
+                with open(uv_lock, "rb") as f:
+                    lock_hash = hashlib.md5(f.read()).hexdigest()
+                env_info["uv_lock_hash"] = lock_hash
+        except Exception:
+            pass
+
+        # Try to capture requirements
+        try:
+            requirements_file = Path.cwd() / "requirements.txt"
+            if requirements_file.exists():
+                env_info["requirements"] = requirements_file.read_text()
+        except Exception:
+            pass
+
+        return env_info
+
+    def _capture_execution_info(self) -> Dict[str, Any]:
+        """Capture execution context for reproducibility.
+
+        Returns:
+            Execution info dict with entry point and working directory
+        """
+        import sys
+        from pathlib import Path
+
+        exec_info: Dict[str, Any] = {
+            "working_dir": str(Path.cwd()),
+        }
+
+        # Try to capture command line that was run
+        if sys.argv:
+            exec_info["entry_point"] = " ".join(sys.argv)
+
+        return exec_info
+
+    # ==================== Snapshot Creation ====================
+
+    def create_snapshot(
+        self,
+        name: str,
+        description: Optional[str] = None,
+        tags: Optional[list[str]] = None,
+        capture_git: bool = True,
+        capture_environment: bool = False,
+        capture_execution: bool = False,
+    ) -> Self:
+        """Create a named snapshot of the current bundle state.
+
+        A snapshot captures:
+        - Current versions of all items (via item_versions dict)
+        - Current metadata state (via metadata_snapshot dict)
+        - Git repository state (commit, branch, dirty status) [optional]
+        - Python environment (version, packages) [optional, off by default]
+        - Execution context (entry point, working directory) [optional, off by default]
+
+        After creating a snapshot, all current items are marked as being
+        in that snapshot. Future overwrites will trigger copy-on-write
+        to preserve the snapshot state.
+
+        SECURITY NOTE: Environment variables (API keys, tokens, etc.) are NEVER
+        captured. The capture_environment flag only captures Python version,
+        platform, and package versions from uv.lock or requirements.txt.
+
+        Args:
+            name: Snapshot name (filesystem-safe, no @ symbol)
+            description: Optional human-readable description
+            tags: Optional list of tags for organization
+            capture_git: Whether to capture git state (default: True)
+            capture_environment: Whether to capture Python environment info
+                like version and packages (default: False for security)
+            capture_execution: Whether to capture execution context like
+                entry point and working directory (default: False for security)
+
+        Returns:
+            Self for method chaining
+
+        Raises:
+            ValueError: If snapshot name is invalid or already exists
+
+        Examples:
+            >>> folio = DataFolio('experiments/my-exp')
+            >>> folio.add_table('results', df)
+            >>> folio.create_snapshot('v1.0-baseline', description='Initial results')
+            >>>
+            >>> # Later, overwriting will preserve the snapshot
+            >>> folio.add_table('results', new_df, overwrite=True)  # Creates v2
+        """
+        self._check_read_only()
+
+        from datetime import datetime, timezone
+
+        from datafolio.utils import validate_snapshot_name
+
+        # Validate snapshot name
+        validate_snapshot_name(name)
+
+        # Check if snapshot already exists
+        if name in self._snapshots:
+            raise ValueError(f"Snapshot '{name}' already exists")
+
+        # Capture current item versions (using checksum as version identifier)
+        item_versions: Dict[str, str] = {}
+        for item_name, item_meta in self._items.items():
+            # Use checksum as version identifier to detect actual content changes
+            # This is more reliable than filename since filenames can be reused
+            checksum = item_meta.get("checksum", "")
+            item_versions[item_name] = checksum
+
+        # Capture current metadata state
+        metadata_snapshot = dict(self.metadata) if hasattr(self, "metadata") else {}
+
+        # Build snapshot metadata
+        snapshot_meta: Dict[str, Any] = {
+            "name": name,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "item_versions": item_versions,
+            "metadata_snapshot": metadata_snapshot,
+        }
+
+        # Add optional fields
+        if description:
+            snapshot_meta["description"] = description
+        if tags:
+            snapshot_meta["tags"] = tags
+        else:
+            snapshot_meta["tags"] = []
+
+        # Capture context
+        if capture_git:
+            git_info = self._capture_git_info()
+            if git_info:
+                snapshot_meta["git"] = git_info
+
+        if capture_environment:
+            snapshot_meta["environment"] = self._capture_environment_info()
+
+        if capture_execution:
+            snapshot_meta["execution"] = self._capture_execution_info()
+
+        # Update all current items to mark them as in this snapshot
+        for item_name in self._items:
+            item = self._items[item_name]
+            if "in_snapshots" not in item:
+                item["in_snapshots"] = []
+            item["in_snapshots"].append(name)
+
+        # Store snapshot
+        self._snapshots[name] = snapshot_meta
+
+        # Save snapshots.json and items.json
+        self._save_snapshots()
+        self._save_items()
+
+        return self
+
+    @property
+    def snapshots(self) -> SnapshotAccessor:
+        """Access snapshots in dict-like manner.
+
+        Returns:
+            SnapshotAccessor for accessing snapshots
+
+        Examples:
+            >>> # List all snapshots
+            >>> for name in folio.snapshots:
+            ...     print(name)
+            >>>
+            >>> # Access specific snapshot
+            >>> snapshot = folio.snapshots['v1.0']
+            >>> df = snapshot.get_table('results')
+            >>> print(snapshot.metadata)
+            >>>
+            >>> # Check if snapshot exists
+            >>> if 'v1.0' in folio.snapshots:
+            ...     print("Snapshot exists")
+        """
+        return SnapshotAccessor(self)
+
+    def list_snapshots(self) -> list[Dict[str, Any]]:
+        """List all snapshots with their metadata.
+
+        Returns:
+            List of snapshot metadata dicts with name, timestamp, description, tags
+
+        Examples:
+            >>> snapshots = folio.list_snapshots()
+            >>> for snap in snapshots:
+            ...     print(f"{snap['name']}: {snap['description']}")
+        """
+        result = []
+        for name, meta in self._snapshots.items():
+            snapshot_info = {
+                "name": name,
+                "timestamp": meta.get("timestamp", ""),
+                "description": meta.get("description"),
+                "tags": meta.get("tags", []),
+                "num_items": len(meta.get("item_versions", {})),
+            }
+            result.append(snapshot_info)
+
+        # Sort by timestamp (newest first)
+        result.sort(key=lambda x: x["timestamp"], reverse=True)
+        return result
+
+    def delete_snapshot(self, name: str, cleanup_orphans: bool = False) -> Self:
+        """Delete a snapshot.
+
+        Removes the snapshot from the registry and updates items' in_snapshots lists.
+        Optionally cleans up orphaned item versions that are no longer referenced.
+
+        Args:
+            name: Snapshot name to delete
+            cleanup_orphans: If True, delete item versions no longer in any snapshot
+
+        Returns:
+            Self for method chaining
+
+        Raises:
+            KeyError: If snapshot doesn't exist
+
+        Examples:
+            >>> folio.delete_snapshot('experimental-v5')
+            >>> folio.delete_snapshot('old-snapshot', cleanup_orphans=True)
+        """
+        self._check_read_only()
+
+        if name not in self._snapshots:
+            raise KeyError(f"Snapshot '{name}' not found")
+
+        # Remove from snapshots registry
+        del self._snapshots[name]
+
+        # Remove snapshot from all items' in_snapshots lists
+        for item in self._items.values():
+            if "in_snapshots" in item and name in item["in_snapshots"]:
+                item["in_snapshots"].remove(name)
+
+        # Also check snapshot versions
+        for item in self._snapshot_versions:
+            if "in_snapshots" in item and name in item["in_snapshots"]:
+                item["in_snapshots"].remove(name)
+
+        # Save manifests
+        self._save_snapshots()
+        self._save_items()
+
+        # Optionally cleanup orphaned versions
+        if cleanup_orphans:
+            self.cleanup_orphaned_versions()
+
+        return self
+
+    def compare_snapshots(self, snapshot1: str, snapshot2: str) -> Dict[str, Any]:
+        """Compare two snapshots.
+
+        Returns a dictionary showing differences between the two snapshots including:
+        - added_items: Items in snapshot2 but not snapshot1
+        - removed_items: Items in snapshot1 but not snapshot2
+        - modified_items: Items in both but with different versions
+        - shared_items: Items in both with same version
+        - metadata_changes: Metadata fields that changed (old_value, new_value)
+
+        Args:
+            snapshot1: First snapshot name
+            snapshot2: Second snapshot name
+
+        Returns:
+            Dictionary with comparison results
+
+        Raises:
+            KeyError: If either snapshot doesn't exist
+
+        Examples:
+            >>> diff = folio.compare_snapshots('v1.0', 'v2.0')
+            >>> print(diff['modified_items'])
+            ['classifier', 'config']
+            >>> print(diff['metadata_changes']['accuracy'])
+            (0.89, 0.91)
+        """
+        if snapshot1 not in self._snapshots:
+            raise KeyError(f"Snapshot '{snapshot1}' not found")
+        if snapshot2 not in self._snapshots:
+            raise KeyError(f"Snapshot '{snapshot2}' not found")
+
+        snap1_meta = self._snapshots[snapshot1]
+        snap2_meta = self._snapshots[snapshot2]
+
+        snap1_items = snap1_meta.get("item_versions", {})
+        snap2_items = snap2_meta.get("item_versions", {})
+
+        # Find item differences
+        snap1_names = set(snap1_items.keys())
+        snap2_names = set(snap2_items.keys())
+
+        added_items = sorted(snap2_names - snap1_names)
+        removed_items = sorted(snap1_names - snap2_names)
+
+        # Check for modified items (different versions)
+        shared_names = snap1_names & snap2_names
+        modified_items = []
+        unchanged_items = []
+
+        for item_name in shared_names:
+            if snap1_items[item_name] != snap2_items[item_name]:
+                modified_items.append(item_name)
+            else:
+                unchanged_items.append(item_name)
+
+        # Compare metadata
+        snap1_metadata = snap1_meta.get("metadata_snapshot", {})
+        snap2_metadata = snap2_meta.get("metadata_snapshot", {})
+
+        metadata_changes = {}
+        all_metadata_keys = set(snap1_metadata.keys()) | set(snap2_metadata.keys())
+
+        for key in all_metadata_keys:
+            val1 = snap1_metadata.get(key)
+            val2 = snap2_metadata.get(key)
+            if val1 != val2:
+                metadata_changes[key] = (val1, val2)
+
+        return {
+            "added_items": added_items,
+            "removed_items": removed_items,
+            "modified_items": sorted(modified_items),
+            "shared_items": sorted(unchanged_items),
+            "metadata_changes": metadata_changes,
+        }
+
+    def diff_from_snapshot(self, snapshot: Optional[str] = None) -> Dict[str, Any]:
+        """Compare current state to a snapshot.
+
+        This is useful for seeing what has changed since a snapshot was created,
+        similar to 'git status' showing changes since last commit.
+
+        Args:
+            snapshot: Snapshot name to compare to. If None, uses most recent snapshot.
+
+        Returns:
+            Dictionary with comparison results including:
+            - snapshot_name: The snapshot being compared to
+            - added_items: Items in current state but not in snapshot
+            - removed_items: Items in snapshot but not in current state
+            - modified_items: Items in both but with different checksums/versions
+            - unchanged_items: Items in both with same checksum/version
+            - metadata_changes: Metadata fields that changed
+
+        Raises:
+            KeyError: If snapshot doesn't exist
+            ValueError: If no snapshots exist and snapshot=None
+
+        Examples:
+            >>> # Compare to last snapshot
+            >>> diff = folio.diff_from_snapshot()
+            >>> print(f"Modified: {diff['modified_items']}")
+            ['classifier', 'config']
+
+            >>> # Compare to specific snapshot
+            >>> diff = folio.diff_from_snapshot('v1.0')
+            >>> print(f"Added since v1.0: {diff['added_items']}")
+            ['new_feature']
+        """
+        # Get snapshot to compare to
+        if snapshot is None:
+            # Use most recent snapshot
+            if not self._snapshots:
+                raise ValueError("No snapshots exist. Create a snapshot first.")
+            snapshots_list = self.list_snapshots()
+            if not snapshots_list:
+                raise ValueError("No snapshots exist. Create a snapshot first.")
+            snapshot = snapshots_list[-1]["name"]
+
+        if snapshot not in self._snapshots:
+            raise KeyError(f"Snapshot '{snapshot}' not found")
+
+        snapshot_meta = self._snapshots[snapshot]
+        snapshot_items = snapshot_meta.get("item_versions", {})
+
+        # Get current item versions (name -> checksum mapping)
+        current_items = {
+            item["name"]: item["checksum"] for item in self._items.values()
+        }
+
+        # Find item differences
+        snapshot_names = set(snapshot_items.keys())
+        current_names = set(current_items.keys())
+
+        added_items = sorted(current_names - snapshot_names)
+        removed_items = sorted(snapshot_names - current_names)
+
+        # Check for modified items (different checksums)
+        shared_names = snapshot_names & current_names
+        modified_items = []
+        unchanged_items = []
+
+        for item_name in shared_names:
+            # Compare checksums
+            snapshot_checksum = snapshot_items[item_name]
+            current_checksum = current_items[item_name]
+
+            if snapshot_checksum != current_checksum:
+                modified_items.append(item_name)
+            else:
+                unchanged_items.append(item_name)
+
+        # Compare metadata
+        snapshot_metadata = snapshot_meta.get("metadata_snapshot", {})
+        current_metadata = dict(self.metadata)
+
+        metadata_changes = {}
+        all_metadata_keys = set(snapshot_metadata.keys()) | set(current_metadata.keys())
+
+        for key in all_metadata_keys:
+            # Skip internal metadata fields
+            if key in ("created_at", "updated_at", "_datafolio"):
+                continue
+
+            val_snapshot = snapshot_metadata.get(key)
+            val_current = current_metadata.get(key)
+            if val_snapshot != val_current:
+                metadata_changes[key] = (val_snapshot, val_current)
+
+        return {
+            "snapshot_name": snapshot,
+            "added_items": added_items,
+            "removed_items": removed_items,
+            "modified_items": sorted(modified_items),
+            "unchanged_items": sorted(unchanged_items),
+            "metadata_changes": metadata_changes,
+        }
+
+    def cleanup_orphaned_versions(self, dry_run: bool = False) -> list[str]:
+        """Delete item versions not in any snapshot and not current.
+
+        An item version is orphaned if:
+        - It's not the current version of any item
+        - It's not referenced by any snapshot
+
+        Args:
+            dry_run: If True, return what would be deleted without deleting
+
+        Returns:
+            List of deleted filenames (or would-be deleted if dry_run=True)
+
+        Examples:
+            >>> # See what would be deleted
+            >>> orphans = folio.cleanup_orphaned_versions(dry_run=True)
+            >>> print(f"Would delete {len(orphans)} files")
+            >>>
+            >>> # Actually delete
+            >>> deleted = folio.cleanup_orphaned_versions()
+            >>> print(f"Deleted {len(deleted)} orphaned versions")
+        """
+        from datafolio.base.registry import get_handler
+
+        deleted_files = []
+
+        # Find orphaned snapshot versions
+        orphaned_versions = []
+        for item in self._snapshot_versions:
+            in_snapshots = item.get("in_snapshots", [])
+            # If not in any snapshot, it's orphaned
+            if not in_snapshots:
+                orphaned_versions.append(item)
+
+        # Delete orphaned versions
+        for item in orphaned_versions:
+            item_name = item.get("name")
+            item_type = item.get("item_type")
+            filename = item.get("filename")
+
+            if not dry_run and filename:
+                # Delete the physical file directly by filename
+                # Don't use handler.delete() as that would delete from _items
+                try:
+                    # Determine storage directory
+                    if item_type == "included_table":
+                        subdir = TABLES_DIR
+                    elif item_type in ("model", "sklearn_model", "pytorch_model"):
+                        subdir = MODELS_DIR
+                    else:
+                        subdir = ARTIFACTS_DIR
+
+                    # Delete the snapshot version file
+                    file_path = self._storage.join_paths(
+                        self._bundle_dir, subdir, filename
+                    )
+                    if self._storage.exists(file_path):
+                        self._storage.delete_file(file_path)
+                except Exception:
+                    # Deletion failed - still remove from manifest
+                    pass
+
+                # Remove from snapshot_versions list
+                self._snapshot_versions.remove(item)
+
+            if filename:
+                deleted_files.append(filename)
+
+        # Save updated manifest if we deleted anything
+        if not dry_run and deleted_files:
+            self._save_items()
+
+        return deleted_files
+
+    def restore_snapshot(self, snapshot: str, confirm: bool = False) -> Self:
+        """Restore working state to snapshot (DESTRUCTIVE).
+
+        This operation:
+        - Replaces current metadata with snapshot metadata
+        - Sets current item versions to match snapshot
+        - Removes items added after snapshot
+        - Does NOT delete the snapshot itself
+
+        WARNING: This is a destructive operation that overwrites current state.
+
+        Args:
+            snapshot: Snapshot name to restore
+            confirm: Must be True to proceed (safety check)
+
+        Returns:
+            Self for method chaining
+
+        Raises:
+            ValueError: If confirm=False
+            KeyError: If snapshot doesn't exist
+
+        Examples:
+            >>> folio.restore_snapshot('v1.0', confirm=True)
+            >>> # Working state now matches v1.0 snapshot
+        """
+        self._check_read_only()
+
+        if not confirm:
+            raise ValueError(
+                "restore_snapshot requires confirm=True as this is a destructive operation"
+            )
+
+        if snapshot not in self._snapshots:
+            raise KeyError(f"Snapshot '{snapshot}' not found")
+
+        snap_meta = self._snapshots[snapshot]
+        snap_items = snap_meta.get("item_versions", {})
+        snap_metadata = snap_meta.get("metadata_snapshot", {})
+
+        # Restore metadata
+        self.metadata.clear()
+        self.metadata.update(snap_metadata)
+
+        # Find items to remove (items not in snapshot)
+        current_item_names = set(self._items.keys())
+        snapshot_item_names = set(snap_items.keys())
+        items_to_remove = current_item_names - snapshot_item_names
+
+        # Remove items not in snapshot
+        for item_name in items_to_remove:
+            item = self._items[item_name]
+            item_type = item.get("item_type")
+
+            # Delete physical file
+            from datafolio.base.registry import get_handler
+
+            try:
+                handler = get_handler(item_type)
+                handler.delete(folio=self, name=item_name)
+            except (KeyError, Exception):
+                pass
+
+            del self._items[item_name]
+
+        # For items in snapshot, restore them from snapshot version if needed
+        for item_name, snapshot_checksum in snap_items.items():
+            if item_name in self._items:
+                current_item = self._items[item_name]
+                current_checksum = current_item.get("checksum", "")
+
+                # If different version, need to restore from snapshot version
+                if current_checksum != snapshot_checksum:
+                    # Find the snapshot version item
+                    snapshot_item = None
+                    for item in self._snapshot_versions:
+                        if item.get("name") == item_name and snapshot in item.get(
+                            "in_snapshots", []
+                        ):
+                            snapshot_item = item
+                            break
+
+                    if snapshot_item:
+                        # Copy snapshot version file to current location
+                        from datafolio.base.registry import get_handler
+
+                        try:
+                            handler = get_handler(snapshot_item["item_type"])
+
+                            # Get paths
+                            snapshot_filename = snapshot_item.get("filename")
+                            current_filename = current_item.get("filename")
+
+                            if snapshot_filename and current_filename:
+                                # Determine storage directory
+                                item_type = snapshot_item.get("item_type", "")
+                                if item_type == "included_table":
+                                    subdir = TABLES_DIR
+                                elif item_type in (
+                                    "model",
+                                    "sklearn_model",
+                                    "pytorch_model",
+                                ):
+                                    subdir = MODELS_DIR
+                                else:
+                                    subdir = ARTIFACTS_DIR
+
+                                # Copy snapshot file to current file
+                                snapshot_path = self._storage.join_paths(
+                                    self._bundle_dir, subdir, snapshot_filename
+                                )
+                                current_path = self._storage.join_paths(
+                                    self._bundle_dir, subdir, current_filename
+                                )
+
+                                if self._storage.exists(snapshot_path):
+                                    # Delete current file and copy snapshot file
+                                    if self._storage.exists(current_path):
+                                        self._storage.delete_file(current_path)
+                                    self._storage.copy_file(snapshot_path, current_path)
+
+                                    # Update item metadata to match snapshot
+                                    current_item.update(
+                                        {
+                                            "checksum": snapshot_item.get("checksum"),
+                                            "num_rows": snapshot_item.get("num_rows"),
+                                            "num_cols": snapshot_item.get("num_cols"),
+                                            "dtypes": snapshot_item.get("dtypes"),
+                                            "columns": snapshot_item.get("columns"),
+                                        }
+                                    )
+                        except (KeyError, Exception):
+                            # Handler not found or restore failed
+                            pass
+
+        # Save updated state
+        self._save_items()
+        self._save_metadata()
+
+        return self
+
+    @classmethod
+    def load_snapshot(
+        cls,
+        bundle_dir: Union[str, Path],
+        snapshot: str,
+    ) -> "DataFolio":
+        """Load a DataFolio in snapshot state.
+
+        Creates a DataFolio instance configured to access items and metadata
+        as they existed at snapshot time. Snapshots are always read-only
+        to preserve snapshot immutability.
+
+        Args:
+            bundle_dir: Path to bundle directory
+            snapshot: Snapshot name to load
+
+        Returns:
+            Read-only DataFolio instance in snapshot state
+
+        Raises:
+            KeyError: If snapshot doesn't exist
+
+        Examples:
+            Load snapshot for inspection:
+            >>> paper = DataFolio.load_snapshot('research/exp', 'paper-v1')
+            >>> model = paper.get_model('classifier')
+            >>> print(paper.metadata['accuracy'])
+            >>> paper.add_table('new', df)  # Error: snapshots are always read-only
+
+            Compare multiple snapshots:
+            >>> v1 = DataFolio.load_snapshot('path', 'v1.0')
+            >>> v2 = DataFolio.load_snapshot('path', 'v2.0')
+            >>> print(f"v1: {v1.metadata['accuracy']}, v2: {v2.metadata['accuracy']}")
+        """
+        # Load folio as read-only (snapshots are always immutable)
+        folio = cls(bundle_dir, read_only=True)
+
+        # Verify snapshot exists
+        if snapshot not in folio._snapshots:
+            raise KeyError(f"Snapshot '{snapshot}' not found in bundle")
+
+        # Set snapshot mode
+        folio._in_snapshot_mode = True
+        folio._loaded_snapshot = snapshot
+
+        # Get snapshot metadata
+        snapshot_meta = folio._snapshots[snapshot]
+
+        # Replace current metadata with snapshot metadata
+        # Use dict methods directly to bypass read-only checks during setup
+        snapshot_metadata = snapshot_meta.get("metadata_snapshot", {})
+        dict.clear(folio.metadata)
+        dict.update(folio.metadata, snapshot_metadata)
+
+        # Get snapshot item versions (using checksums as version identifiers)
+        snapshot_versions = snapshot_meta.get("item_versions", {})
+
+        # For each item in snapshot, point to that version
+        for item_name, checksum in snapshot_versions.items():
+            # Find the item with this name and checksum
+            item = folio._find_item_by_checksum(item_name, checksum)
+            if item:
+                folio._items[item_name] = item
+
+        # Remove items not in snapshot
+        current_items = list(folio._items.keys())
+        for item_name in current_items:
+            if item_name not in snapshot_versions:
+                del folio._items[item_name]
+
+        return folio
+
+    def get_snapshot(self, snapshot: str) -> "DataFolio":
+        """Get a snapshot from this folio as a new DataFolio instance.
+
+        Convenience method for loading a snapshot when you already have a folio.
+        Equivalent to DataFolio.load_snapshot(self._bundle_dir, snapshot).
+        Snapshots are always read-only to preserve immutability.
+
+        Args:
+            snapshot: Snapshot name to load
+
+        Returns:
+            Read-only DataFolio instance in snapshot state
+
+        Raises:
+            KeyError: If snapshot doesn't exist
+
+        Examples:
+            >>> folio = DataFolio('experiments/classifier')
+            >>> baseline = folio.get_snapshot('v1.0-baseline')
+            >>> assert baseline.metadata['accuracy'] == 0.89
+            >>> assert baseline.read_only  # Snapshots are always read-only
+            >>>
+            >>> # Compare current state to snapshot
+            >>> current_acc = folio.metadata['accuracy']
+            >>> baseline_acc = baseline.metadata['accuracy']
+            >>> print(f"Improvement: {current_acc - baseline_acc:.2%}")
+        """
+        return self.__class__.load_snapshot(self._bundle_dir, snapshot)
+
+    def export_snapshot(
+        self,
+        snapshot: str,
+        target_path: Union[str, Path],
+        *,
+        include_snapshot_metadata: bool = True,
+    ) -> "DataFolio":
+        """Export a snapshot to a clean, standalone bundle.
+
+        Creates a new DataFolio bundle containing only the items and metadata
+        from the specified snapshot. This is useful for:
+        - Sharing a specific snapshot with collaborators
+        - Creating a clean bundle for deployment
+        - Starting fresh without version history
+
+        Args:
+            snapshot: Name of snapshot to export
+            target_path: Path for new bundle (must not exist)
+            include_snapshot_metadata: If True, adds snapshot info to new bundle's
+                metadata under '_source_snapshot' key (default: True)
+
+        Returns:
+            New DataFolio instance at target_path
+
+        Raises:
+            KeyError: If snapshot doesn't exist
+            ValueError: If target_path already exists
+
+        Examples:
+            Export a baseline snapshot for sharing:
+            >>> folio = DataFolio('experiments/classifier')
+            >>> baseline = folio.export_snapshot('v1.0-baseline', 'shared/baseline')
+            >>> # New bundle contains only v1.0-baseline state, no history
+
+            Export for deployment:
+            >>> production = folio.export_snapshot('production-v2', 'deploy/v2')
+            >>> # Clean bundle ready for deployment
+
+            Export without metadata reference:
+            >>> clean = folio.export_snapshot(
+            ...     'v1.0',
+            ...     'clean-export',
+            ...     include_snapshot_metadata=False
+            ... )
+        """
+        from pathlib import Path
+
+        target_path = Path(target_path)
+
+        # Check target doesn't exist
+        if target_path.exists():
+            raise ValueError(f"Target path already exists: {target_path}")
+
+        # Verify snapshot exists
+        if snapshot not in self._snapshots:
+            raise KeyError(f"Snapshot '{snapshot}' not found")
+
+        # Load the snapshot
+        snapshot_folio = self.get_snapshot(snapshot)
+
+        # Create new empty bundle
+        new_folio = self.__class__(target_path)
+
+        # Copy metadata from snapshot
+        snapshot_metadata = dict(snapshot_folio.metadata)
+
+        # Remove internal metadata
+        for key in ["created_at", "updated_at", "_datafolio"]:
+            snapshot_metadata.pop(key, None)
+
+        # Add snapshot metadata to new bundle
+        if include_snapshot_metadata:
+            snapshot_info = self.get_snapshot_info(snapshot)
+            snapshot_metadata["_source_snapshot"] = {
+                "name": snapshot,
+                "source_bundle": str(Path(self._bundle_dir).resolve()),
+                "timestamp": snapshot_info["timestamp"],
+                "description": snapshot_info.get("description"),
+                "tags": snapshot_info.get("tags"),
+            }
+
+        # Update new folio's metadata
+        new_folio.metadata.update(snapshot_metadata)
+
+        # Copy all items from snapshot
+        for item_name in snapshot_folio._items.keys():
+            item_meta = snapshot_folio._items[item_name]
+            item_type = item_meta["item_type"]
+
+            # Get the handler for this item type
+            from datafolio.base.registry import get_handler
+
+            handler = get_handler(item_type)
+
+            if handler:
+                # Load the item from snapshot
+                item_data = handler.get(snapshot_folio, item_name)
+
+                # Add to new folio - handler writes data and returns metadata
+                new_metadata = handler.add(new_folio, item_name, item_data)
+
+                # Initialize snapshot fields for new items
+                if "in_snapshots" not in new_metadata:
+                    new_metadata["in_snapshots"] = []
+                if "is_current" not in new_metadata:
+                    new_metadata["is_current"] = True
+
+                # Store metadata
+                new_folio._items[item_name] = new_metadata
+
+        # Save items manifest
+        new_folio._save_items()
+
+        return new_folio
+
+    def _find_item_by_checksum(
+        self, name: str, checksum: str
+    ) -> Optional[Dict[str, Any]]:
+        """Find item by name and checksum.
+
+        Args:
+            name: Item name
+            checksum: Checksum to match
+
+        Returns:
+            Item metadata dict or None if not found
+        """
+        # Check current items
+        if name in self._items:
+            item = self._items[name]
+            if item.get("checksum") == checksum:
+                return item
+
+        # Check snapshot versions
+        for item in self._snapshot_versions:
+            if item.get("name") == name and item.get("checksum") == checksum:
+                return item
+
+        return None
+
+    def get_snapshot_info(self, snapshot: str) -> Dict[str, Any]:
+        """Get detailed information about a snapshot.
+
+        Returns the full snapshot metadata including item versions, metadata state,
+        git info, environment info, and execution context.
+
+        Args:
+            snapshot: Snapshot name
+
+        Returns:
+            Dictionary containing all snapshot metadata
+
+        Raises:
+            KeyError: If snapshot doesn't exist
+
+        Examples:
+            >>> info = folio.get_snapshot_info('v1.0')
+            >>> print(info['description'])
+            'Baseline model'
+            >>> print(info['git']['commit'])
+            'a3f2b8c'
+            >>> print(info['metadata_snapshot']['accuracy'])
+            0.89
+        """
+        if snapshot not in self._snapshots:
+            raise KeyError(f"Snapshot '{snapshot}' not found")
+
+        # Return a copy of the snapshot metadata
+        return dict(self._snapshots[snapshot])
+
+    def reproduce_instructions(self, snapshot: Optional[str] = None) -> str:
+        """Generate human-readable instructions to reproduce a snapshot.
+
+        Creates a formatted guide with steps to:
+        1. Restore code (git checkout)
+        2. Restore environment (Python version, dependencies)
+        3. Run execution command
+        4. Verify expected results
+
+        Args:
+            snapshot: Snapshot name. If None and no snapshots exist, raises error.
+
+        Returns:
+            Formatted string with reproduction steps
+
+        Raises:
+            KeyError: If snapshot doesn't exist
+            ValueError: If snapshot is None and no snapshots exist
+
+        Examples:
+            >>> instructions = folio.reproduce_instructions('v1.0')
+            >>> print(instructions)
+            To reproduce snapshot 'v1.0':
+
+            1. Restore code:
+               git checkout a3f2b8c
+
+            2. Restore environment:
+               python --version  # Should be 3.11.5
+               uv sync
+
+            3. Run training:
+               python train.py --config config.json
+
+            4. Expected results:
+               - accuracy: 0.89
+               - f1_score: 0.87
+        """
+        if snapshot is None:
+            if not self._snapshots:
+                raise ValueError(
+                    "No snapshot specified and no snapshots exist. "
+                    "Create a snapshot first or specify a snapshot name."
+                )
+            # Use the most recent snapshot
+            snapshots = self.list_snapshots()
+            if snapshots:
+                snapshot = snapshots[0]["name"]
+            else:
+                raise ValueError("No snapshots available")
+
+        if snapshot not in self._snapshots:
+            raise KeyError(f"Snapshot '{snapshot}' not found")
+
+        snap_meta = self._snapshots[snapshot]
+        lines = []
+
+        # Header
+        lines.append(f"To reproduce snapshot '{snapshot}':")
+        if snap_meta.get("description"):
+            lines.append(f"Description: {snap_meta['description']}")
+        lines.append("")
+
+        step = 1
+
+        # Git restore
+        if "git" in snap_meta:
+            git_info = snap_meta["git"]
+            lines.append(f"{step}. Restore code:")
+            if git_info.get("remote"):
+                lines.append(f"   git clone {git_info['remote']}")
+                lines.append(f"   cd <repository>")
+            commit = git_info.get("commit_short") or git_info.get("commit", "")[:7]
+            lines.append(f"   git checkout {commit}")
+            if git_info.get("dirty"):
+                lines.append("   Note: Original snapshot had uncommitted changes")
+            lines.append("")
+            step += 1
+
+        # Environment restore
+        if "environment" in snap_meta:
+            env_info = snap_meta["environment"]
+            lines.append(f"{step}. Restore environment:")
+            if "python_version" in env_info:
+                py_ver = env_info["python_version"]
+                lines.append(f"   python --version  # Should be {py_ver}")
+            lines.append("   uv sync  # Or: pip install -r requirements.txt")
+            lines.append("")
+            step += 1
+
+        # Execution
+        if "execution" in snap_meta:
+            exec_info = snap_meta["execution"]
+            lines.append(f"{step}. Run execution:")
+            if "entry_point" in exec_info:
+                lines.append(f"   {exec_info['entry_point']}")
+            if "working_dir" in exec_info:
+                lines.append(f"   # Working directory: {exec_info['working_dir']}")
+            lines.append("")
+            step += 1
+
+        # Expected results
+        if "metadata_snapshot" in snap_meta:
+            metadata = snap_meta["metadata_snapshot"]
+            if metadata:
+                lines.append(f"{step}. Expected results:")
+                # Show up to 5 metadata fields
+                for i, (key, value) in enumerate(list(metadata.items())[:5]):
+                    # Skip internal fields
+                    if key in ("created_at", "updated_at"):
+                        continue
+                    lines.append(f"   - {key}: {value}")
+                if len(metadata) > 5:
+                    lines.append(f"   ... and {len(metadata) - 5} more fields")
+                lines.append("")
+
+        return "\n".join(lines)
+
+    # ==================== Snapshot Version Management ====================
+
+    def _is_in_snapshots(self, name: str) -> bool:
+        """Check if an item is referenced by any snapshots.
+
+        Args:
+            name: Item name to check
+
+        Returns:
+            True if item exists and is referenced by at least one snapshot
+        """
+        if name not in self._items:
+            return False
+
+        item = self._items[name]
+        in_snapshots = item.get("in_snapshots", [])
+        return len(in_snapshots) > 0
+
+    def _rename_to_snapshot_version(self, name: str) -> None:
+        """Rename current item file to snapshot version format.
+
+        When an item is in snapshots and needs to be overwritten, this method:
+        1. Renames the current file from <name>.<ext> to <name>@<snapshot>.<ext>
+        2. Uses the first snapshot name from in_snapshots list
+        3. Updates the item metadata to mark it as not current
+
+        Args:
+            name: Item name to rename
+
+        Raises:
+            ValueError: If item not found or not in any snapshots
+        """
+        if name not in self._items:
+            raise ValueError(f"Item '{name}' not found")
+
+        item = self._items[name]
+        in_snapshots = item.get("in_snapshots", [])
+
+        if not in_snapshots:
+            raise ValueError(f"Item '{name}' is not in any snapshots")
+
+        # Get the first snapshot name to use in filename
+        first_snapshot = in_snapshots[0]
+
+        # Get current filename and create snapshot version filename
+        current_filename = item.get("filename")
+        if not current_filename:
+            # For referenced tables, no file to rename
+            return
+
+        # Create snapshot version filename: <name>@<snapshot>.<ext>
+        # Extract extension from current filename
+        from pathlib import Path
+
+        file_path = Path(current_filename)
+        name_part = file_path.stem
+        ext_part = file_path.suffix
+
+        # Create new filename with @snapshot
+        snapshot_filename = f"{name_part}@{first_snapshot}{ext_part}"
+
+        # Get storage subdir based on item type
+        item_type = item.get("item_type", "")
+        if item_type == "included_table":
+            subdir = TABLES_DIR
+        elif item_type in ("model", "sklearn_model", "pytorch_model"):
+            subdir = MODELS_DIR
+        elif item_type in ("artifact", "numpy_array", "json_data", "timestamp"):
+            subdir = ARTIFACTS_DIR
+        else:
+            # Referenced tables don't have files to rename
+            return
+
+        # Build full paths
+        old_path = self._storage.join_paths(self._bundle_dir, subdir, current_filename)
+        new_path = self._storage.join_paths(self._bundle_dir, subdir, snapshot_filename)
+
+        # Rename the file
+        if self._storage.exists(old_path):
+            # For cloud storage, this is copy + delete
+            # For local storage, this is os.rename
+            self._storage.copy_file(old_path, new_path)
+            self._storage.delete_file(old_path)
+
+        # Update item metadata
+        item["filename"] = snapshot_filename
+        item["is_current"] = False
+
+    def _handle_copy_on_write(self, name: str) -> None:
+        """Handle copy-on-write logic when overwriting an item.
+
+        If the item exists and is in snapshots:
+        1. Rename current file to @snapshot version
+        2. Move old metadata to _snapshot_versions list
+        3. Caller will create new current entry in _items
+
+        Args:
+            name: Item name being added/overwritten
+        """
+        if self._is_in_snapshots(name):
+            # Item is in snapshots - need to preserve it
+            self._rename_to_snapshot_version(name)
+
+            # Move old item from _items to _snapshot_versions
+            old_item = self._items[name]
+            self._snapshot_versions.append(old_item)
+            # Note: caller will add new item to _items with same name
 
     # ==================== Auto-Refresh Methods ====================
 
@@ -1164,6 +2792,48 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         return DataAccessor(self)
 
     @property
+    def read_only(self) -> bool:
+        """Check if folio is in read-only mode.
+
+        Returns:
+            True if folio is read-only, False otherwise
+
+        Examples:
+            >>> folio = DataFolio('path', read_only=True)
+            >>> folio.read_only
+            True
+        """
+        return self._read_only
+
+    @property
+    def in_snapshot_mode(self) -> bool:
+        """Check if folio was loaded from a snapshot.
+
+        Returns:
+            True if loaded via load_snapshot(), False otherwise
+
+        Examples:
+            >>> snapshot = DataFolio.load_snapshot('path', 'v1.0')
+            >>> snapshot.in_snapshot_mode
+            True
+        """
+        return self._in_snapshot_mode
+
+    @property
+    def loaded_snapshot(self) -> Optional[str]:
+        """Get name of loaded snapshot, or None.
+
+        Returns:
+            Snapshot name if loaded via load_snapshot(), None otherwise
+
+        Examples:
+            >>> snapshot = DataFolio.load_snapshot('path', 'v1.0')
+            >>> snapshot.loaded_snapshot
+            'v1.0'
+        """
+        return self._loaded_snapshot
+
+    @property
     def path(self) -> str:
         """Get the absolute path to the bundle directory.
 
@@ -1195,7 +2865,17 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         """Return string representation of DataFolio."""
         contents = self.list_contents()
         total_items = sum(len(v) for v in contents.values())
-        return f"DataFolio(bundle_dir='{self._bundle_dir}', items={total_items})"
+        snapshot_count = len(self._snapshots)
+
+        repr_str = f"DataFolio(bundle_dir='{self._bundle_dir}', items={total_items}, snapshots={snapshot_count})"
+
+        if self._read_only:
+            repr_str += " [READ-ONLY]"
+
+        if self._in_snapshot_mode and self._loaded_snapshot:
+            repr_str += f" [snapshot: {self._loaded_snapshot}]"
+
+        return repr_str
 
     def describe(
         self,
@@ -1209,12 +2889,46 @@ For more information, see the [datafolio documentation](https://github.com/ceese
 
         See DisplayFormatter.describe() for full documentation.
         """
+        # Build header for snapshot mode
+        header_lines = []
+
+        if self._in_snapshot_mode and self._loaded_snapshot:
+            snapshot_meta = self._snapshots.get(self._loaded_snapshot, {})
+            header_lines.append(f"Snapshot: {self._loaded_snapshot}")
+            timestamp = snapshot_meta.get("timestamp", "")
+            if timestamp:
+                header_lines.append(f"Created: {timestamp}")
+            desc = snapshot_meta.get("description", "")
+            if desc:
+                header_lines.append(f"Description: {desc}")
+            tags = snapshot_meta.get("tags", [])
+            if tags:
+                header_lines.append(f"Tags: {', '.join(tags)}")
+            header_lines.append("")  # Blank line
+
+        if self._read_only:
+            header_lines.append("[READ-ONLY MODE]")
+            header_lines.append("")  # Blank line
+
+        # Get main description from formatter
         formatter = DisplayFormatter(self)
-        return formatter.describe(
-            return_string=return_string,
+        main_description = formatter.describe(
+            return_string=True,  # Always get as string so we can prepend header
             show_empty=show_empty,
             max_metadata_fields=max_metadata_fields,
         )
+
+        # Combine header and main description
+        if header_lines:
+            full_description = "\n".join(header_lines) + main_description
+        else:
+            full_description = main_description
+
+        if return_string:
+            return full_description
+        else:
+            print(full_description)
+            return None
 
     def reference_table(
         self,
@@ -1278,6 +2992,11 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             table_format=table_format,
         )
 
+        # Validate item name
+        from datafolio.utils import validate_item_name
+
+        validate_item_name(name)
+
         # Add extra fields not handled by base handler
         if num_rows is not None:
             metadata["num_rows"] = num_rows
@@ -1285,6 +3004,12 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             metadata["version"] = version
         if code is not None:
             metadata["code"] = code
+
+        # Initialize snapshot fields for new items
+        if "in_snapshots" not in metadata:
+            metadata["in_snapshots"] = []
+        if "is_current" not in metadata:
+            metadata["is_current"] = True
 
         self._items[name] = metadata
 
@@ -1335,11 +3060,24 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             ...     models=['classifier'],
             ...     code='pred = model.predict(X_test)')
         """
-        # Validate inputs
-        if not overwrite and name in self._items:
-            raise ValueError(
-                f"Item '{name}' already exists in this DataFolio. Use overwrite=True to replace it."
-            )
+        self._check_read_only()
+
+        # Validate item name
+        from datafolio.utils import validate_item_name
+
+        validate_item_name(name)
+
+        # Handle overwriting logic
+        if name in self._items:
+            if self._is_in_snapshots(name):
+                # Item is in snapshots - must preserve it via copy-on-write
+                self._handle_copy_on_write(name)
+            elif not overwrite:
+                # Item exists but not in snapshots - respect overwrite flag
+                raise ValueError(
+                    f"Item '{name}' already exists in this DataFolio. Use overwrite=True to replace it."
+                )
+            # else: overwrite=True and not in snapshots, so just replace it
 
         # Get handler and delegate storage + metadata creation
         registry = get_registry()
@@ -1359,6 +3097,12 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             metadata["models"] = models
         if code is not None:
             metadata["code"] = code
+
+        # Initialize snapshot fields for new items
+        if "in_snapshots" not in metadata:
+            metadata["in_snapshots"] = []
+        if "is_current" not in metadata:
+            metadata["is_current"] = True
 
         self._items[name] = metadata
 
@@ -1620,13 +3364,25 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             self, name, model, description=description, inputs=inputs
         )
 
+        # Validate item name
+        from datafolio.utils import validate_item_name
+
+        validate_item_name(name)
+
         # Add extra fields not handled by base handler
         if hyperparameters is not None:
             metadata["hyperparameters"] = hyperparameters
         if code is not None:
             metadata["code"] = code
 
+        # Initialize snapshot fields for new items
+        if "in_snapshots" not in metadata:
+            metadata["in_snapshots"] = []
+        if "is_current" not in metadata:
+            metadata["is_current"] = True
+
         self._items[name] = metadata
+
         self._save_items()
 
         return self
@@ -1851,6 +3607,11 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             save_class=save_class,
         )
 
+        # Validate item name
+        from datafolio.utils import validate_item_name
+
+        validate_item_name(name)
+
         # Add extra fields not handled by base handler
         if hyperparameters is not None:
             metadata["hyperparameters"] = hyperparameters
@@ -1859,7 +3620,14 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         if save_class:
             metadata["has_serialized_class"] = True
 
+        # Initialize snapshot fields for new items
+        if "in_snapshots" not in metadata:
+            metadata["in_snapshots"] = []
+        if "is_current" not in metadata:
+            metadata["is_current"] = True
+
         self._items[name] = metadata
+
         self._save_items()
 
         return self
@@ -1968,11 +3736,23 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         # Handler builds metadata and copies file
         metadata = handler.add(self, name, str(path), description=description)
 
+        # Validate item name
+        from datafolio.utils import validate_item_name
+
+        validate_item_name(name)
+
         # Add extra fields not handled by base handler
         if category is not None:
             metadata["category"] = category
 
+        # Initialize snapshot fields for new items
+        if "in_snapshots" not in metadata:
+            metadata["in_snapshots"] = []
+        if "is_current" not in metadata:
+            metadata["is_current"] = True
+
         self._items[name] = metadata
+
         self._save_items()
 
         return self
@@ -2072,9 +3852,20 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             inputs=inputs,
         )
 
+        # Validate item name
+        from datafolio.utils import validate_item_name
+
+        validate_item_name(name)
+
         # Add extra fields not handled by base handler
         if code is not None:
             metadata["code"] = code
+
+        # Initialize snapshot fields for new items
+        if "in_snapshots" not in metadata:
+            metadata["in_snapshots"] = []
+        if "is_current" not in metadata:
+            metadata["is_current"] = True
 
         self._items[name] = metadata
 
@@ -2175,11 +3966,23 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         # Handler builds metadata and writes data
         metadata = handler.add(self, name, data, description=description, inputs=inputs)
 
+        # Validate item name
+        from datafolio.utils import validate_item_name
+
+        validate_item_name(name)
+
         # Add extra fields not handled by base handler
         if code is not None:
             metadata["code"] = code
 
+        # Initialize snapshot fields for new items
+        if "in_snapshots" not in metadata:
+            metadata["in_snapshots"] = []
+        if "is_current" not in metadata:
+            metadata["is_current"] = True
+
         self._items[name] = metadata
+
         self._save_items()
 
         return self
@@ -2291,11 +4094,23 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             self, name, timestamp, description=description, inputs=inputs
         )
 
+        # Validate item name
+        from datafolio.utils import validate_item_name
+
+        validate_item_name(name)
+
         # Add extra fields not handled by base handler
         if code is not None:
             metadata["code"] = code
 
+        # Initialize snapshot fields for new items
+        if "in_snapshots" not in metadata:
+            metadata["in_snapshots"] = []
+        if "is_current" not in metadata:
+            metadata["is_current"] = True
+
         self._items[name] = metadata
+
         self._save_items()
 
         return self
@@ -2391,6 +4206,8 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             External reference:
             >>> folio.add_data('raw', reference='s3://bucket/data.parquet')
         """
+        self._check_read_only()
+
         # Validate inputs
         if data is None and reference is None:
             raise ValueError("Must provide either 'data' or 'reference' parameter")
@@ -2422,6 +4239,11 @@ For more information, see the [datafolio documentation](https://github.com/ceese
                 f"Use explicit add_*() methods for more control."
             )
 
+        # Validate item name
+        from datafolio.utils import validate_item_name
+
+        validate_item_name(name)
+
         # Use handler to add data
         metadata = handler.add(
             folio=self,
@@ -2431,7 +4253,15 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             inputs=kwargs.get("inputs"),
             **kwargs,
         )
+
+        # Initialize snapshot fields for new items
+        if "in_snapshots" not in metadata:
+            metadata["in_snapshots"] = []
+        if "is_current" not in metadata:
+            metadata["is_current"] = True
+
         self._items[name] = metadata
+
         self._save_items()
 
         return self
@@ -2523,6 +4353,8 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             Delete without warnings:
             >>> folio.delete('item', warn_dependents=False)
         """
+        self._check_read_only()
+
         import warnings
 
         # Convert single name to list for uniform processing
