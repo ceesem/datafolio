@@ -15,7 +15,13 @@ Traditional experiment tracking solutions can be heavyweight, require servers, o
 ## Installation
 
 ```bash
+# Basic installation
 pip install datafolio
+
+# With optional features
+pip install datafolio[polars]  # Polars DataFrame support
+pip install datafolio[query]   # SQL queries and chunked iteration
+pip install datafolio[all]     # All optional features
 ```
 
 This installs both the Python library and the `datafolio` CLI tool.
@@ -98,12 +104,14 @@ DataFolio supports multiple data types, each optimized for its use case:
 
 | Type | Examples | Storage Format |
 |------|----------|---------------|
-| **Tables** | DataFrames | Parquet |
+| **Tables** | pandas/Polars DataFrames | Parquet |
 | **Numpy Arrays** | Embeddings, tensors | `.npy` |
 | **JSON** | Configs, metrics, lists | `.json` |
 | **Models** | sklearn, PyTorch | `.joblib`, `.pth` |
 | **Artifacts** | Images, PDFs, any file | Original format |
 | **References** | External data (S3, etc.) | Metadata only |
+
+> **Tip:** For advanced table features like SQL queries, chunked iteration, and Polars support, see the [Advanced Tables Guide](advanced-tables.md).
 
 ### The Universal `add_data()` Method
 

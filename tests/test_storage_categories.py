@@ -39,6 +39,7 @@ class TestItemTypeMapping:
         """Test that all standard item types have category mappings."""
         expected_types = {
             "included_table",
+            "polars_table",
             "referenced_table",
             "numpy_array",
             "json_data",
@@ -52,6 +53,7 @@ class TestItemTypeMapping:
     def test_table_types_mapped_correctly(self):
         """Test that table types map to TABLES category."""
         assert ITEM_TYPE_TO_CATEGORY["included_table"] == StorageCategory.TABLES
+        assert ITEM_TYPE_TO_CATEGORY["polars_table"] == StorageCategory.TABLES
         assert ITEM_TYPE_TO_CATEGORY["referenced_table"] == StorageCategory.TABLES
 
     def test_model_types_mapped_correctly(self):

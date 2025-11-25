@@ -53,6 +53,7 @@ class StorageCategory(Enum):
 ITEM_TYPE_TO_CATEGORY: Dict[str, StorageCategory] = {
     # Tables
     "included_table": StorageCategory.TABLES,
+    "polars_table": StorageCategory.TABLES,
     "referenced_table": StorageCategory.TABLES,
     # Arrays and JSON
     "numpy_array": StorageCategory.ARTIFACTS,

@@ -55,7 +55,7 @@ class ItemProxy:
         item_type = item.get("item_type")
 
         # Dispatch to appropriate getter
-        if item_type in ("referenced_table", "included_table"):
+        if item_type in ("referenced_table", "included_table", "polars_table"):
             return self._folio.get_table(self._name)
         elif item_type == "numpy_array":
             return self._folio.get_numpy(self._name)

@@ -144,6 +144,151 @@ class PandasHandler(BaseHandler):
         return folio._storage.read_parquet(filepath, **kwargs)
 
 
+class PolarsHandler(BaseHandler):
+    """Handler for Polars DataFrames (included in bundle).
+
+    This handler manages the full lifecycle of Polars DataFrame storage:
+    - Serializes DataFrames to Parquet format (compatible with pandas)
+    - Stores metadata (shape, columns, dtypes)
+    - Handles lineage tracking
+    - Deserializes back to Polars DataFrame on read
+    - Supports conversion between Polars and pandas formats
+
+    Examples:
+        >>> from datafolio.base.registry import register_handler
+        >>> handler = PolarsHandler()
+        >>> register_handler(handler)
+        >>>
+        >>> # Handler is used automatically by DataFolio
+        >>> import polars as pl
+        >>> df = pl.DataFrame({"a": [1, 2, 3]})
+        >>> folio.add_table('data', df)  # Uses PolarsHandler internally
+    """
+
+    @property
+    def item_type(self) -> str:
+        """Return item type identifier."""
+        return "polars_table"
+
+    def can_handle(self, data: Any) -> bool:
+        """Check if data is a Polars DataFrame.
+
+        Args:
+            data: Data to check
+
+        Returns:
+            True if data is a Polars DataFrame
+        """
+        try:
+            import polars as pl
+
+            return isinstance(data, pl.DataFrame)
+        except ImportError:
+            return False
+
+    def add(
+        self,
+        folio: "DataFolio",
+        name: str,
+        data: Any,
+        description: Optional[str] = None,
+        inputs: Optional[list[str]] = None,
+        table_format: str = "parquet",
+        **kwargs,
+    ) -> Dict[str, Any]:
+        """Add Polars DataFrame to folio.
+
+        Writes the DataFrame to storage and builds complete metadata including:
+        - Basic info: filename, row/column counts
+        - Schema: column names and dtypes
+        - Lineage: inputs and description
+        - Timestamps: creation time
+        - Library: 'polars' marker for proper deserialization
+
+        Args:
+            folio: DataFolio instance
+            name: Item name
+            data: Polars DataFrame to store
+            description: Optional description
+            inputs: Optional lineage inputs
+            table_format: Format for storage (default: 'parquet')
+            **kwargs: Additional arguments (currently unused)
+
+        Returns:
+            Complete metadata dict for this table
+
+        Raises:
+            TypeError: If data is not a Polars DataFrame
+        """
+        import polars as pl
+
+        if not isinstance(data, pl.DataFrame):
+            raise TypeError(f"Expected Polars DataFrame, got {type(data).__name__}")
+
+        # Build filename
+        extension = get_file_extension(table_format)
+        filename = f"{name}{extension}"
+        subdir = self.get_storage_subdir()
+        filepath = folio._storage.join_paths(folio._bundle_dir, subdir, filename)
+
+        # Write data to storage (convert to pandas for compatibility with storage backend)
+        pandas_df = data.to_pandas()
+        folio._storage.write_parquet(filepath, pandas_df)
+
+        # Calculate checksum
+        checksum = folio._storage.calculate_checksum(filepath)
+
+        # Build comprehensive metadata
+        metadata = {
+            "name": name,
+            "item_type": self.item_type,
+            "filename": filename,
+            "table_format": table_format,
+            "dataframe_library": "polars",  # Mark as polars for proper deserialization
+            "is_directory": False,
+            "checksum": checksum,
+            "num_rows": len(data),
+            "num_cols": len(data.columns),
+            "columns": list(data.columns),
+            "dtypes": {col: str(dtype) for col, dtype in data.schema.items()},
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+        # Add optional fields
+        if description:
+            metadata["description"] = description
+        if inputs:
+            metadata["inputs"] = inputs
+
+        return metadata
+
+    def get(self, folio: "DataFolio", name: str, **kwargs) -> Any:
+        """Load Polars DataFrame from folio.
+
+        Args:
+            folio: DataFolio instance
+            name: Item name
+            **kwargs: Additional arguments passed to read_parquet
+
+        Returns:
+            Polars DataFrame
+
+        Raises:
+            KeyError: If item doesn't exist
+        """
+        import polars as pl
+
+        item = folio._items[name]
+        subdir = self.get_storage_subdir()
+        filepath = folio._storage.join_paths(
+            folio._bundle_dir, subdir, item["filename"]
+        )
+
+        # Read as pandas first (using storage backend), then convert to polars
+        pandas_df = folio._storage.read_parquet(filepath, **kwargs)
+        return pl.from_pandas(pandas_df)
+
+
 class ReferenceTableHandler(BaseHandler):
     """Handler for external table references (not stored in bundle).
 

@@ -4,6 +4,84 @@
 
 ### Major Features
 
+#### Advanced Table Features
+
+**Polars DataFrame Support**
+- **First-class Polars integration**: DataFolio now automatically detects and handles Polars DataFrames
+  - New `PolarsHandler` for seamless Polars DataFrame storage and retrieval
+  - Type preservation: Polars in → Polars out, pandas in → pandas out
+  - Shared Parquet storage format ensures pandas/Polars interoperability
+  - Auto-detection via handler registry - no manual specification needed
+  - Full metadata tracking including dtypes and dataframe library
+- **Optional dependency**: Install with `pip install datafolio[polars]` or `pip install datafolio[all]`
+
+**SQL Queries with DuckDB**
+- **New `query_table()` method**: Query tables using SQL without loading full data into memory
+  - Powered by DuckDB for efficient Parquet file queries
+  - Use `$table` placeholder for automatic file path substitution
+  - Supports complex SQL: WHERE, JOIN, GROUP BY, ORDER BY, LIMIT, OFFSET
+  - Memory-efficient: Only matching rows loaded into memory
+  - Return type options: `return_type="pandas"` or `return_type="polars"`
+- **Example**: `folio.query_table('data', 'SELECT * FROM $table WHERE value > 1000 LIMIT 100')`
+- **Optional dependency**: Install with `pip install datafolio[query]` or `pip install datafolio[all]`
+
+**Chunked Iteration**
+- **New `iter_table()` method**: Memory-efficient iteration over large tables
+  - Generator-based: Process data in chunks without loading entire table
+  - Column selection: `columns=['col1', 'col2']` to load only needed columns
+  - WHERE filtering: `where='value > 1000'` to filter rows during iteration
+  - Configurable chunk size: `chunk_size=10000` (default)
+  - Return type options: `return_type="pandas"` or `return_type="polars"`
+  - Uses DuckDB OFFSET/LIMIT for efficient chunking
+- **Example**:
+  ```python
+  for chunk in folio.iter_table('large_data', chunk_size=10000, where='status = "active"'):
+      process(chunk)
+  ```
+- **Requires DuckDB**: Install with `pip install datafolio[query]` or `pip install datafolio[all]`
+
+**Convenient Query Parameters in `get_table()`**
+- **Enhanced `get_table()` method**: New convenience parameters for common operations
+  - `limit`: Return only first N rows (e.g., `limit=100`)
+  - `offset`: Skip first N rows (e.g., `offset=1000`)
+  - `where`: Simple filter without SQL boilerplate (e.g., `where='value > 9000'`)
+  - Type preservation: Automatically returns pandas or Polars based on storage
+  - Can be combined: `get_table('data', where='active', limit=100, offset=50)`
+- **Example**: `folio.get_table('data', where="status = 'active'", limit=100)`
+- **Backward compatible**: Original behavior preserved when no parameters specified
+- **Requires DuckDB**: Install with `pip install datafolio[query]` or `pip install datafolio[all]`
+- **Limitation**: Only works with included tables (not referenced tables)
+
+**Table Utility Methods**
+- **New `get_table_path()` method**: Get filesystem path to table's Parquet file
+  - Enables integration with external tools (Ibis, DuckDB, Polars)
+  - Returns absolute path to Parquet file
+  - Works with both pandas and Polars tables
+- **New `table_info()` method**: Inspect table metadata without loading data
+  - Uses PyArrow to read Parquet metadata efficiently
+  - Returns row count, column count, file size, schema
+  - Helps decide processing strategy (load vs iterate)
+- **New `preview_table()` method**: Quick preview of first N rows
+  - Convenience wrapper around `get_table(limit=n)`
+  - Default: 10 rows
+  - Type preservation (pandas/Polars)
+- **Example**: `path = folio.get_table_path('data'); df = pl.read_parquet(path)`
+
+**Documentation**
+- **New Advanced Tables Guide** (`docs/guides/advanced-tables.md`):
+  - Complete documentation for Polars support
+  - SQL query examples and patterns
+  - Chunked iteration use cases
+  - Convenience parameter reference
+  - Table utility methods documentation
+  - Performance tips and best practices
+  - **Ibis integration guide**: Recommended patterns for complex operations
+    - Joins across multiple DataFolio tables
+    - Window functions and pivots
+    - Complete customer analytics example
+    - When to use each tool (DataFolio vs Ibis)
+- Updated main documentation with installation options and feature highlights
+
 #### Generic Data Interface
 - **New `add_data()` method**: Universal data addition method that automatically detects data type and routes to the appropriate handler
   - Supports DataFrames, numpy arrays, dicts, lists, scalars, and external references

@@ -7,6 +7,10 @@ DataFolio helps you organize, version, and track your data science experiments b
 ## Features
 
 - **Universal Data Management**: Single `add_data()` method automatically handles DataFrames, numpy arrays, dicts, lists, and scalars
+- **Polars Support**: First-class support for Polars DataFrames with automatic type detection and preservation
+- **SQL Queries**: Query tables using SQL via DuckDB without loading full data into memory
+- **Chunked Iteration**: Memory-efficient iteration over large tables with filtering and column selection
+- **Convenient Query Parameters**: Simple `limit`, `offset`, and `where` parameters for common operations
 - **Model Support**: Save and load scikit-learn and PyTorch models with full metadata tracking
 - **Data Lineage**: Track inputs and dependencies between datasets and models
 - **External References**: Point to data stored externally (S3, local paths) without copying
@@ -55,7 +59,13 @@ folio.delete('temp_data')
 ## Installation
 
 ```bash
+# Basic installation
 pip install datafolio
+
+# With optional features
+pip install datafolio[polars]  # Polars DataFrame support
+pip install datafolio[query]   # SQL queries via DuckDB
+pip install datafolio[all]     # All optional features
 ```
 
 ## Core Concepts
@@ -73,10 +83,12 @@ data = folio.get_data('my_data')  # Returns original type
 ```
 
 Supported data types:
-- **DataFrames** (`pd.DataFrame`) → stored as Parquet
+- **DataFrames** (`pd.DataFrame`, `pl.DataFrame`) → stored as Parquet
 - **Numpy arrays** (`np.ndarray`) → stored as `.npy`
 - **JSON data** (`dict`, `list`, `int`, `float`, `str`, `bool`, `None`) → stored as JSON
 - **External references** → metadata only, data stays in original location
+
+> **New!** DataFolio now supports Polars DataFrames and provides SQL queries, chunked iteration, and convenient query parameters for memory-efficient data access. See the [Advanced Tables Guide](guides/advanced-tables.md) for details.
 
 ### Multi-Instance Access
 
@@ -104,22 +116,45 @@ All read operations (`describe()`, `list_contents()`, `get_*()` methods, and `fo
 
 #### Tables (DataFrames)
 
-Store pandas DataFrames as Parquet files:
+Store pandas or Polars DataFrames as Parquet files:
 
 ```python
-# Add table
+import pandas as pd
+import polars as pl
+
+# Add pandas table
 folio.add_table('training_data', df,
     description='Training dataset with 10k samples',
     inputs=['raw_data'])
+
+# Add Polars table (automatically detected)
+df_polars = pl.DataFrame({'x': [1, 2, 3]})
+folio.add_table('polars_data', df_polars)
 
 # Reference external data (no copy)
 folio.reference_table('raw_data',
     reference='s3://bucket/data.parquet',
     description='Original raw data')
 
-# Retrieve
-df = folio.get_table('training_data')
+# Retrieve (returns correct type)
+df = folio.get_table('training_data')  # pandas
+df_pl = folio.get_table('polars_data')  # Polars
+
+# Query with SQL (memory-efficient)
+result = folio.query_table('training_data',
+    'SELECT * FROM $table WHERE value > 1000 LIMIT 100')
+
+# Iterate in chunks
+for chunk in folio.iter_table('training_data', chunk_size=5000):
+    process(chunk)
+
+# Convenient query parameters
+preview = folio.get_table('training_data', limit=10)
+filtered = folio.get_table('training_data', where='value > 1000')
+page2 = folio.get_table('training_data', limit=100, offset=100)
 ```
+
+See the [Advanced Tables Guide](guides/advanced-tables.md) for complete details on Polars support, SQL queries, and chunked iteration.
 
 #### Numpy Arrays
 

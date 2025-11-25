@@ -336,6 +336,9 @@ class DataFolio:
         # Snapshot-related state (Phase 1)
         self._snapshots: Dict[str, Any] = {}  # Snapshot name → metadata
 
+        # DuckDB connection for query features (lazy initialization)
+        self._duckdb_con = None
+
         # Check if path is an existing bundle (has metadata.json or items.json)
         path_str = str(path)
         metadata_path = self._storage.join_paths(path_str, METADATA_FILE)
@@ -3079,9 +3082,15 @@ For more information, see the [datafolio documentation](https://github.com/ceese
                 )
             # else: overwrite=True and not in snapshots, so just replace it
 
-        # Get handler and delegate storage + metadata creation
-        registry = get_registry()
-        handler = registry.get("included_table")
+        # Get handler using auto-detection (supports both pandas and polars)
+        from datafolio.base.registry import detect_handler
+
+        handler = detect_handler(data)
+
+        # Fallback to pandas handler if no specific handler found (backward compatibility)
+        if handler is None:
+            registry = get_registry()
+            handler = registry.get("included_table")
 
         # Handler builds metadata and writes data
         metadata = handler.add(
@@ -3111,31 +3120,65 @@ For more information, see the [datafolio documentation](https://github.com/ceese
 
         return self
 
-    def get_table(self, name: str) -> Any:  # Returns pandas.DataFrame
+    def get_table(
+        self,
+        name: str,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        where: Optional[str] = None,
+    ) -> Any:  # Returns pandas.DataFrame or polars.DataFrame
         """Get a table by name (works for both included and referenced).
 
         For included tables, reads from bundle directory.
         For referenced tables, reads from the specified external path.
         Tables are NOT cached - always read fresh from disk.
 
+        Optional query parameters (limit, offset, where) use DuckDB for efficient
+        filtering and are only supported for included tables (parquet-backed).
+
         Args:
             name: Name of the table
+            limit: Optional maximum number of rows to return (requires DuckDB)
+            offset: Optional number of rows to skip (requires DuckDB)
+            where: Optional SQL WHERE clause for filtering (without the WHERE keyword).
+                  Example: "value > 100 AND category = 'A'" (requires DuckDB)
 
         Returns:
-            pandas DataFrame
+            pandas DataFrame or Polars DataFrame (depending on how it was stored)
 
         Raises:
             KeyError: If table name doesn't exist
+            ValueError: If query parameters used on referenced table
             ImportError: If reading from cloud requires missing dependencies
+            ImportError: If query parameters used but DuckDB not installed
             FileNotFoundError: If referenced file doesn't exist
 
         Examples:
+            Basic usage:
             >>> folio = DataFolio('experiments', prefix='test')
             >>> import pandas as pd
             >>> df = pd.DataFrame({'a': [1, 2, 3]})
             >>> folio.add_table('test', df)
             >>> retrieved = folio.get_table('test')
             >>> assert len(retrieved) == 3
+
+            With limit:
+            >>> df = pd.DataFrame({'value': range(1000)})
+            >>> folio.add_table('data', df)
+            >>> subset = folio.get_table('data', limit=10)
+            >>> assert len(subset) == 10
+
+            With offset and limit (pagination):
+            >>> page2 = folio.get_table('data', limit=10, offset=10)
+            >>> assert len(page2) == 10
+
+            With filter:
+            >>> filtered = folio.get_table('data', where="value > 990")
+            >>> assert len(filtered) == 9
+
+            Combined:
+            >>> result = folio.get_table('data', where="value < 100", limit=5)
+            >>> assert len(result) == 5
         """
         # Auto-refresh if bundle was updated externally
         self._refresh_if_needed()
@@ -3148,13 +3191,505 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         item_type = item.get("item_type")
 
         # Validate it's a table
-        if item_type not in ("included_table", "referenced_table"):
+        if item_type not in ("included_table", "polars_table", "referenced_table"):
             raise ValueError(f"Item '{name}' is not a table (type: {item_type})")
 
-        # Get handler and delegate to it
-        registry = get_registry()
-        handler = registry.get(item_type)
-        return handler.get(self, name)
+        # Check if query parameters are used
+        has_query_params = limit is not None or offset is not None or where is not None
+
+        if has_query_params:
+            # Query parameters only work with included tables
+            if item_type == "referenced_table":
+                raise ValueError(
+                    "Query parameters (limit, offset, where) are not supported "
+                    "for referenced tables. Use query_table() or iter_table() for "
+                    "parquet-backed tables only."
+                )
+
+            # Use query interface for efficient filtering
+            # Build SQL query
+            where_clause = f"WHERE {where}" if where else ""
+            limit_clause = f"LIMIT {limit}" if limit is not None else ""
+            offset_clause = f"OFFSET {offset}" if offset is not None else ""
+
+            query = (
+                f"SELECT * FROM $table {where_clause} {limit_clause} {offset_clause}"
+            )
+
+            # Determine return type based on how table was stored
+            return_type = "polars" if item_type == "polars_table" else "pandas"
+
+            return self.query_table(name, query, return_type=return_type)
+        else:
+            # No query parameters - use normal handler path
+            registry = get_registry()
+            handler = registry.get(item_type)
+            return handler.get(self, name)
+
+    def _get_duckdb_connection(self):
+        """Get or create lazy DuckDB connection.
+
+        Returns:
+            DuckDB connection object
+
+        Raises:
+            ImportError: If duckdb is not installed
+        """
+        if self._duckdb_con is None:
+            try:
+                import duckdb
+            except ImportError:
+                raise ImportError(
+                    "DuckDB is required for query operations. "
+                    "Install with: pip install duckdb"
+                )
+            self._duckdb_con = duckdb.connect(":memory:")
+        return self._duckdb_con
+
+    def query_table(
+        self,
+        name: str,
+        query: str,
+        return_type: str = "pandas",
+    ) -> Any:
+        """Query a table using SQL without loading it fully into memory.
+
+        Uses DuckDB to execute SQL queries directly on Parquet files,
+        enabling memory-efficient filtering, aggregation, and joins.
+
+        Args:
+            name: Table name to query
+            query: SQL query string. Use '$table' as placeholder for the table.
+                  Example: "SELECT * FROM $table WHERE value > 100"
+            return_type: Output format - "pandas" or "polars" (default: "pandas")
+
+        Returns:
+            Query result as pandas DataFrame or Polars DataFrame
+
+        Raises:
+            KeyError: If table doesn't exist
+            ValueError: If table is not an included table (only parquet-backed tables)
+            ImportError: If duckdb is not installed
+            ImportError: If return_type="polars" but polars is not installed
+
+        Examples:
+            >>> folio = DataFolio('experiments/test')
+            >>> df = pd.DataFrame({'value': range(1000), 'category': ['A', 'B'] * 500})
+            >>> folio.add_table('data', df)
+            >>>
+            >>> # Filter without loading full table
+            >>> result = folio.query_table('data',
+            ...     "SELECT * FROM $table WHERE value > 900")
+            >>> len(result)  # Much smaller than original
+            99
+            >>>
+            >>> # Aggregation
+            >>> summary = folio.query_table('data',
+            ...     "SELECT category, COUNT(*) as count FROM $table GROUP BY category")
+            >>>
+            >>> # Return as Polars
+            >>> result_pl = folio.query_table('data',
+            ...     "SELECT * FROM $table LIMIT 10",
+            ...     return_type="polars")
+        """
+        # Auto-refresh if needed
+        self._refresh_if_needed()
+
+        # Check table exists
+        if name not in self._items:
+            raise KeyError(f"Table '{name}' not found in DataFolio")
+
+        item = self._items[name]
+        item_type = item.get("item_type")
+
+        # Only support included tables (parquet-backed)
+        if item_type not in ("included_table", "polars_table"):
+            raise ValueError(
+                f"Table '{name}' must be an included table (parquet-backed). "
+                f"Got type: {item_type}. "
+                "Query operations are only supported for tables stored in the bundle."
+            )
+
+        # Get table file path
+        subdir = "tables"
+        filepath = self._storage.join_paths(self._bundle_dir, subdir, item["filename"])
+
+        # Get DuckDB connection
+        con = self._get_duckdb_connection()
+
+        # Replace $table placeholder with actual query
+        query_sql = query.replace("$table", f"read_parquet('{filepath}')")
+
+        # Execute query
+        result = con.execute(query_sql).df()
+
+        # Convert to requested format
+        if return_type == "pandas":
+            return result
+        elif return_type == "polars":
+            try:
+                import polars as pl
+
+                return pl.from_pandas(result)
+            except ImportError:
+                raise ImportError(
+                    "Polars is required for return_type='polars'. "
+                    "Install with: pip install polars"
+                )
+        else:
+            raise ValueError(
+                f"Invalid return_type: '{return_type}'. Must be 'pandas' or 'polars'."
+            )
+
+    def iter_table(
+        self,
+        name: str,
+        chunk_size: int = 10000,
+        columns: Optional[list[str]] = None,
+        where: Optional[str] = None,
+        return_type: str = "pandas",
+    ):
+        """Iterate over table in chunks without loading it fully into memory.
+
+        Uses DuckDB with OFFSET/LIMIT to yield chunks, enabling processing
+        of tables larger than available RAM.
+
+        Args:
+            name: Table name to iterate over
+            chunk_size: Number of rows per chunk (default: 10000)
+            columns: Optional list of column names to select. If None, selects all columns.
+            where: Optional SQL WHERE clause for filtering (without the WHERE keyword).
+                  Example: "value > 100 AND category = 'A'"
+            return_type: Output format - "pandas" or "polars" (default: "pandas")
+
+        Yields:
+            Chunks of the table as pandas or Polars DataFrames
+
+        Raises:
+            KeyError: If table doesn't exist
+            ValueError: If table is not an included table (only parquet-backed tables)
+            ValueError: If chunk_size <= 0
+            ImportError: If duckdb is not installed
+            ImportError: If return_type="polars" but polars is not installed
+
+        Examples:
+            >>> folio = DataFolio('experiments/test')
+            >>> df = pd.DataFrame({'value': range(100000), 'category': ['A', 'B'] * 50000})
+            >>> folio.add_table('data', df)
+            >>>
+            >>> # Process large table in chunks
+            >>> for chunk in folio.iter_table('data', chunk_size=10000):
+            ...     result = process_chunk(chunk)  # Process without loading all data
+            >>>
+            >>> # Select specific columns
+            >>> for chunk in folio.iter_table('data', columns=['value']):
+            ...     print(chunk['value'].mean())
+            >>>
+            >>> # Filter while iterating
+            >>> for chunk in folio.iter_table('data', where="value > 50000"):
+            ...     print(len(chunk))  # Only gets filtered rows
+            >>>
+            >>> # Return as Polars chunks
+            >>> for chunk in folio.iter_table('data', chunk_size=5000, return_type='polars'):
+            ...     assert isinstance(chunk, pl.DataFrame)
+        """
+        # Validate chunk_size
+        if chunk_size <= 0:
+            raise ValueError(f"chunk_size must be positive, got {chunk_size}")
+
+        # Auto-refresh if needed
+        self._refresh_if_needed()
+
+        # Check table exists
+        if name not in self._items:
+            raise KeyError(f"Table '{name}' not found in DataFolio")
+
+        item = self._items[name]
+        item_type = item.get("item_type")
+
+        # Only support included tables (parquet-backed)
+        if item_type not in ("included_table", "polars_table"):
+            raise ValueError(
+                f"Table '{name}' must be an included table (parquet-backed). "
+                f"Got type: {item_type}. "
+                "Iteration is only supported for tables stored in the bundle."
+            )
+
+        # Get table file path
+        subdir = "tables"
+        filepath = self._storage.join_paths(self._bundle_dir, subdir, item["filename"])
+
+        # Get DuckDB connection
+        con = self._get_duckdb_connection()
+
+        # Build column selection
+        if columns:
+            column_str = ", ".join(columns)
+        else:
+            column_str = "*"
+
+        # Build WHERE clause
+        where_clause = f"WHERE {where}" if where else ""
+
+        # Get total count for iteration (with filter if provided)
+        count_query = f"SELECT COUNT(*) FROM read_parquet('{filepath}') {where_clause}"
+        total_rows = con.execute(count_query).fetchone()[0]
+
+        # Iterate through chunks
+        offset = 0
+        while offset < total_rows:
+            # Build query with LIMIT and OFFSET
+            query = f"""
+                SELECT {column_str}
+                FROM read_parquet('{filepath}')
+                {where_clause}
+                LIMIT {chunk_size} OFFSET {offset}
+            """
+
+            # Execute and get chunk
+            chunk = con.execute(query).df()
+
+            # Convert to requested format
+            if return_type == "pandas":
+                yield chunk
+            elif return_type == "polars":
+                try:
+                    import polars as pl
+
+                    yield pl.from_pandas(chunk)
+                except ImportError:
+                    raise ImportError(
+                        "Polars is required for return_type='polars'. "
+                        "Install with: pip install polars"
+                    )
+            else:
+                raise ValueError(
+                    f"Invalid return_type: '{return_type}'. "
+                    "Must be 'pandas' or 'polars'."
+                )
+
+            offset += chunk_size
+
+    def get_table_path(self, name: str) -> str:
+        """Get the filesystem path to a table's Parquet file.
+
+        This is useful for integrating with external tools like Ibis, DuckDB,
+        or Polars that can read Parquet files directly.
+
+        Args:
+            name: Table name
+
+        Returns:
+            Absolute path to the Parquet file
+
+        Raises:
+            KeyError: If table doesn't exist
+            ValueError: If table is a referenced table (use get_data_path instead)
+
+        Examples:
+            >>> folio = DataFolio('experiments/test')
+            >>> df = pd.DataFrame({'x': [1, 2, 3]})
+            >>> folio.add_table('data', df)
+            >>>
+            >>> # Get path for external tools
+            >>> path = folio.get_table_path('data')
+            >>> print(path)
+            /path/to/experiments/test/tables/data.parquet
+            >>>
+            >>> # Use with Ibis
+            >>> import ibis
+            >>> con = ibis.duckdb.connect()
+            >>> table = con.read_parquet(path)
+            >>>
+            >>> # Use with Polars
+            >>> import polars as pl
+            >>> df_polars = pl.read_parquet(path)
+        """
+        # Auto-refresh if needed
+        self._refresh_if_needed()
+
+        # Check table exists
+        if name not in self._items:
+            raise KeyError(f"Table '{name}' not found in DataFolio")
+
+        item = self._items[name]
+        item_type = item.get("item_type")
+
+        # Only support included tables (parquet-backed)
+        if item_type == "referenced_table":
+            raise ValueError(
+                f"Table '{name}' is a referenced table. "
+                "Use get_data_path() to get the reference path instead."
+            )
+
+        if item_type not in ("included_table", "polars_table"):
+            raise ValueError(
+                f"'{name}' is not a table. Got type: {item_type}. "
+                "Use get_table_path() only for included tables."
+            )
+
+        # Build path to Parquet file
+        subdir = "tables"
+        filepath = self._storage.join_paths(self._bundle_dir, subdir, item["filename"])
+
+        return filepath
+
+    def table_info(self, name: str) -> dict[str, Any]:
+        """Get table metadata without loading the data.
+
+        Uses PyArrow to read Parquet metadata efficiently without loading
+        the full dataset into memory.
+
+        Args:
+            name: Table name
+
+        Returns:
+            Dictionary containing:
+                - num_rows: Number of rows
+                - num_columns: Number of columns
+                - size_bytes: File size in bytes
+                - size_mb: File size in megabytes
+                - columns: List of column names
+                - schema: PyArrow schema (if pyarrow available)
+
+        Raises:
+            KeyError: If table doesn't exist
+            ValueError: If table is not an included table
+            ImportError: If pyarrow is not installed
+
+        Examples:
+            >>> folio = DataFolio('experiments/test')
+            >>> df = pd.DataFrame({'value': range(100000)})
+            >>> folio.add_table('data', df)
+            >>>
+            >>> # Check table size before loading
+            >>> info = folio.table_info('data')
+            >>> print(f"Table has {info['num_rows']:,} rows, {info['size_mb']:.1f} MB")
+            Table has 100,000 rows, 0.4 MB
+            >>>
+            >>> # Decide processing strategy based on size
+            >>> if info['size_mb'] > 1000:
+            ...     # Use chunked iteration for large tables
+            ...     for chunk in folio.iter_table('data', chunk_size=10000):
+            ...         process(chunk)
+            ... else:
+            ...     # Load directly for small tables
+            ...     df = folio.get_table('data')
+        """
+        try:
+            import pyarrow.parquet as pq
+        except ImportError:
+            raise ImportError(
+                "PyArrow is required for table_info(). "
+                "Install with: pip install pyarrow"
+            )
+
+        # Auto-refresh if needed
+        self._refresh_if_needed()
+
+        # Check table exists
+        if name not in self._items:
+            raise KeyError(f"Table '{name}' not found in DataFolio")
+
+        item = self._items[name]
+        item_type = item.get("item_type")
+
+        # Only support included tables (parquet-backed)
+        if item_type not in ("included_table", "polars_table"):
+            raise ValueError(
+                f"Table '{name}' must be an included table. "
+                f"Got type: {item_type}. "
+                "table_info() is only supported for parquet-backed tables."
+            )
+
+        # Get table file path
+        filepath = self.get_table_path(name)
+
+        # Read Parquet metadata
+        parquet_file = pq.ParquetFile(filepath)
+        metadata = parquet_file.metadata
+
+        # Get file size
+        import os
+
+        file_size = os.path.getsize(filepath)
+
+        # Return info dictionary
+        return {
+            "num_rows": metadata.num_rows,
+            "num_columns": metadata.num_columns,
+            "size_bytes": file_size,
+            "size_mb": file_size / (1024 * 1024),
+            "columns": parquet_file.schema.names,
+            "schema": parquet_file.schema,
+        }
+
+    def preview_table(
+        self,
+        name: str,
+        n: int = 10,
+        return_type: Optional[str] = None,
+    ):
+        """Preview first N rows of table without loading full dataset.
+
+        This is a convenience method that uses get_table() with limit parameter
+        for efficient preview of table contents.
+
+        Args:
+            name: Table name
+            n: Number of rows to preview (default: 10)
+            return_type: Override return type ('pandas' or 'polars').
+                        If None, uses the table's stored type.
+
+        Returns:
+            DataFrame with first n rows (pandas or Polars)
+
+        Raises:
+            KeyError: If table doesn't exist
+            ValueError: If table is a referenced table
+            ImportError: If required libraries not installed
+
+        Examples:
+            >>> folio = DataFolio('experiments/test')
+            >>> df = pd.DataFrame({'value': range(100000)})
+            >>> folio.add_table('data', df)
+            >>>
+            >>> # Quick preview
+            >>> preview = folio.preview_table('data', n=5)
+            >>> print(preview)
+               value
+            0      0
+            1      1
+            2      2
+            3      3
+            4      4
+            >>>
+            >>> # Preview and check schema
+            >>> preview = folio.preview_table('data')
+            >>> print(preview.dtypes)
+            value    int64
+            dtype: object
+        """
+        # Use get_table with limit for efficient preview
+        # This will handle all validation and type conversion
+        if return_type is None:
+            # Auto-detect from storage
+            return self.get_table(name, limit=n)
+        else:
+            # Explicit return type - need to use query_table
+            item = self._items.get(name)
+            if not item:
+                raise KeyError(f"Table '{name}' not found in DataFolio")
+
+            item_type = item.get("item_type")
+            if item_type not in ("included_table", "polars_table"):
+                raise ValueError(
+                    f"Table '{name}' must be an included table. Got type: {item_type}"
+                )
+
+            # Build simple query
+            query = f"SELECT * FROM $table LIMIT {n}"
+            return self.query_table(name, query, return_type=return_type)
 
     def get_data_path(self, name: str) -> str:
         """Get the path to a referenced table.
@@ -4302,6 +4837,7 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         data_types = (
             "referenced_table",
             "included_table",
+            "polars_table",
             "numpy_array",
             "json_data",
             "timestamp",
