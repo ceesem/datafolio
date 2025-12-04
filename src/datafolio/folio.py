@@ -264,6 +264,9 @@ class DataFolio:
         metadata: Optional[Dict[str, Any]] = None,
         random_suffix: bool = False,
         read_only: bool = False,
+        cache_enabled: bool = False,
+        cache_dir: Optional[Union[str, Path]] = None,
+        cache_ttl: Optional[int] = None,
     ):
         """Initialize a new or open an existing DataFolio.
 
@@ -275,6 +278,9 @@ class DataFolio:
             metadata: Optional dictionary of analysis metadata (for new bundles)
             random_suffix: If True, append random suffix to bundle name (default: False)
             read_only: If True, prevent all write operations (default: False)
+            cache_enabled: If True, enable local caching for remote data (default: False)
+            cache_dir: Optional cache directory (default: ~/.datafolio_cache)
+            cache_ttl: Optional TTL override in seconds (default: 1800 = 30 minutes)
 
         Examples:
             Create new bundle with exact name:
@@ -301,6 +307,19 @@ class DataFolio:
             >>> folio = DataFolio('experiments/production-model', read_only=True)
             >>> model = folio.get_model('classifier')  # OK
             >>> folio.add_table('new', df)  # Error: read-only
+
+            Enable caching for cloud bundles (faster repeated access):
+            >>> folio = DataFolio('gs://bucket/experiment', cache_enabled=True)
+            >>> df = folio.get_table('data')  # Downloads and caches
+            >>> df = folio.get_table('data')  # Loads from cache (instant)
+
+            Custom cache configuration:
+            >>> folio = DataFolio(
+            ...     'gs://bucket/experiment',
+            ...     cache_enabled=True,
+            ...     cache_dir='/mnt/shared/cache',
+            ...     cache_ttl=3600  # 1 hour
+            ... )
         """
         # Read-only mode flag
         self._read_only = read_only
@@ -311,6 +330,12 @@ class DataFolio:
 
         # Storage backend for all I/O operations
         self._storage = StorageBackend()
+
+        # Cache manager (initialized after bundle_dir is set)
+        self._cache_enabled = cache_enabled
+        self._cache_manager: Optional["CacheManager"] = None
+        self._cache_dir = cache_dir
+        self._cache_ttl = cache_ttl
 
         # Unified items dictionary - current versions only (for fast lookup)
         self._items: Dict[str, Union[TableReference, IncludedTable, IncludedItem]] = {}
@@ -405,6 +430,20 @@ class DataFolio:
             self._initialize_bundle()
 
         self._cf = cloudfiles.CloudFiles(resolve_path(self._bundle_dir))
+
+        # Initialize cache manager if caching is enabled and bundle is remote
+        if self._cache_enabled and is_cloud_path(self._bundle_dir):
+            from datafolio.cache import CacheConfig, CacheManager
+
+            config = CacheConfig(
+                enabled=True,
+                cache_dir=Path(self._cache_dir) if self._cache_dir else None,
+            )
+            self._cache_manager = CacheManager(
+                bundle_path=self._bundle_dir,
+                config=config,
+                ttl_override=self._cache_ttl,
+            )
 
     # ==================== Well-factored I/O Helper Functions ====================
 
@@ -2516,6 +2555,88 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         if self._check_if_stale():
             self.refresh()
 
+    def _get_with_cache(self, name: str, handler_get_fn: callable) -> Any:
+        """Get an item with caching if enabled.
+
+        Args:
+            name: Item name
+            handler_get_fn: Function to call if cache miss (handler.get)
+
+        Returns:
+            Item data (from cache or remote)
+        """
+        # If caching not enabled or not a cloud bundle, use handler directly
+        if not self._cache_manager:
+            return handler_get_fn()
+
+        # Get item metadata
+        item = self._items[name]
+        item_type = item.get("item_type")
+        filename = item.get("filename")
+        remote_checksum = item.get("checksum")
+
+        # Define fetch function for cache manager
+        def fetch_from_remote():
+            # Read data from remote using handler
+            data = handler_get_fn()
+
+            # Serialize to bytes for caching
+            import tempfile
+            from pathlib import Path
+
+            with tempfile.NamedTemporaryFile(delete=False, suffix=filename) as tmp:
+                tmp_path = Path(tmp.name)
+
+            try:
+                # Write data to temp file using storage backend
+                if item_type == "included_table":
+                    self._storage.write_parquet(str(tmp_path), data)
+                elif item_type == "model":
+                    import joblib
+
+                    joblib.dump(data, tmp_path)
+                elif item_type in ("pytorch_model", "pytorch_state_dict"):
+                    import torch
+
+                    torch.save(data, tmp_path)
+                else:
+                    # For other types, try generic serialization
+                    import joblib
+
+                    joblib.dump(data, tmp_path)
+
+                # Read bytes
+                data_bytes = tmp_path.read_bytes()
+                return (data_bytes, item_type, filename)
+            finally:
+                tmp_path.unlink()
+
+        # Try to get from cache
+        cache_path = self._cache_manager.get(
+            name, remote_fetch_fn=fetch_from_remote, remote_checksum=remote_checksum
+        )
+
+        if cache_path is None:
+            # No cache, use handler directly
+            return handler_get_fn()
+
+        # Load from cache file
+        if item_type == "included_table":
+            return self._storage.read_parquet(str(cache_path))
+        elif item_type == "model":
+            import joblib
+
+            return joblib.load(cache_path)
+        elif item_type in ("pytorch_model", "pytorch_state_dict"):
+            import torch
+
+            return torch.load(cache_path, weights_only=False)
+        else:
+            # Generic deserialization
+            import joblib
+
+            return joblib.load(cache_path)
+
     def refresh(self) -> Self:
         """Explicitly refresh manifests from disk/cloud.
 
@@ -3155,7 +3276,8 @@ For more information, see the [datafolio documentation](https://github.com/ceese
 
         For included tables, reads from bundle directory.
         For referenced tables, reads from the specified external path.
-        Tables are NOT cached - always read fresh from disk.
+        If caching is enabled (cache_enabled=True), cloud-based tables are cached locally
+        for faster repeated access.
 
         Args:
             name: Name of the table
@@ -3190,10 +3312,10 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         if item_type not in ("included_table", "referenced_table"):
             raise ValueError(f"Item '{name}' is not a table (type: {item_type})")
 
-        # Get handler and delegate to it
+        # Get handler and delegate to it (with caching if enabled)
         registry = get_registry()
         handler = registry.get(item_type)
-        return handler.get(self, name)
+        return self._get_with_cache(name, lambda: handler.get(self, name))
 
     def get_data_path(self, name: str) -> str:
         """Get the path to a referenced table.
@@ -3489,7 +3611,8 @@ For more information, see the [datafolio documentation](https://github.com/ceese
     def get_sklearn(self, name: str) -> Any:
         """Get a scikit-learn style model by name.
 
-        Models are NOT cached - always read fresh from disk.
+        If caching is enabled (cache_enabled=True), cloud-based models are cached locally
+        for faster repeated access.
 
         Args:
             name: Name of the model
@@ -3514,12 +3637,12 @@ For more information, see the [datafolio documentation](https://github.com/ceese
                 f"Item '{name}' is not a sklearn model (type: {item.get('item_type')})"
             )
 
-        # Delegate to handler
+        # Delegate to handler (with caching if enabled)
         from datafolio.base.registry import get_registry
 
         registry = get_registry()
         handler = registry.get("model")
-        return handler.get(self, name)
+        return self._get_with_cache(name, lambda: handler.get(self, name))
 
     def get_model(self, name: str, **kwargs) -> Any:
         """Get a model by name with automatic type detection.
@@ -3528,7 +3651,8 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         and uses the appropriate loader. For fine-grained control, use
         get_sklearn() or get_pytorch().
 
-        Models are NOT cached - always read fresh from disk.
+        If caching is enabled (cache_enabled=True), cloud-based models are cached locally
+        for faster repeated access.
 
         Args:
             name: Name of the model
@@ -3680,6 +3804,7 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         """Get a PyTorch model by name.
 
         Can return either the state_dict only, or a reconstructed model.
+        Supports caching for cloud bundles when caching is enabled.
 
         Args:
             name: Name of the model
@@ -3721,12 +3846,19 @@ For more information, see the [datafolio documentation](https://github.com/ceese
                 f"Item '{name}' is not a PyTorch model (type: {item.get('item_type')})"
             )
 
-        # Delegate to handler
+        # Delegate to handler (with caching if enabled)
         from datafolio.base.registry import get_registry
 
         registry = get_registry()
         handler = registry.get("pytorch_model")
-        return handler.get(self, name, model_class=model_class, reconstruct=reconstruct)
+
+        # Use caching if available
+        return self._get_with_cache(
+            name,
+            lambda: handler.get(
+                self, name, model_class=model_class, reconstruct=reconstruct
+            ),
+        )
 
     def add_artifact(
         self,
@@ -4737,3 +4869,127 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             raise
 
         return new_folio
+
+    # Cache Management Methods
+
+    def cache_status(self, item_name: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Get cache status for an item or entire bundle.
+
+        Args:
+            item_name: Name of item to check. If None, returns overall cache stats.
+
+        Returns:
+            Dict with cache status information, or None if caching not enabled or item not found.
+            For specific items:
+                - cached: Whether item is cached
+                - cache_path: Path to cached file
+                - size_bytes: Size of cached file
+                - cached_at: Timestamp when cached
+                - last_accessed: Last access timestamp
+                - access_count: Number of times accessed
+                - ttl_remaining: Seconds until cache expires (None if no TTL)
+            For bundle-level (item_name=None):
+                - bundle_path: Original bundle path
+                - cache_dir: Cache directory path
+                - ttl_seconds: TTL in seconds
+                - cache_hits: Number of cache hits
+                - cache_misses: Number of cache misses
+                - cache_hit_rate: Hit rate (0.0-1.0)
+
+        Examples:
+            Check if a specific item is cached:
+            >>> status = folio.cache_status('my_table')
+            >>> if status and status['cached']:
+            ...     print(f"Cache expires in {status['ttl_remaining']} seconds")
+
+            Get overall cache statistics:
+            >>> stats = folio.cache_status()
+            >>> print(f"Cache hit rate: {stats['cache_hit_rate']:.1%}")
+        """
+        if not self._cache_manager:
+            return None
+
+        if item_name is None:
+            # Return bundle-level stats
+            return self._cache_manager.get_stats()
+        else:
+            # Return item-level status
+            return self._cache_manager.get_status(item_name)
+
+    def clear_cache(self, item_name: Optional[str] = None) -> None:
+        """Clear cached items.
+
+        Args:
+            item_name: Name of specific item to clear. If None, clears all cached items for this bundle.
+
+        Examples:
+            Clear a specific item:
+            >>> folio.clear_cache('my_table')
+
+            Clear entire cache:
+            >>> folio.clear_cache()
+        """
+        if not self._cache_manager:
+            return
+
+        if item_name is None:
+            self._cache_manager.clear_all()
+        else:
+            self._cache_manager.clear_item(item_name)
+
+    def invalidate_cache(self, item_name: str) -> None:
+        """Invalidate cache for an item without deleting the file.
+
+        This marks the cached item as invalid, forcing a re-fetch on next access,
+        but keeps the file on disk (useful for stale cache fallback).
+
+        Args:
+            item_name: Name of item to invalidate
+
+        Examples:
+            Force re-download on next access:
+            >>> folio.invalidate_cache('my_table')
+            >>> table = folio.get_table('my_table')  # Will re-download
+        """
+        if not self._cache_manager:
+            return
+
+        self._cache_manager.invalidate(item_name)
+
+    def refresh_cache(self, item_name: str) -> None:
+        """Refresh cache for an item by re-downloading from remote.
+
+        This is equivalent to invalidating and then fetching the item.
+
+        Args:
+            item_name: Name of item to refresh
+
+        Raises:
+            ValueError: If item doesn't exist in bundle
+            RuntimeError: If caching is not enabled
+
+        Examples:
+            >>> folio.refresh_cache('my_table')
+        """
+        if not self._cache_manager:
+            raise RuntimeError("Caching is not enabled for this DataFolio")
+
+        if item_name not in self._items:
+            raise ValueError(f"Item '{item_name}' not found in bundle")
+
+        # Invalidate cache
+        self._cache_manager.invalidate(item_name)
+
+        # Re-fetch based on item type
+        item_meta = self._items[item_name]
+        item_type = item_meta["item_type"]
+
+        if item_type in ["parquet_table", "csv_table"]:
+            self.get_table(item_name)
+        elif item_type == "sklearn_model":
+            self.get_sklearn(item_name)
+        elif item_type == "pytorch_model":
+            self.get_pytorch(item_name)
+        else:
+            # For other types, just invalidate (don't auto-fetch)
+            pass
