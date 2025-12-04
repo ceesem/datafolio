@@ -264,6 +264,9 @@ class DataFolio:
         metadata: Optional[Dict[str, Any]] = None,
         random_suffix: bool = False,
         read_only: bool = False,
+        cache_enabled: bool = False,
+        cache_dir: Optional[Union[str, Path]] = None,
+        cache_ttl: Optional[int] = None,
     ):
         """Initialize a new or open an existing DataFolio.
 
@@ -275,6 +278,9 @@ class DataFolio:
             metadata: Optional dictionary of analysis metadata (for new bundles)
             random_suffix: If True, append random suffix to bundle name (default: False)
             read_only: If True, prevent all write operations (default: False)
+            cache_enabled: If True, enable local caching for remote data (default: False)
+            cache_dir: Optional cache directory (default: ~/.datafolio_cache)
+            cache_ttl: Optional TTL override in seconds (default: 1800 = 30 minutes)
 
         Examples:
             Create new bundle with exact name:
@@ -301,6 +307,19 @@ class DataFolio:
             >>> folio = DataFolio('experiments/production-model', read_only=True)
             >>> model = folio.get_model('classifier')  # OK
             >>> folio.add_table('new', df)  # Error: read-only
+
+            Enable caching for cloud bundles (faster repeated access):
+            >>> folio = DataFolio('gs://bucket/experiment', cache_enabled=True)
+            >>> df = folio.get_table('data')  # Downloads and caches
+            >>> df = folio.get_table('data')  # Loads from cache (instant)
+
+            Custom cache configuration:
+            >>> folio = DataFolio(
+            ...     'gs://bucket/experiment',
+            ...     cache_enabled=True,
+            ...     cache_dir='/mnt/shared/cache',
+            ...     cache_ttl=3600  # 1 hour
+            ... )
         """
         # Read-only mode flag
         self._read_only = read_only
@@ -311,6 +330,12 @@ class DataFolio:
 
         # Storage backend for all I/O operations
         self._storage = StorageBackend()
+
+        # Cache manager (initialized after bundle_dir is set)
+        self._cache_enabled = cache_enabled
+        self._cache_manager: Optional["CacheManager"] = None
+        self._cache_dir = cache_dir
+        self._cache_ttl = cache_ttl
 
         # Unified items dictionary - current versions only (for fast lookup)
         self._items: Dict[str, Union[TableReference, IncludedTable, IncludedItem]] = {}
@@ -405,6 +430,20 @@ class DataFolio:
             self._initialize_bundle()
 
         self._cf = cloudfiles.CloudFiles(resolve_path(self._bundle_dir))
+
+        # Initialize cache manager if caching is enabled and bundle is remote
+        if self._cache_enabled and is_cloud_path(self._bundle_dir):
+            from datafolio.cache import CacheConfig, CacheManager
+
+            config = CacheConfig(
+                enabled=True,
+                cache_dir=Path(self._cache_dir) if self._cache_dir else None,
+            )
+            self._cache_manager = CacheManager(
+                bundle_path=self._bundle_dir,
+                config=config,
+                ttl_override=self._cache_ttl,
+            )
 
     # ==================== Well-factored I/O Helper Functions ====================
 
