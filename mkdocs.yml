@@ -52,11 +52,11 @@ plugins:
       default_handler: python
       handlers:
         python:
-          import:
-            - https://docs.python.org/3/objects.inv
-            - https://numpy.org/doc/stable/objects.inv
-            - https://pandas.pydata.org/pandas-docs/stable/objects.inv
           paths: [.]
+          import:
+            - url: https://docs.python.org/3/objects.inv
+            - url: https://numpy.org/doc/stable/objects.inv
+            - url: https://pandas.pydata.org/pandas-docs/stable/objects.inv
           options:
             show_source: false
             docstring_style: numpy
