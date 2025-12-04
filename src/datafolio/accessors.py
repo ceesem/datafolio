@@ -178,7 +178,58 @@ class DataAccessor:
         Args:
             folio: Parent DataFolio instance
         """
+        # Store folio reference
         self._folio = folio
+
+        # Create a dynamic class with item attributes for better autocomplete
+        self._setup_dynamic_attributes()
+
+    def _setup_dynamic_attributes(self) -> None:
+        """Set up dynamic attributes on the class for autocomplete support.
+
+        This sets attributes on the class itself (not just the instance),
+        which makes them more visible to IDE autocomplete and Jedi.
+        """
+        # Get current items
+        self._folio._refresh_if_needed()
+
+        # Get the class of this instance
+        cls = self.__class__
+
+        # Track which attributes we've added (store on the class)
+        if not hasattr(cls, "_dynamic_attrs"):
+            cls._dynamic_attrs = set()
+
+        # Get current item names
+        current_items = set(self._folio._items.keys())
+
+        # Remove attributes that no longer exist
+        for attr in list(cls._dynamic_attrs):
+            if attr not in current_items:
+                if hasattr(cls, attr):
+                    delattr(cls, attr)
+                cls._dynamic_attrs.discard(attr)
+
+        # Add new attributes as properties on the class
+        for item_name in current_items:
+            if item_name not in cls._dynamic_attrs:
+                # Create a property that returns an ItemProxy
+                # Use a default argument to capture the item_name in the closure
+                def make_property(name: str):
+                    def item_property(self) -> ItemProxy:
+                        return ItemProxy(self._folio, name)
+
+                    return property(item_property)
+
+                setattr(cls, item_name, make_property(item_name))
+                cls._dynamic_attrs.add(item_name)
+
+    def _sync_items(self) -> None:
+        """Sync item attributes with current folio state.
+
+        This method is called when items may have changed.
+        """
+        self._setup_dynamic_attributes()
 
     def __getattr__(self, name: str) -> ItemProxy:
         """Get item by attribute access.
@@ -198,16 +249,19 @@ class DataAccessor:
                 f"'{type(self).__name__}' object has no attribute '{name}'"
             )
 
-        # Auto-refresh before accessing
+        # Auto-refresh and re-sync items if needed
         self._folio._refresh_if_needed()
+        self._sync_items()
 
-        if name not in self._folio._items:
+        # Try to get the attribute again after syncing
+        # Use object.__getattribute__ directly to avoid recursion
+        try:
+            return object.__getattribute__(self, name)
+        except AttributeError:
             raise AttributeError(
                 f"Item '{name}' not found in DataFolio. "
                 f"Available items: {', '.join(sorted(self._folio._items.keys()))}"
             )
-
-        return ItemProxy(self._folio, name)
 
     def __getitem__(self, name: str) -> ItemProxy:
         """Get item by dictionary access.
@@ -233,12 +287,28 @@ class DataAccessor:
         """Return list of item names for autocomplete.
 
         Returns:
+            List combining standard attributes and item names
+        """
+        # Auto-refresh before accessing
+        self._folio._refresh_if_needed()
+
+        # Combine standard object attributes with item names
+        standard_attrs = list(object.__dir__(self))
+        item_names = list(self._folio._items.keys())
+        return sorted(set(standard_attrs + item_names))
+
+    def _ipython_key_completions_(self) -> list[str]:
+        """Provide key completions for IPython/Jupyter.
+
+        This method is specifically for IPython's autocomplete system,
+        which provides better autocomplete support in Jupyter notebooks.
+
+        Returns:
             Sorted list of all item names
         """
         # Auto-refresh before accessing
         self._folio._refresh_if_needed()
 
-        # Include item names for autocomplete
         return sorted(self._folio._items.keys())
 
     def __repr__(self) -> str:

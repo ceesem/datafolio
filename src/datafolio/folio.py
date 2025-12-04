@@ -445,7 +445,20 @@ class DataFolio:
                 ttl_override=self._cache_ttl,
             )
 
+        # Initialize data accessor for autocomplete support
+        # Create it here (not lazily) so autocomplete is immediately available
+        self._data_accessor = DataAccessor(self)
+
     # ==================== Well-factored I/O Helper Functions ====================
+
+    def _sync_data_accessor(self) -> None:
+        """Sync data accessor after items have changed.
+
+        This ensures autocomplete is updated immediately when items are added,
+        removed, or modified, rather than waiting for the next access to .data.
+        """
+        if hasattr(self, "_data_accessor"):
+            self._data_accessor._sync_items()
 
     def _check_read_only(self) -> None:
         """Raise error if folio is in read-only mode.
@@ -1140,6 +1153,9 @@ For more information, see the [datafolio documentation](https://github.com/ceese
                 "updated_at", datetime.now(timezone.utc).isoformat()
             )
             self._save_metadata()
+
+        # Sync data accessor to update autocomplete immediately
+        self._sync_data_accessor()
 
     def _save_snapshots(self) -> None:
         """Save snapshots.json manifest."""
@@ -2917,6 +2933,12 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             DataAccessor that provides attribute-style and dictionary-style
             access to all items with autocomplete in IPython/Jupyter.
 
+        Note:
+            Autocomplete suggestions are automatically updated when items are
+            added or deleted. However, JupyterLab's autocomplete may cache
+            results, so if a newly added item doesn't appear, try re-evaluating
+            the cell or use dictionary-style access: folio.data['item_name'].
+
         Examples:
             Attribute-style access:
             >>> df = folio.data.results.content
@@ -2933,8 +2955,14 @@ For more information, see the [datafolio documentation](https://github.com/ceese
 
             Autocomplete (in IPython/Jupyter):
             >>> folio.data.<TAB>  # Shows: results, classifier, embeddings, ...
+
+            Autocomplete updates automatically:
+            >>> folio.add_table('new_data', df)
+            >>> folio.data.new_data.content  # Autocompletes immediately
         """
-        return DataAccessor(self)
+        # Sync items in case they changed since initialization
+        self._data_accessor._sync_items()
+        return self._data_accessor
 
     @property
     def read_only(self) -> bool:
