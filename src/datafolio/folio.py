@@ -3804,6 +3804,7 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         """Get a PyTorch model by name.
 
         Can return either the state_dict only, or a reconstructed model.
+        Supports caching for cloud bundles when caching is enabled.
 
         Args:
             name: Name of the model
@@ -3845,12 +3846,19 @@ For more information, see the [datafolio documentation](https://github.com/ceese
                 f"Item '{name}' is not a PyTorch model (type: {item.get('item_type')})"
             )
 
-        # Delegate to handler
+        # Delegate to handler (with caching if enabled)
         from datafolio.base.registry import get_registry
 
         registry = get_registry()
         handler = registry.get("pytorch_model")
-        return handler.get(self, name, model_class=model_class, reconstruct=reconstruct)
+
+        # Use caching if available
+        return self._get_with_cache(
+            name,
+            lambda: handler.get(
+                self, name, model_class=model_class, reconstruct=reconstruct
+            ),
+        )
 
     def add_artifact(
         self,
