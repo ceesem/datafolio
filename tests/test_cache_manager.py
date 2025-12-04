@@ -357,3 +357,55 @@ class TestConcurrency:
         # Temp file should not exist
         temp_path = cache_path.with_suffix(cache_path.suffix + ".tmp")
         assert not temp_path.exists()
+
+
+class TestFileSizeLimit:
+    """Test file size limit enforcement."""
+
+    def test_file_size_limit_enforced(self, cache_config, temp_cache_dir):
+        """Test that files exceeding max_item_size are rejected."""
+        # Create config with small size limit (1KB)
+        small_config = CacheConfig(
+            enabled=True,
+            cache_dir=temp_cache_dir,
+            max_item_size=1024,  # 1KB limit
+        )
+        manager = CacheManager(
+            bundle_path="gs://test/bundle",
+            config=small_config,
+        )
+
+        # Create data larger than limit (2KB)
+        large_data = b"X" * 2048
+
+        def mock_fetch():
+            return (large_data, "included_table", "test.parquet")
+
+        # Should raise ValueError for oversized item
+        with pytest.raises(ValueError, match="exceeds maximum cache size"):
+            manager.get("large_item", remote_fetch_fn=mock_fetch)
+
+    def test_file_within_size_limit_cached(self, cache_config, temp_cache_dir):
+        """Test that files within max_item_size are cached normally."""
+        # Create config with size limit
+        config = CacheConfig(
+            enabled=True,
+            cache_dir=temp_cache_dir,
+            max_item_size=10 * 1024,  # 10KB limit
+        )
+        manager = CacheManager(
+            bundle_path="gs://test/bundle",
+            config=config,
+        )
+
+        # Create data smaller than limit (1KB)
+        small_data = b"X" * 1024
+
+        def mock_fetch():
+            return (small_data, "included_table", "test.parquet")
+
+        # Should cache successfully
+        cache_path = manager.get("small_item", remote_fetch_fn=mock_fetch)
+        assert cache_path is not None
+        assert cache_path.exists()
+        assert cache_path.read_bytes() == small_data

@@ -11,6 +11,19 @@ Key components:
 """
 
 from datafolio.cache.config import CacheConfig
-from datafolio.cache.manager import CacheManager
+from datafolio.cache.manager import (
+    CacheDiskFullError,
+    CacheError,
+    CacheLockError,
+    CacheManager,
+    CachePermissionError,
+)
 
-__all__ = ["CacheManager", "CacheConfig"]
+__all__ = [
+    "CacheManager",
+    "CacheConfig",
+    "CacheError",
+    "CacheDiskFullError",
+    "CachePermissionError",
+    "CacheLockError",
+]

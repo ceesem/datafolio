@@ -1,11 +1,12 @@
 """Cache manager for handling local caching of remote bundles."""
 
+import logging
 import shutil
 import warnings
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
-from filelock import FileLock
+from filelock import FileLock, Timeout
 
 from datafolio.cache.config import CacheConfig
 from datafolio.cache.metadata import CacheMetadata
@@ -16,6 +17,32 @@ from datafolio.cache.validation import (
     is_ttl_valid,
     verify_checksum,
 )
+
+logger = logging.getLogger(__name__)
+
+
+class CacheError(Exception):
+    """Base exception for cache-related errors."""
+
+    pass
+
+
+class CacheDiskFullError(CacheError):
+    """Raised when disk is full and cannot write to cache."""
+
+    pass
+
+
+class CachePermissionError(CacheError):
+    """Raised when cache directory permissions are insufficient."""
+
+    pass
+
+
+class CacheLockError(CacheError):
+    """Raised when unable to acquire cache lock."""
+
+    pass
 
 
 class CacheManager:
@@ -48,12 +75,26 @@ class CacheManager:
         self.bundle_id = self._normalize_bundle_path(bundle_path)
         self.cache_dir = self.config.cache_dir / "bundles" / self.bundle_id
 
-        # Initialize metadata
-        self.metadata = CacheMetadata(self.cache_dir, bundle_path)
-
-        # Lock directory
+        # Lock directory - create first to catch permission errors early
         self.lock_dir = self.config.cache_dir / ".locks"
-        self.lock_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            self.lock_dir.mkdir(parents=True, exist_ok=True)
+        except PermissionError as e:
+            raise CachePermissionError(
+                f"Cannot create cache lock directory at {self.lock_dir}: {e}"
+            ) from e
+        except OSError as e:
+            logger.warning(f"Error creating cache lock directory: {e}")
+            raise CacheError(
+                f"Cannot access cache directory at {self.lock_dir}: {e}"
+            ) from e
+
+        # Initialize metadata
+        try:
+            self.metadata = CacheMetadata(self.cache_dir, bundle_path)
+        except Exception as e:
+            logger.error(f"Failed to load cache metadata: {e}")
+            raise CacheError(f"Cannot initialize cache metadata: {e}") from e
 
     @staticmethod
     def _normalize_bundle_path(bundle_path: str) -> str:
@@ -160,6 +201,32 @@ class CacheManager:
 
         return True
 
+    def _check_disk_space(self, required_bytes: int) -> None:
+        """Check if sufficient disk space is available.
+
+        Args:
+            required_bytes: Number of bytes needed
+
+        Raises:
+            CacheDiskFullError: If insufficient disk space
+        """
+        try:
+            stat = shutil.disk_usage(self.cache_dir.parent)
+            available = stat.free
+            # Require 10% buffer beyond required bytes
+            required_with_buffer = int(required_bytes * 1.1)
+
+            if available < required_with_buffer:
+                raise CacheDiskFullError(
+                    f"Insufficient disk space: {available / (1024**3):.2f} GB available, "
+                    f"{required_with_buffer / (1024**3):.2f} GB required"
+                )
+        except CacheDiskFullError:
+            raise
+        except Exception as e:
+            logger.warning(f"Could not check disk space: {e}")
+            # Don't fail if we can't check disk space
+
     def get(
         self,
         item_name: str,
@@ -178,31 +245,48 @@ class CacheManager:
 
         Raises:
             ChecksumMismatchError: If checksum validation fails in strict mode
+            CacheLockError: If unable to acquire lock
+            CacheDiskFullError: If insufficient disk space
+            CachePermissionError: If cache directory not writable
         """
         lock_path = self._get_lock_path(item_name)
 
-        with FileLock(lock_path, timeout=30):
-            # Check if cached and valid
-            if self.is_valid(item_name, remote_checksum):
-                # Cache hit
-                item_meta = self.metadata.get_item(item_name)
-                cache_path = self._get_item_cache_path(
-                    item_name, item_meta["item_type"], item_meta["filename"]
-                )
+        try:
+            with FileLock(lock_path, timeout=30):
+                return self._get_locked(item_name, remote_fetch_fn, remote_checksum)
+        except Timeout as e:
+            raise CacheLockError(
+                f"Timeout acquiring lock for {item_name} after 30 seconds"
+            ) from e
 
-                # Update access stats
-                self.metadata.update_access(item_name)
-                self.metadata.record_cache_hit()
+    def _get_locked(
+        self,
+        item_name: str,
+        remote_fetch_fn: Optional[Callable],
+        remote_checksum: Optional[str],
+    ) -> Optional[Path]:
+        """Get cached item with lock already acquired."""
+        # Check if cached and valid
+        if self.is_valid(item_name, remote_checksum):
+            # Cache hit
+            item_meta = self.metadata.get_item(item_name)
+            cache_path = self._get_item_cache_path(
+                item_name, item_meta["item_type"], item_meta["filename"]
+            )
 
-                return cache_path
+            # Update access stats
+            self.metadata.update_access(item_name)
+            self.metadata.record_cache_hit()
 
-            # Cache miss or invalid - need to fetch
-            if remote_fetch_fn is None:
-                self.metadata.record_cache_miss()
-                return None
+            return cache_path
 
-            # Fetch from remote
-            return self._fetch_and_cache(item_name, remote_fetch_fn, remote_checksum)
+        # Cache miss or invalid - need to fetch
+        if remote_fetch_fn is None:
+            self.metadata.record_cache_miss()
+            return None
+
+        # Fetch from remote
+        return self._fetch_and_cache(item_name, remote_fetch_fn, remote_checksum)
 
     def _fetch_and_cache(
         self,
@@ -229,21 +313,69 @@ class CacheManager:
         # remote_fetch_fn should return (data_bytes, item_type, filename)
         data_bytes, item_type, filename = remote_fetch_fn()
 
+        # Check file size limit
+        data_size = len(data_bytes)
+        if data_size > self.config.max_item_size:
+            warnings.warn(
+                f"Item {item_name} size ({data_size / (1024 * 1024):.2f} MB) exceeds "
+                f"max_item_size ({self.config.max_item_size / (1024 * 1024):.2f} MB). "
+                f"Skipping cache."
+            )
+            # Raise exception to indicate item cannot be cached
+            raise ValueError(
+                f"Item {item_name} exceeds maximum cache size "
+                f"({data_size} > {self.config.max_item_size} bytes)"
+            )
+
+        # Check available disk space
+        try:
+            self._check_disk_space(data_size)
+        except CacheDiskFullError as e:
+            logger.error(f"Cannot cache {item_name}: {e}")
+            raise
+
         # Get cache path
         cache_path = self._get_item_cache_path(item_name, item_type, filename)
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Create parent directory with error handling
+        try:
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+        except PermissionError as e:
+            raise CachePermissionError(
+                f"Cannot create cache directory {cache_path.parent}: {e}"
+            ) from e
+        except OSError as e:
+            logger.error(f"OS error creating cache directory: {e}")
+            raise CacheError(f"Cannot create cache directory: {e}") from e
 
         # Write to temp file first (atomic write)
         temp_path = cache_path.with_suffix(cache_path.suffix + ".tmp")
 
         try:
-            with open(temp_path, "wb") as f:
-                f.write(data_bytes)
+            # Write to temp file
+            try:
+                with open(temp_path, "wb") as f:
+                    f.write(data_bytes)
+            except PermissionError as e:
+                raise CachePermissionError(
+                    f"Cannot write to cache file {temp_path}: {e}"
+                ) from e
+            except OSError as e:
+                if e.errno == 28:  # ENOSPC - No space left on device
+                    raise CacheDiskFullError(
+                        f"Disk full while writing {item_name} to cache"
+                    ) from e
+                logger.error(f"OS error writing cache file: {e}")
+                raise CacheError(f"Cannot write cache file: {e}") from e
 
             # Compute checksum
-            actual_checksum = compute_checksum(
-                temp_path, self.config.checksum_algorithm
-            )
+            try:
+                actual_checksum = compute_checksum(
+                    temp_path, self.config.checksum_algorithm
+                )
+            except Exception as e:
+                logger.error(f"Error computing checksum for {item_name}: {e}")
+                raise CacheError(f"Checksum computation failed: {e}") from e
 
             # Verify checksum if provided
             if remote_checksum and actual_checksum != remote_checksum:
@@ -259,24 +391,45 @@ class CacheManager:
                     )
 
             # Atomic rename
-            temp_path.rename(cache_path)
+            try:
+                temp_path.rename(cache_path)
+            except OSError as e:
+                logger.error(f"Error renaming temp file to cache path: {e}")
+                raise CacheError(f"Cannot finalize cache file: {e}") from e
 
             # Update metadata
-            self.metadata.set_item(
-                item_name,
-                item_type,
-                filename,
-                remote_checksum or actual_checksum,
-                cache_path.stat().st_size,
-            )
+            try:
+                self.metadata.set_item(
+                    item_name,
+                    item_type,
+                    filename,
+                    remote_checksum or actual_checksum,
+                    cache_path.stat().st_size,
+                )
+            except Exception as e:
+                logger.error(f"Error updating cache metadata: {e}")
+                # Not critical - file is cached even if metadata update fails
+                warnings.warn(f"Cache metadata update failed for {item_name}: {e}")
 
             return cache_path
 
-        except Exception:
-            # Clean up temp file on error
+        except (CacheError, ChecksumMismatchError, ValueError):
+            # Re-raise our custom exceptions
             if temp_path.exists():
-                temp_path.unlink()
+                try:
+                    temp_path.unlink()
+                except Exception as e:
+                    logger.warning(f"Failed to clean up temp file {temp_path}: {e}")
             raise
+        except Exception as e:
+            # Catch-all for unexpected errors
+            logger.error(f"Unexpected error caching {item_name}: {e}")
+            if temp_path.exists():
+                try:
+                    temp_path.unlink()
+                except Exception as cleanup_error:
+                    logger.warning(f"Failed to clean up temp file: {cleanup_error}")
+            raise CacheError(f"Unexpected error caching item: {e}") from e
 
     def invalidate(self, item_name: str) -> None:
         """Invalidate cache for an item (mark as needing refresh).

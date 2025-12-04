@@ -15,7 +15,8 @@ class CacheConfig:
         enabled: Whether caching is enabled
         cache_dir: Root directory for cache storage
         default_ttl: Default time-to-live in seconds (30 minutes)
-        max_cache_size: Maximum cache size in bytes (None = unlimited)
+        max_cache_size: Maximum total cache size in bytes (None = unlimited)
+        max_item_size: Maximum size per item in bytes (250 MB default)
         checksum_algorithm: Algorithm for checksum validation ('md5', 'sha256')
         strict_mode: If True, fail on checksum mismatch; if False, warn and re-download
         fallback_to_stale: Use stale cache on network error
@@ -25,7 +26,8 @@ class CacheConfig:
     enabled: bool = False
     cache_dir: Path = Path.home() / ".datafolio_cache"
     default_ttl: int = 1800  # 30 minutes
-    max_cache_size: Optional[int] = None  # bytes
+    max_cache_size: Optional[int] = None  # bytes (total cache size)
+    max_item_size: int = 250 * 1024 * 1024  # 250 MB per item
     checksum_algorithm: str = "md5"
     strict_mode: bool = False
     fallback_to_stale: bool = True
@@ -79,6 +81,7 @@ class CacheConfig:
             "cache_dir": str(self.cache_dir),
             "default_ttl": self.default_ttl,
             "max_cache_size": self.max_cache_size,
+            "max_item_size": self.max_item_size,
             "checksum_algorithm": self.checksum_algorithm,
             "strict_mode": self.strict_mode,
             "fallback_to_stale": self.fallback_to_stale,
@@ -96,6 +99,7 @@ class CacheConfig:
             DATAFOLIO_CACHE_ENABLED: Enable caching (true/false)
             DATAFOLIO_CACHE_DIR: Cache directory path
             DATAFOLIO_CACHE_TTL: Default TTL in seconds
+            DATAFOLIO_CACHE_MAX_ITEM_SIZE: Maximum item size in bytes
 
         Returns:
             CacheConfig instance
@@ -110,6 +114,9 @@ class CacheConfig:
 
         if os.getenv("DATAFOLIO_CACHE_TTL"):
             config.default_ttl = int(os.getenv("DATAFOLIO_CACHE_TTL"))
+
+        if os.getenv("DATAFOLIO_CACHE_MAX_ITEM_SIZE"):
+            config.max_item_size = int(os.getenv("DATAFOLIO_CACHE_MAX_ITEM_SIZE"))
 
         return config
 
