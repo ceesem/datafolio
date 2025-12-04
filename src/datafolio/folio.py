@@ -4861,3 +4861,127 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             raise
 
         return new_folio
+
+    # Cache Management Methods
+
+    def cache_status(self, item_name: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Get cache status for an item or entire bundle.
+
+        Args:
+            item_name: Name of item to check. If None, returns overall cache stats.
+
+        Returns:
+            Dict with cache status information, or None if caching not enabled or item not found.
+            For specific items:
+                - cached: Whether item is cached
+                - cache_path: Path to cached file
+                - size_bytes: Size of cached file
+                - cached_at: Timestamp when cached
+                - last_accessed: Last access timestamp
+                - access_count: Number of times accessed
+                - ttl_remaining: Seconds until cache expires (None if no TTL)
+            For bundle-level (item_name=None):
+                - bundle_path: Original bundle path
+                - cache_dir: Cache directory path
+                - ttl_seconds: TTL in seconds
+                - cache_hits: Number of cache hits
+                - cache_misses: Number of cache misses
+                - cache_hit_rate: Hit rate (0.0-1.0)
+
+        Examples:
+            Check if a specific item is cached:
+            >>> status = folio.cache_status('my_table')
+            >>> if status and status['cached']:
+            ...     print(f"Cache expires in {status['ttl_remaining']} seconds")
+
+            Get overall cache statistics:
+            >>> stats = folio.cache_status()
+            >>> print(f"Cache hit rate: {stats['cache_hit_rate']:.1%}")
+        """
+        if not self._cache_manager:
+            return None
+
+        if item_name is None:
+            # Return bundle-level stats
+            return self._cache_manager.get_stats()
+        else:
+            # Return item-level status
+            return self._cache_manager.get_status(item_name)
+
+    def clear_cache(self, item_name: Optional[str] = None) -> None:
+        """Clear cached items.
+
+        Args:
+            item_name: Name of specific item to clear. If None, clears all cached items for this bundle.
+
+        Examples:
+            Clear a specific item:
+            >>> folio.clear_cache('my_table')
+
+            Clear entire cache:
+            >>> folio.clear_cache()
+        """
+        if not self._cache_manager:
+            return
+
+        if item_name is None:
+            self._cache_manager.clear_all()
+        else:
+            self._cache_manager.clear_item(item_name)
+
+    def invalidate_cache(self, item_name: str) -> None:
+        """Invalidate cache for an item without deleting the file.
+
+        This marks the cached item as invalid, forcing a re-fetch on next access,
+        but keeps the file on disk (useful for stale cache fallback).
+
+        Args:
+            item_name: Name of item to invalidate
+
+        Examples:
+            Force re-download on next access:
+            >>> folio.invalidate_cache('my_table')
+            >>> table = folio.get_table('my_table')  # Will re-download
+        """
+        if not self._cache_manager:
+            return
+
+        self._cache_manager.invalidate(item_name)
+
+    def refresh_cache(self, item_name: str) -> None:
+        """Refresh cache for an item by re-downloading from remote.
+
+        This is equivalent to invalidating and then fetching the item.
+
+        Args:
+            item_name: Name of item to refresh
+
+        Raises:
+            ValueError: If item doesn't exist in bundle
+            RuntimeError: If caching is not enabled
+
+        Examples:
+            >>> folio.refresh_cache('my_table')
+        """
+        if not self._cache_manager:
+            raise RuntimeError("Caching is not enabled for this DataFolio")
+
+        if item_name not in self._items:
+            raise ValueError(f"Item '{item_name}' not found in bundle")
+
+        # Invalidate cache
+        self._cache_manager.invalidate(item_name)
+
+        # Re-fetch based on item type
+        item_meta = self._items[item_name]
+        item_type = item_meta["item_type"]
+
+        if item_type in ["parquet_table", "csv_table"]:
+            self.get_table(item_name)
+        elif item_type == "sklearn_model":
+            self.get_sklearn(item_name)
+        elif item_type == "pytorch_model":
+            self.get_pytorch(item_name)
+        else:
+            # For other types, just invalidate (don't auto-fetch)
+            pass
