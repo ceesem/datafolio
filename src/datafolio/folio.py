@@ -2555,6 +2555,88 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         if self._check_if_stale():
             self.refresh()
 
+    def _get_with_cache(self, name: str, handler_get_fn: callable) -> Any:
+        """Get an item with caching if enabled.
+
+        Args:
+            name: Item name
+            handler_get_fn: Function to call if cache miss (handler.get)
+
+        Returns:
+            Item data (from cache or remote)
+        """
+        # If caching not enabled or not a cloud bundle, use handler directly
+        if not self._cache_manager:
+            return handler_get_fn()
+
+        # Get item metadata
+        item = self._items[name]
+        item_type = item.get("item_type")
+        filename = item.get("filename")
+        remote_checksum = item.get("checksum")
+
+        # Define fetch function for cache manager
+        def fetch_from_remote():
+            # Read data from remote using handler
+            data = handler_get_fn()
+
+            # Serialize to bytes for caching
+            import tempfile
+            from pathlib import Path
+
+            with tempfile.NamedTemporaryFile(delete=False, suffix=filename) as tmp:
+                tmp_path = Path(tmp.name)
+
+            try:
+                # Write data to temp file using storage backend
+                if item_type == "included_table":
+                    self._storage.write_parquet(str(tmp_path), data)
+                elif item_type == "model":
+                    import joblib
+
+                    joblib.dump(data, tmp_path)
+                elif item_type in ("pytorch_model", "pytorch_state_dict"):
+                    import torch
+
+                    torch.save(data, tmp_path)
+                else:
+                    # For other types, try generic serialization
+                    import joblib
+
+                    joblib.dump(data, tmp_path)
+
+                # Read bytes
+                data_bytes = tmp_path.read_bytes()
+                return (data_bytes, item_type, filename)
+            finally:
+                tmp_path.unlink()
+
+        # Try to get from cache
+        cache_path = self._cache_manager.get(
+            name, remote_fetch_fn=fetch_from_remote, remote_checksum=remote_checksum
+        )
+
+        if cache_path is None:
+            # No cache, use handler directly
+            return handler_get_fn()
+
+        # Load from cache file
+        if item_type == "included_table":
+            return self._storage.read_parquet(str(cache_path))
+        elif item_type == "model":
+            import joblib
+
+            return joblib.load(cache_path)
+        elif item_type in ("pytorch_model", "pytorch_state_dict"):
+            import torch
+
+            return torch.load(cache_path, weights_only=False)
+        else:
+            # Generic deserialization
+            import joblib
+
+            return joblib.load(cache_path)
+
     def refresh(self) -> Self:
         """Explicitly refresh manifests from disk/cloud.
 
@@ -3194,7 +3276,8 @@ For more information, see the [datafolio documentation](https://github.com/ceese
 
         For included tables, reads from bundle directory.
         For referenced tables, reads from the specified external path.
-        Tables are NOT cached - always read fresh from disk.
+        If caching is enabled (cache_enabled=True), cloud-based tables are cached locally
+        for faster repeated access.
 
         Args:
             name: Name of the table
@@ -3229,10 +3312,10 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         if item_type not in ("included_table", "referenced_table"):
             raise ValueError(f"Item '{name}' is not a table (type: {item_type})")
 
-        # Get handler and delegate to it
+        # Get handler and delegate to it (with caching if enabled)
         registry = get_registry()
         handler = registry.get(item_type)
-        return handler.get(self, name)
+        return self._get_with_cache(name, lambda: handler.get(self, name))
 
     def get_data_path(self, name: str) -> str:
         """Get the path to a referenced table.
@@ -3528,7 +3611,8 @@ For more information, see the [datafolio documentation](https://github.com/ceese
     def get_sklearn(self, name: str) -> Any:
         """Get a scikit-learn style model by name.
 
-        Models are NOT cached - always read fresh from disk.
+        If caching is enabled (cache_enabled=True), cloud-based models are cached locally
+        for faster repeated access.
 
         Args:
             name: Name of the model
@@ -3553,12 +3637,12 @@ For more information, see the [datafolio documentation](https://github.com/ceese
                 f"Item '{name}' is not a sklearn model (type: {item.get('item_type')})"
             )
 
-        # Delegate to handler
+        # Delegate to handler (with caching if enabled)
         from datafolio.base.registry import get_registry
 
         registry = get_registry()
         handler = registry.get("model")
-        return handler.get(self, name)
+        return self._get_with_cache(name, lambda: handler.get(self, name))
 
     def get_model(self, name: str, **kwargs) -> Any:
         """Get a model by name with automatic type detection.
@@ -3567,7 +3651,8 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         and uses the appropriate loader. For fine-grained control, use
         get_sklearn() or get_pytorch().
 
-        Models are NOT cached - always read fresh from disk.
+        If caching is enabled (cache_enabled=True), cloud-based models are cached locally
+        for faster repeated access.
 
         Args:
             name: Name of the model
