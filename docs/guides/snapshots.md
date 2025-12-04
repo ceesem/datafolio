@@ -377,10 +377,10 @@ cd experiments/my-experiment
 datafolio snapshot list
 
 # Specify bundle path
-datafolio --bundle experiments/my-experiment snapshot list
+datafolio --folio experiments/my-experiment snapshot list
 
 # Use environment variable
-export DATAFOLIO_BUNDLE=experiments/my-experiment
+export DATAFOLIO_PATH=experiments/my-experiment
 datafolio snapshot list
 ```
 

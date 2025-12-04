@@ -513,6 +513,10 @@ class DataFolio:
 
         Returns:
             Deserialized data
+
+        Raises:
+            FileNotFoundError: If file doesn't exist
+            ValueError: If file content is empty or invalid
         """
         import orjson
 
@@ -527,6 +531,13 @@ class DataFolio:
                 filename = parts[0]
             cf = CloudFiles(dir_path) if dir_path else CloudFiles(path)
             content = cf.get(filename)
+
+            # Handle case where file doesn't exist or is empty
+            if content is None:
+                raise FileNotFoundError(f"File not found in cloud storage: {path}")
+            if not content:
+                raise ValueError(f"Empty file in cloud storage: {path}")
+
             return orjson.loads(content)
         else:
             with open(path, "rb") as f:
@@ -1417,7 +1428,20 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             # Use checksum as version identifier to detect actual content changes
             # This is more reliable than filename since filenames can be reused
             checksum = item_meta.get("checksum", "")
-            item_versions[item_name] = checksum
+
+            # For cloud files or items without checksums, generate a version ID
+            if not checksum:
+                import uuid
+
+                # Generate a consistent version ID based on item metadata
+                # Use created_at timestamp if available, otherwise generate new UUID
+                if "created_at" in item_meta:
+                    version_id = f"v_{item_meta['created_at']}"
+                else:
+                    version_id = f"v_{uuid.uuid4().hex[:8]}"
+                item_versions[item_name] = version_id
+            else:
+                item_versions[item_name] = checksum
 
         # Capture current metadata state
         metadata_snapshot = dict(self.metadata) if hasattr(self, "metadata") else {}
@@ -2882,10 +2906,24 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         return_string: bool = False,
         show_empty: bool = False,
         max_metadata_fields: int = 10,
+        snapshot: Optional[str] = None,
     ) -> Optional[str]:
         """Generate a human-readable description of all items in the bundle.
 
         Includes lineage information showing inputs and dependencies.
+
+        Args:
+            return_string: If True, return as string instead of printing
+            show_empty: If True, show empty sections
+            max_metadata_fields: Maximum metadata fields to show
+            snapshot: Optional snapshot name to describe instead of the full bundle
+
+        Returns:
+            None if return_string=False, otherwise the description string
+
+        Examples:
+            >>> folio.describe()  # Show full bundle
+            >>> folio.describe(snapshot='v1.0')  # Show specific snapshot
 
         See DisplayFormatter.describe() for full documentation.
         """
@@ -2916,6 +2954,7 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             return_string=True,  # Always get as string so we can prepend header
             show_empty=show_empty,
             max_metadata_fields=max_metadata_fields,
+            snapshot=snapshot,
         )
 
         # Combine header and main description
@@ -4554,78 +4593,147 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             path=new_path, metadata=new_metadata, random_suffix=random_suffix
         )
 
-        # Determine which items to copy
-        items_to_copy = set(self._items.keys())
-        if include_items is not None:
-            items_to_copy = items_to_copy.intersection(include_items)
-        if exclude_items is not None:
-            items_to_copy = items_to_copy.difference(exclude_items)
+        # Wrap copy operation in try/except to cleanup on failure
+        try:
+            # Determine which items to copy
+            items_to_copy = set(self._items.keys())
+            if include_items is not None:
+                items_to_copy = items_to_copy.intersection(include_items)
+            if exclude_items is not None:
+                items_to_copy = items_to_copy.difference(exclude_items)
 
-        # Copy items
-        for item_name in items_to_copy:
-            item = self._items[item_name]
-            item_type = item.get("item_type")
+            # Copy items
+            for item_name in items_to_copy:
+                item = self._items[item_name]
+                item_type = item.get("item_type")
 
-            if item_type == "referenced_table":
-                # Just copy the reference (no data to copy)
-                new_folio._items[item_name] = dict(item)
+                if item_type == "referenced_table":
+                    # Just copy the reference (no data to copy)
+                    new_folio._items[item_name] = dict(item)
 
-            elif item_type == "included_table":
-                # Copy the parquet file
-                src_path = self._storage.join_paths(
-                    self._bundle_dir, TABLES_DIR, item["filename"]
-                )
-                dst_path = self._storage.join_paths(
-                    new_folio._bundle_dir, TABLES_DIR, item["filename"]
-                )
-                if not is_cloud_path(src_path):
-                    shutil.copy2(src_path, dst_path)
+                elif item_type == "included_table":
+                    # Copy the parquet file
+                    src_path = self._storage.join_paths(
+                        self._bundle_dir, TABLES_DIR, item["filename"]
+                    )
+                    dst_path = self._storage.join_paths(
+                        new_folio._bundle_dir, TABLES_DIR, item["filename"]
+                    )
+                    if not is_cloud_path(src_path):
+                        shutil.copy2(src_path, dst_path)
+                    else:
+                        # For cloud paths, use cloudfiles
+                        # Extract directory and filename from paths
+                        src_parts = src_path.rsplit("/", 1)
+                        src_dir = src_parts[0] if len(src_parts) == 2 else ""
+                        src_filename = src_parts[-1]
+
+                        dst_parts = dst_path.rsplit("/", 1)
+                        dst_dir = dst_parts[0] if len(dst_parts) == 2 else ""
+                        dst_filename = dst_parts[-1]
+
+                        src_cf = (
+                            cloudfiles.CloudFiles(src_dir)
+                            if src_dir
+                            else cloudfiles.CloudFiles(src_path)
+                        )
+                        content = src_cf.get(src_filename)
+                        dst_cf = (
+                            cloudfiles.CloudFiles(dst_dir)
+                            if dst_dir
+                            else cloudfiles.CloudFiles(dst_path)
+                        )
+                        dst_cf.put(dst_filename, content)
+
+                    new_folio._items[item_name] = dict(item)
+
+                elif item_type == "model":
+                    # Copy the model file
+                    src_path = self._storage.join_paths(
+                        self._bundle_dir, MODELS_DIR, item["filename"]
+                    )
+                    dst_path = self._storage.join_paths(
+                        new_folio._bundle_dir, MODELS_DIR, item["filename"]
+                    )
+                    if not is_cloud_path(src_path):
+                        shutil.copy2(src_path, dst_path)
+                    else:
+                        # For cloud paths, use cloudfiles
+                        # Extract directory and filename from paths
+                        src_parts = src_path.rsplit("/", 1)
+                        src_dir = src_parts[0] if len(src_parts) == 2 else ""
+                        src_filename = src_parts[-1]
+
+                        dst_parts = dst_path.rsplit("/", 1)
+                        dst_dir = dst_parts[0] if len(dst_parts) == 2 else ""
+                        dst_filename = dst_parts[-1]
+
+                        src_cf = (
+                            cloudfiles.CloudFiles(src_dir)
+                            if src_dir
+                            else cloudfiles.CloudFiles(src_path)
+                        )
+                        content = src_cf.get(src_filename)
+                        dst_cf = (
+                            cloudfiles.CloudFiles(dst_dir)
+                            if dst_dir
+                            else cloudfiles.CloudFiles(dst_path)
+                        )
+                        dst_cf.put(dst_filename, content)
+
+                    new_folio._items[item_name] = dict(item)
+
+                elif item_type == "artifact":
+                    # Copy the artifact file
+                    src_path = self._storage.join_paths(
+                        self._bundle_dir, ARTIFACTS_DIR, item["filename"]
+                    )
+                    dst_path = self._storage.join_paths(
+                        new_folio._bundle_dir, ARTIFACTS_DIR, item["filename"]
+                    )
+                    if not is_cloud_path(src_path):
+                        shutil.copy2(src_path, dst_path)
+                    else:
+                        # For cloud paths, use cloudfiles
+                        # Extract directory and filename from paths
+                        src_parts = src_path.rsplit("/", 1)
+                        src_dir = src_parts[0] if len(src_parts) == 2 else ""
+                        src_filename = src_parts[-1]
+
+                        dst_parts = dst_path.rsplit("/", 1)
+                        dst_dir = dst_parts[0] if len(dst_parts) == 2 else ""
+                        dst_filename = dst_parts[-1]
+
+                        src_cf = (
+                            cloudfiles.CloudFiles(src_dir)
+                            if src_dir
+                            else cloudfiles.CloudFiles(src_path)
+                        )
+                        content = src_cf.get(src_filename)
+                        dst_cf = (
+                            cloudfiles.CloudFiles(dst_dir)
+                            if dst_dir
+                            else cloudfiles.CloudFiles(dst_path)
+                        )
+                        dst_cf.put(dst_filename, content)
+
+                    new_folio._items[item_name] = dict(item)
+
+            # Save the new manifest
+            new_folio._save_items()
+
+        except Exception:
+            # Cleanup on failure: remove the partially created bundle
+            import shutil as shutil_module
+
+            if self._storage.exists(new_folio._bundle_dir):
+                if is_cloud_path(new_folio._bundle_dir):
+                    # Use cloudfiles to delete cloud directory
+                    cf = cloudfiles.CloudFiles(new_folio._bundle_dir)
+                    cf.delete(cf.list())
                 else:
-                    # For cloud paths, use cloudfiles
-                    src_cf = cloudfiles.CloudFiles(src_path)
-                    content = src_cf.get(item["filename"])
-                    dst_cf = cloudfiles.CloudFiles(dst_path)
-                    dst_cf.put(item["filename"], content)
-
-                new_folio._items[item_name] = dict(item)
-
-            elif item_type == "model":
-                # Copy the model file
-                src_path = self._storage.join_paths(
-                    self._bundle_dir, MODELS_DIR, item["filename"]
-                )
-                dst_path = self._storage.join_paths(
-                    new_folio._bundle_dir, MODELS_DIR, item["filename"]
-                )
-                if not is_cloud_path(src_path):
-                    shutil.copy2(src_path, dst_path)
-                else:
-                    src_cf = cloudfiles.CloudFiles(src_path)
-                    content = src_cf.get(item["filename"])
-                    dst_cf = cloudfiles.CloudFiles(dst_path)
-                    dst_cf.put(item["filename"], content)
-
-                new_folio._items[item_name] = dict(item)
-
-            elif item_type == "artifact":
-                # Copy the artifact file
-                src_path = self._storage.join_paths(
-                    self._bundle_dir, ARTIFACTS_DIR, item["filename"]
-                )
-                dst_path = self._storage.join_paths(
-                    new_folio._bundle_dir, ARTIFACTS_DIR, item["filename"]
-                )
-                if not is_cloud_path(src_path):
-                    shutil.copy2(src_path, dst_path)
-                else:
-                    src_cf = cloudfiles.CloudFiles(src_path)
-                    content = src_cf.get(item["filename"])
-                    dst_cf = cloudfiles.CloudFiles(dst_path)
-                    dst_cf.put(item["filename"], content)
-
-                new_folio._items[item_name] = dict(item)
-
-        # Save the new manifest
-        new_folio._save_items()
+                    # Use shutil to delete local directory
+                    shutil_module.rmtree(new_folio._bundle_dir)
+            raise
 
         return new_folio

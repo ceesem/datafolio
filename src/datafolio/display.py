@@ -37,6 +37,7 @@ class DisplayFormatter:
         return_string: bool = False,
         show_empty: bool = False,
         max_metadata_fields: int = 10,
+        snapshot: Optional[str] = None,
     ) -> Optional[str]:
         """Generate a human-readable description of all items in the bundle.
 
@@ -46,6 +47,7 @@ class DisplayFormatter:
             return_string: If True, return the description as a string instead of printing
             show_empty: If True, show empty sections (e.g., "Models (0): (none)")
             max_metadata_fields: Maximum number of metadata fields to display (default: 10)
+            snapshot: Optional snapshot name to describe. If provided, shows details of that snapshot instead.
 
         Returns:
             None if return_string=False (prints to stdout), otherwise returns the description string
@@ -60,6 +62,16 @@ class DisplayFormatter:
               • raw_data (reference): Training data
               • results: Model results
                 ↳ inputs: raw_data
+
+            Describe a specific snapshot:
+            >>> folio.describe(snapshot='v1.0')
+            Snapshot: v1.0
+            ==============
+            Created: 2024-01-15 10:30 AM
+            Description: Initial baseline
+            Items (5):
+              • training_data: Training dataset
+              • model: Trained classifier
 
             Get description as string:
             >>> folio = DataFolio('experiments/test')
@@ -78,6 +90,10 @@ class DisplayFormatter:
         """
         # Auto-refresh if bundle was updated externally
         self._folio._refresh_if_needed()
+
+        # If snapshot is specified, show snapshot details instead
+        if snapshot:
+            return self._describe_snapshot(snapshot, return_string, show_empty)
 
         lines = []
         lines.append(f"DataFolio: {self._folio._bundle_dir}")
@@ -149,28 +165,6 @@ class DisplayFormatter:
             else:
                 lines.append("  (none)")
             lines.append("")
-
-        # Show which snapshots items belong to (if any snapshots exist)
-        if snapshots:
-            # Count items by snapshot membership
-            items_in_snapshots = {}
-            for item_name, item in self._folio._items.items():
-                in_snaps = item.get("in_snapshots", [])
-                if in_snaps:
-                    items_in_snapshots[item_name] = in_snaps
-
-            if items_in_snapshots:
-                lines.append(f"Snapshot Membership ({len(items_in_snapshots)} items):")
-                for item_name in sorted(items_in_snapshots.keys())[:10]:
-                    snaps = items_in_snapshots[item_name]
-                    snaps_str = ", ".join(snaps[:3])
-                    if len(snaps) > 3:
-                        snaps_str += f", ... ({len(snaps) - 3} more)"
-                    lines.append(f"  • {item_name}: {snaps_str}")
-
-                if len(items_in_snapshots) > 10:
-                    lines.append(f"  ... ({len(items_in_snapshots) - 10} more items)")
-                lines.append("")
 
         contents = self._folio.list_contents()
 
@@ -499,6 +493,124 @@ class DisplayFormatter:
             truncated = value_str[:max_length]
             remaining = len(value_str) - max_length
             return f"{truncated}... ({remaining} more chars)"
+
+    def _describe_snapshot(
+        self, snapshot_name: str, return_string: bool, show_empty: bool
+    ) -> Optional[str]:
+        """Generate description of a specific snapshot.
+
+        Args:
+            snapshot_name: Name of the snapshot to describe
+            return_string: If True, return as string instead of printing
+            show_empty: If True, show empty sections
+
+        Returns:
+            None if return_string=False, otherwise returns the description string
+
+        Raises:
+            KeyError: If snapshot doesn't exist
+        """
+        # Get snapshot info
+        snapshot_info = self._folio.get_snapshot_info(snapshot_name)
+
+        lines = []
+        lines.append(f"Snapshot: {snapshot_name}")
+        lines.append("=" * len(lines[0]))
+        lines.append("")
+
+        # Basic info
+        if snapshot_info.get("description"):
+            lines.append(f"Description: {snapshot_info['description']}")
+            lines.append("")
+
+        if snapshot_info.get("timestamp"):
+            formatted_time = self._format_timestamp(snapshot_info["timestamp"])
+            lines.append(f"Created: {formatted_time}")
+
+        if snapshot_info.get("tags"):
+            tags_str = ", ".join(snapshot_info["tags"])
+            lines.append(f"Tags: {tags_str}")
+
+        if any(k in snapshot_info for k in ["timestamp", "tags"]):
+            lines.append("")
+
+        # Get items in this snapshot
+        item_versions = snapshot_info.get("item_versions", {})
+        lines.append(f"Items ({len(item_versions)}):")
+
+        if item_versions:
+            # Group by category
+            tables = []
+            models = []
+            arrays = []
+            json_data = []
+            artifacts = []
+
+            for item_name, version_id in item_versions.items():
+                # Find the item in snapshot versions or current items
+                item = None
+                if item_name in self._folio._items:
+                    item = self._folio._items[item_name]
+                else:
+                    # Look in snapshot versions
+                    for snap_item in self._folio._snapshot_versions:
+                        if (
+                            snap_item["name"] == item_name
+                            and snap_item.get("version_id") == version_id
+                        ):
+                            item = snap_item
+                            break
+
+                if item:
+                    item_type = item.get("item_type", "unknown")
+                    desc = item.get("description", "(no description)")
+
+                    if item_type in ["included_table", "referenced_table"]:
+                        tables.append((item_name, desc, item_type))
+                    elif item_type == "model":
+                        models.append((item_name, desc))
+                    elif item_type == "numpy_array":
+                        arrays.append((item_name, desc))
+                    elif item_type == "json_data":
+                        json_data.append((item_name, desc))
+                    elif item_type == "artifact":
+                        artifacts.append((item_name, desc))
+
+            # Display by category
+            if tables:
+                lines.append(f"\n  Tables ({len(tables)}):")
+                for name, desc, item_type in tables:
+                    ref_tag = " (reference)" if item_type == "referenced_table" else ""
+                    lines.append(f"    • {name}{ref_tag}: {desc}")
+
+            if json_data:
+                lines.append(f"\n  JSON Data ({len(json_data)}):")
+                for name, desc in json_data:
+                    lines.append(f"    • {name}: {desc}")
+
+            if arrays:
+                lines.append(f"\n  Numpy Arrays ({len(arrays)}):")
+                for name, desc in arrays:
+                    lines.append(f"    • {name}: {desc}")
+
+            if models:
+                lines.append(f"\n  Models ({len(models)}):")
+                for name, desc in models:
+                    lines.append(f"    • {name}: {desc}")
+
+            if artifacts:
+                lines.append(f"\n  Artifacts ({len(artifacts)}):")
+                for name, desc in artifacts:
+                    lines.append(f"    • {name}: {desc}")
+        else:
+            lines.append("  (none)")
+
+        result = "\n".join(lines)
+        if return_string:
+            return result
+        else:
+            print(result)
+            return None
 
     def _format_filesize(self, size_bytes: int) -> str:
         """Format file size in bytes to human-readable string.

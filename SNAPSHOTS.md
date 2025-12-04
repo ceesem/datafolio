@@ -792,15 +792,15 @@ datafolio bundle describe
 
 **Best for:** Interactive development, when you're working on one experiment.
 
-#### Pattern 2: Global `--bundle` Flag
+#### Pattern 2: Global `--folio` Flag
 
 ```bash
 # Specify bundle from anywhere
-datafolio --bundle data/v1dd-experiment snapshot create v1.0
-datafolio -b data/v1dd-experiment snapshot list
+datafolio --folio data/v1dd-experiment snapshot create v1.0
+datafolio -f data/v1dd-experiment snapshot list
 
-# Git-style -C flag
-datafolio -C data/v1dd-experiment snapshot create v1.0
+# Short form
+datafolio -f data/v1dd-experiment snapshot create v1.0
 ```
 
 **Best for:** Managing multiple bundles, scripts, automation.
@@ -809,7 +809,7 @@ datafolio -C data/v1dd-experiment snapshot create v1.0
 
 ```bash
 # Set once, use many times
-export DATAFOLIO_BUNDLE=data/v1dd-experiment
+export DATAFOLIO_PATH=data/v1dd-experiment
 
 datafolio snapshot create v1.0
 datafolio snapshot list
@@ -820,8 +820,8 @@ datafolio snapshot list
 #### Precedence Order
 
 ```
-1. --bundle / -C flag (highest priority)
-2. DATAFOLIO_BUNDLE environment variable
+1. --folio / -f flag (highest priority)
+2. DATAFOLIO_PATH environment variable
 3. Current directory (default)
 ```
 
@@ -829,14 +829,14 @@ datafolio snapshot list
 
 ```bash
 cd /path/to/experiment1
-export DATAFOLIO_BUNDLE=/path/to/experiment2
+export DATAFOLIO_PATH=/path/to/experiment2
 
 # Uses current directory (experiment1)
 datafolio snapshot list
 
 # Uses environment variable (experiment2) - WRONG, flag overrides!
 # Actually uses experiment3 because flag has highest priority
-datafolio --bundle /path/to/experiment3 snapshot list
+datafolio --folio /path/to/experiment3 snapshot list
 ```
 
 ### 7.3 Command Structure
@@ -845,7 +845,7 @@ datafolio --bundle /path/to/experiment3 snapshot list
 datafolio [GLOBAL_OPTIONS] COMMAND [COMMAND_OPTIONS] [ARGS]
 
 # Global options (before command)
-  -b, --bundle PATH    Path to bundle directory
+  -b, --folio PATH    Path to bundle directory
   -C PATH              Change to directory (git-style)
   --help               Show help
   --version            Show version
@@ -1050,11 +1050,11 @@ datafolio init data/new-experiment --description "My experiment"
 
 # Describe bundle
 datafolio describe
-datafolio --bundle data/exp1 describe
+datafolio --folio data/exp1 describe
 
 # Validate bundle integrity
 datafolio validate
-datafolio --bundle data/exp1 validate
+datafolio --folio data/exp1 validate
 
 # List bundles in directory
 datafolio list --search data/
@@ -1100,9 +1100,9 @@ console = Console()
 
 @click.group()
 @click.option(
-    '-b', '--bundle',
+    '-b', '--folio',
     type=click.Path(exists=True, file_okay=False, dir_okay=True),
-    envvar='DATAFOLIO_BUNDLE',
+    envvar='DATAFOLIO_PATH',
     default='.',
     help='Path to bundle directory'
 )
@@ -1123,12 +1123,12 @@ def cli(ctx, bundle, c):
         datafolio snapshot create v1.0
 
         # Specify bundle path
-        datafolio --bundle data/experiment snapshot list
+        datafolio --folio data/experiment snapshot list
 
         # Git-style
         datafolio -C data/experiment snapshot create v1.0
     """
-    # Use -C if provided (git-style), otherwise use --bundle
+    # Use -C if provided (git-style), otherwise use --folio
     bundle_path = Path(c if c else bundle).resolve()
 
     # Check if it's a valid bundle
@@ -1436,7 +1436,7 @@ BUNDLE_DIR="experiments/$(date +%Y%m%d)"
 datafolio init "$BUNDLE_DIR" --description "Daily experiment"
 
 # Set environment variable
-export DATAFOLIO_BUNDLE="$BUNDLE_DIR"
+export DATAFOLIO_PATH="$BUNDLE_DIR"
 
 # Run experiment
 cd "$BUNDLE_DIR"
@@ -1481,7 +1481,7 @@ jobs:
 
       - name: Create snapshot
         env:
-          DATAFOLIO_BUNDLE: experiments/ci-${{ github.run_id }}
+          DATAFOLIO_PATH: experiments/ci-${{ github.run_id }}
         run: |
           datafolio snapshot create "ci-${{ github.sha }}" \
             --message "CI run from commit ${{ github.sha }}" \
@@ -1506,13 +1506,13 @@ Usage: datafolio [OPTIONS] COMMAND [ARGS]...
       datafolio snapshot create v1.0
 
       # Specify bundle path
-      datafolio --bundle data/experiment snapshot list
+      datafolio --folio data/experiment snapshot list
 
       # Git-style
       datafolio -C data/experiment snapshot create v1.0
 
 Options:
-  -b, --bundle PATH  Path to bundle directory [env: DATAFOLIO_BUNDLE]
+  -b, --folio PATH  Path to bundle directory [env: DATAFOLIO_PATH]
   -C PATH            Change to directory (git-style)
   --version          Show version
   --help             Show this message
@@ -1805,7 +1805,7 @@ Tip: Initialize with: datafolio init /tmp
    - Add Rich for terminal formatting
 
 2. Implement core CLI infrastructure
-   - Global options (--bundle, -C)
+   - Global options (--folio, -C)
    - Bundle path resolution (flag > env > current dir)
    - Context passing to subcommands
    - Error handling and formatting
@@ -2094,7 +2094,7 @@ def test_snapshot_create_basic(tmp_path):
     # Run CLI command
     runner = CliRunner()
     result = runner.invoke(cli, [
-        '--bundle', str(tmp_path / 'test'),
+        '--folio', str(tmp_path / 'test'),
         'snapshot', 'create', 'v1.0',
         '-m', 'Test snapshot'
     ])
@@ -2129,7 +2129,7 @@ def test_git_warning(tmp_path):
 
     runner = CliRunner()
     result = runner.invoke(cli, [
-        '--bundle', str(tmp_path / 'test'),
+        '--folio', str(tmp_path / 'test'),
         'snapshot', 'create', 'v1.0'
     ], input='n\n')  # Respond 'no' to confirmation
 
@@ -2148,9 +2148,9 @@ def test_bundle_path_precedence(tmp_path):
     # Flag should override env var
     runner = CliRunner()
     result = runner.invoke(cli, [
-        '--bundle', str(bundle1),
+        '--folio', str(bundle1),
         'snapshot', 'list'
-    ], env={'DATAFOLIO_BUNDLE': str(bundle2)})
+    ], env={'DATAFOLIO_PATH': str(bundle2)})
 
     # Should use bundle1 (flag has priority)
     assert result.exit_code == 0
@@ -2380,7 +2380,7 @@ for snap in folio.list_snapshots():
 
 ### Phase 7: CLI Tool
 - [ ] Set up Click + Rich framework
-- [ ] Implement global options (--bundle, -C)
+- [ ] Implement global options (--folio, -C)
 - [ ] Implement snapshot create command
 - [ ] Implement snapshot list command
 - [ ] Implement snapshot show command

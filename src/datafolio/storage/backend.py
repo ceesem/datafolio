@@ -44,15 +44,28 @@ class StorageBackend:
             return Path(path[7:]).exists()
 
         if is_cloud_path(path):
-            # For cloud, we'll try to list contents
             try:
                 from cloudfiles import CloudFiles
 
-                cf = CloudFiles(path)
-                # Try to list - if it works, directory exists
-                # Note: This might be imperfect for single files depending on backend
-                list(cf.list())
-                return True
+                # Check if it looks like a file (has extension) or directory
+                if "." in path.split("/")[-1]:
+                    # Looks like a file - try to get it
+                    parts = path.rsplit("/", 1)
+                    if len(parts) == 2:
+                        dir_path, filename = parts
+                        cf = CloudFiles(dir_path)
+                        result = cf.get(filename)
+                        return result is not None
+                    else:
+                        cf = CloudFiles(path)
+                        result = cf.get(path)
+                        return result is not None
+                else:
+                    # Looks like a directory - check if prefix exists
+                    cf = CloudFiles(path)
+                    # Try to list - if it works, directory exists
+                    list(cf.list())
+                    return True
             except:
                 return False
         else:
@@ -229,6 +242,10 @@ class StorageBackend:
         Returns:
             Deserialized data
 
+        Raises:
+            FileNotFoundError: If file doesn't exist
+            ValueError: If file content is empty or invalid
+
         Examples:
             >>> storage = StorageBackend()
             >>> data = storage.read_json('/path/to/data.json')
@@ -246,6 +263,17 @@ class StorageBackend:
                 filename = parts[0]
             cf = CloudFiles(dir_path) if dir_path else CloudFiles(path)
             content = cf.get(filename)
+
+            # Handle case where file doesn't exist or is empty
+            if content is None:
+                raise FileNotFoundError(f"File not found in cloud storage: {path}")
+            if not content:
+                raise ValueError(f"Empty file in cloud storage: {path}")
+
+            # CloudFiles might return string or bytes - handle both
+            if isinstance(content, str):
+                content = content.encode("utf-8")
+
             return orjson.loads(content)
         else:
             with open(path, "rb") as f:

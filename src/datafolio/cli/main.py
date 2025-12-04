@@ -18,59 +18,129 @@ from datafolio import DataFolio
 console = Console()
 
 
-def find_bundle_dir(ctx_bundle: Optional[str] = None) -> Path:
-    """Find bundle directory from multiple sources.
+def find_folio_dir(ctx_folio: Optional[str] = None) -> Path:
+    """Find folio directory from multiple sources.
 
     Priority:
-    1. Explicit --bundle/-C flag
-    2. DATAFOLIO_BUNDLE environment variable
+    1. Explicit --folio/-f flag
+    2. DATAFOLIO_PATH environment variable
     3. Current working directory
 
     Args:
-        ctx_bundle: Bundle path from CLI context
+        ctx_folio: Folio path from CLI context
 
     Returns:
-        Path to bundle directory
+        Path to folio directory
 
     Raises:
-        click.ClickException: If bundle cannot be found
+        click.ClickException: If folio cannot be found
     """
     # Check explicit flag
-    if ctx_bundle:
-        path = Path(ctx_bundle)
+    if ctx_folio:
+        path = Path(ctx_folio)
         if path.exists():
             return path
-        raise click.ClickException(f"Bundle not found: {ctx_bundle}")
+        raise click.ClickException(f"Folio not found: {ctx_folio}")
 
     # Check environment variable
-    env_bundle = os.environ.get("DATAFOLIO_BUNDLE")
-    if env_bundle:
-        path = Path(env_bundle)
+    env_folio = os.environ.get("DATAFOLIO_PATH")
+    if env_folio:
+        path = Path(env_folio)
         if path.exists():
             return path
         raise click.ClickException(
-            f"Bundle not found (from DATAFOLIO_BUNDLE): {env_bundle}"
+            f"Folio not found (from DATAFOLIO_PATH): {env_folio}"
         )
 
     # Use current directory
     return Path.cwd()
 
 
+def validate_existing_folio(path: Path) -> None:
+    """Validate that path is an existing DataFolio bundle.
+
+    Args:
+        path: Path to validate
+
+    Raises:
+        click.ClickException: If path is not a valid DataFolio bundle
+    """
+    items_file = path / "items.json"
+    metadata_file = path / "metadata.json"
+
+    if not path.exists():
+        raise click.ClickException(
+            f"Directory does not exist: {path}\n"
+            "Tip: Use 'datafolio init' to create a new folio, or use --folio/-f to specify the path."
+        )
+
+    if not items_file.exists() and not metadata_file.exists():
+        raise click.ClickException(
+            f"Not a DataFolio bundle: {path}\n"
+            f"Missing required files: items.json and metadata.json\n"
+            "Tip: Use 'datafolio init' to create a new folio, or use --folio/-f to specify the correct path."
+        )
+
+
+def validate_snapshot_name(name: str) -> None:
+    """Validate that a snapshot name is safe and valid.
+
+    Args:
+        name: Snapshot name to validate
+
+    Raises:
+        click.ClickException: If name is invalid
+    """
+    import re
+
+    # Check for empty name
+    if not name or not name.strip():
+        raise click.ClickException("Snapshot name cannot be empty")
+
+    # Check for valid characters (alphanumeric, hyphens, underscores, dots)
+    if not re.match(r"^[a-zA-Z0-9._-]+$", name):
+        raise click.ClickException(
+            f"Invalid snapshot name: '{name}'\n"
+            "Snapshot names can only contain letters, numbers, hyphens, underscores, and dots."
+        )
+
+    # Check for path traversal attempts
+    if ".." in name or "/" in name or "\\" in name:
+        raise click.ClickException(
+            f"Invalid snapshot name: '{name}'\n"
+            "Snapshot names cannot contain path separators or '..'."
+        )
+
+    # Check length (reasonable limit)
+    if len(name) > 100:
+        raise click.ClickException(
+            f"Snapshot name too long (max 100 characters): '{name}'"
+        )
+
+
+def _get_version():
+    """Get DataFolio version."""
+    from datafolio import __version__
+
+    return f"DataFolio version {__version__}"
+
+
 @click.group()
 @click.option(
-    "--bundle",
-    "-C",
+    "--folio",
+    "-f",
     type=click.Path(),
-    help="Path to DataFolio bundle (default: current directory or DATAFOLIO_BUNDLE env var)",
+    help="Path to DataFolio (default: current directory or DATAFOLIO_PATH env var)",
 )
+@click.version_option(version=None, prog_name="datafolio", message=_get_version())
 @click.pass_context
-def cli(ctx, bundle):
+def cli(ctx, folio):
     """DataFolio CLI - Manage data bundles and snapshots.
 
-    Use --bundle/-C to specify bundle path, or set DATAFOLIO_BUNDLE environment variable.
+    Use --folio/-f to specify folio path, or set DATAFOLIO_PATH environment variable.
     """
     ctx.ensure_object(dict)
-    ctx.obj["bundle"] = bundle
+    ctx.obj["folio"] = folio
 
 
 @cli.group()
@@ -112,12 +182,20 @@ def snapshot_create(ctx, name, description, tag, no_git, env, exec):
     Security: Git remote URLs are automatically sanitized to remove embedded
     credentials (tokens, passwords) before storage.
 
-    Example:
+    Examples:
+        # From within folio directory:
         datafolio snapshot create v1.0 -d "Baseline model" -t baseline -t production
         datafolio snapshot create v2.0 --env --exec  # Include environment and execution info
+
+        # From anywhere:
+        datafolio --folio /path/to/folio snapshot create v1.0
     """
     try:
-        bundle_path = find_bundle_dir(ctx.obj.get("bundle"))
+        # Validate snapshot name
+        validate_snapshot_name(name)
+
+        bundle_path = find_folio_dir(ctx.obj.get("folio"))
+        validate_existing_folio(bundle_path)
         folio = DataFolio(bundle_path)
 
         tags = list(tag) if tag else None
@@ -152,12 +230,14 @@ def snapshot_create(ctx, name, description, tag, no_git, env, exec):
 def snapshot_list(ctx, tag):
     """List all snapshots in the bundle.
 
-    Example:
+    Examples:
         datafolio snapshot list
         datafolio snapshot list --tag baseline
+        datafolio --folio /path/to/folio snapshot list
     """
     try:
-        bundle_path = find_bundle_dir(ctx.obj.get("bundle"))
+        bundle_path = find_folio_dir(ctx.obj.get("folio"))
+        validate_existing_folio(bundle_path)
         folio = DataFolio(bundle_path)
 
         snapshots = folio.list_snapshots()
@@ -181,12 +261,16 @@ def snapshot_list(ctx, tag):
         for snap in snapshots:
             from datetime import datetime
 
-            # Format timestamp
+            # Format timestamp - convert UTC to local time
             timestamp = snap.get("timestamp", "")
             if timestamp:
                 try:
+                    # Parse as UTC
                     dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-                    time_str = dt.strftime("%Y-%m-%d %H:%M")
+                    # Convert to local time
+                    local_dt = dt.astimezone()
+                    # Format with timezone abbreviation
+                    time_str = local_dt.strftime("%Y-%m-%d %H:%M %Z")
                 except Exception:
                     time_str = timestamp[:16]
             else:
@@ -197,11 +281,11 @@ def snapshot_list(ctx, tag):
 
             table.add_row(
                 snap["name"],
-                (desc[:50] + "...") if (desc and len(desc) > 50) else (desc or ""),
+                (desc[:100] + "...") if (desc and len(desc) > 100) else (desc or ""),
                 str(snap.get("num_items", 0)),
                 time_str,
-                (tags_str[:30] + "...")
-                if (tags_str and len(tags_str) > 30)
+                (tags_str[:60] + "...")
+                if (tags_str and len(tags_str) > 60)
                 else (tags_str or ""),
             )
 
@@ -218,11 +302,13 @@ def snapshot_list(ctx, tag):
 def snapshot_show(ctx, name):
     """Show detailed information about a snapshot.
 
-    Example:
+    Examples:
         datafolio snapshot show v1.0
+        datafolio --folio /path/to/folio snapshot show v1.0
     """
     try:
-        bundle_path = find_bundle_dir(ctx.obj.get("bundle"))
+        bundle_path = find_folio_dir(ctx.obj.get("folio"))
+        validate_existing_folio(bundle_path)
         folio = DataFolio(bundle_path)
 
         info = folio.get_snapshot_info(name)
@@ -237,7 +323,20 @@ def snapshot_show(ctx, name):
         if info.get("tags"):
             console.print(f"[bold]Tags:[/bold] {', '.join(info['tags'])}")
 
-        console.print(f"[bold]Timestamp:[/bold] {info.get('timestamp', 'N/A')}")
+        # Format timestamp in local time
+        timestamp = info.get("timestamp", "")
+        if timestamp:
+            from datetime import datetime
+
+            try:
+                dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                local_dt = dt.astimezone()
+                timestamp_str = local_dt.strftime("%Y-%m-%d %H:%M:%S %Z")
+            except Exception:
+                timestamp_str = timestamp
+        else:
+            timestamp_str = "N/A"
+        console.print(f"[bold]Timestamp:[/bold] {timestamp_str}")
 
         # Items
         item_versions = info.get("item_versions", {})
@@ -298,11 +397,13 @@ def snapshot_show(ctx, name):
 def snapshot_compare(ctx, snapshot1, snapshot2):
     """Compare two snapshots.
 
-    Example:
+    Examples:
         datafolio snapshot compare v1.0 v2.0
+        datafolio --folio /path/to/folio snapshot compare v1.0 v2.0
     """
     try:
-        bundle_path = find_bundle_dir(ctx.obj.get("bundle"))
+        bundle_path = find_folio_dir(ctx.obj.get("folio"))
+        validate_existing_folio(bundle_path)
         folio = DataFolio(bundle_path)
 
         diff = folio.compare_snapshots(snapshot1, snapshot2)
@@ -376,12 +477,14 @@ def snapshot_compare(ctx, snapshot1, snapshot2):
 def snapshot_delete(ctx, name, cleanup, yes):
     """Delete a snapshot.
 
-    Example:
+    Examples:
         datafolio snapshot delete v0.1 --cleanup
         datafolio snapshot delete experimental-v5 -y
+        datafolio --folio /path/to/folio snapshot delete v1.0 -y
     """
     try:
-        bundle_path = find_bundle_dir(ctx.obj.get("bundle"))
+        bundle_path = find_folio_dir(ctx.obj.get("folio"))
+        validate_existing_folio(bundle_path)
         folio = DataFolio(bundle_path)
 
         # Confirmation
@@ -418,7 +521,8 @@ def snapshot_gc(ctx, dry_run):
         datafolio snapshot gc
     """
     try:
-        bundle_path = find_bundle_dir(ctx.obj.get("bundle"))
+        bundle_path = find_folio_dir(ctx.obj.get("folio"))
+        validate_existing_folio(bundle_path)
         folio = DataFolio(bundle_path)
 
         deleted = folio.cleanup_orphaned_versions(dry_run=dry_run)
@@ -457,7 +561,8 @@ def snapshot_reproduce(ctx, name):
         datafolio snapshot reproduce v1.0
     """
     try:
-        bundle_path = find_bundle_dir(ctx.obj.get("bundle"))
+        bundle_path = find_folio_dir(ctx.obj.get("folio"))
+        validate_existing_folio(bundle_path)
         folio = DataFolio(bundle_path)
 
         instructions = folio.reproduce_instructions(name)
@@ -483,7 +588,8 @@ def snapshot_status(ctx):
         datafolio snapshot status
     """
     try:
-        bundle_path = find_bundle_dir(ctx.obj.get("bundle"))
+        bundle_path = find_folio_dir(ctx.obj.get("folio"))
+        validate_existing_folio(bundle_path)
         folio = DataFolio(bundle_path)
 
         console.print(f"\n[bold]Current bundle:[/bold] {bundle_path}")
@@ -498,9 +604,23 @@ def snapshot_status(ctx):
 
         # Get last snapshot
         last_snapshot = snapshots[-1]
+
+        # Format timestamp
+        timestamp = last_snapshot.get("timestamp", "")
+        if timestamp:
+            from datetime import datetime
+
+            try:
+                dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                local_dt = dt.astimezone()
+                date_str = local_dt.strftime("%Y-%m-%d")
+            except Exception:
+                date_str = timestamp[:10]
+        else:
+            date_str = "unknown"
+
         console.print(
-            f"[bold]Last snapshot:[/bold] {last_snapshot['name']} "
-            f"({last_snapshot['timestamp'][:10]})"
+            f"[bold]Last snapshot:[/bold] {last_snapshot['name']} ({date_str})"
         )
 
         # Get diff from last snapshot
@@ -578,7 +698,8 @@ def snapshot_diff(ctx, snapshot):
         datafolio snapshot diff v1.0      # Compare to specific snapshot
     """
     try:
-        bundle_path = find_bundle_dir(ctx.obj.get("bundle"))
+        bundle_path = find_folio_dir(ctx.obj.get("folio"))
+        validate_existing_folio(bundle_path)
         folio = DataFolio(bundle_path)
 
         # Get diff
@@ -663,21 +784,75 @@ def snapshot_diff(ctx, snapshot):
 # ==================== Bundle Commands ====================
 
 
-@cli.command("describe")
-@click.option("--max-metadata", default=10, help="Maximum metadata fields to show")
+@cli.command("validate")
+@click.argument("path", type=click.Path(), required=False)
 @click.pass_context
-def describe(ctx, max_metadata):
-    """Show detailed bundle description.
+def validate(ctx, path):
+    """Validate that a directory is a valid DataFolio bundle.
 
-    Example:
-        datafolio describe
+    If no path is provided, validates the current directory or DATAFOLIO_PATH.
+
+    Examples:
+        datafolio validate
+        datafolio validate /path/to/folio
+        datafolio --folio /path/to/folio validate
     """
     try:
-        bundle_path = find_bundle_dir(ctx.obj.get("bundle"))
+        # Determine which path to validate
+        if path:
+            folio_path = Path(path)
+        else:
+            folio_path = find_folio_dir(ctx.obj.get("folio"))
+
+        # Validate the path
+        validate_existing_folio(folio_path)
+
+        # If we get here, validation succeeded
+        console.print(f"[green]✓[/green] Valid DataFolio bundle: {folio_path}")
+
+        # Show basic info
+        folio = DataFolio(folio_path)
+        contents = folio.list_contents()
+        num_items = sum(len(items) for items in contents.values())
+        num_snapshots = len(folio.list_snapshots())
+
+        console.print(f"  Items: {num_items}")
+        console.print(f"  Snapshots: {num_snapshots}")
+
+        if folio.metadata.get("description"):
+            console.print(f"  Description: {folio.metadata['description']}")
+
+    except click.ClickException as e:
+        # Re-raise Click exceptions (from validate_existing_folio)
+        raise
+    except Exception as e:
+        console.print(f"[red]✗[/red] Error: {e}", style="red")
+        sys.exit(1)
+
+
+@cli.command("describe")
+@click.option("--max-metadata", default=10, help="Maximum metadata fields to show")
+@click.option(
+    "--snapshot", "-s", help="Describe a specific snapshot instead of the full bundle"
+)
+@click.pass_context
+def describe(ctx, max_metadata, snapshot):
+    """Show detailed bundle description.
+
+    Examples:
+        datafolio describe
+        datafolio --folio /path/to/folio describe
+        datafolio describe --snapshot v1.0
+    """
+    try:
+        bundle_path = find_folio_dir(ctx.obj.get("folio"))
+        validate_existing_folio(bundle_path)
         folio = DataFolio(bundle_path)
 
         # Use folio's describe method which prints to stdout
-        folio.describe(return_string=False, max_metadata_fields=max_metadata)
+        folio.describe(
+            return_string=False, max_metadata_fields=max_metadata, snapshot=snapshot
+        )
 
     except Exception as e:
         console.print(f"[red]✗[/red] Error: {e}", style="red")
@@ -694,9 +869,10 @@ def init(ctx, path, description, name):
 
     If no path is provided, initializes in the current directory.
 
-    Example:
+    Examples:
         datafolio init experiments/new-exp -d "My experiment"
         datafolio init -d "Current directory experiment"
+        datafolio init gs://my-bucket/experiment -d "Cloud experiment"
     """
     try:
         from pathlib import Path

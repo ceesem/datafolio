@@ -31,7 +31,7 @@ class TestSnapshotCreate:
         runner = CliRunner()
         result = runner.invoke(
             cli,
-            ["--bundle", str(tmp_path / "test"), "snapshot", "create", "v1.0"],
+            ["--folio", str(tmp_path / "test"), "snapshot", "create", "v1.0"],
         )
 
         assert result.exit_code == 0
@@ -51,7 +51,7 @@ class TestSnapshotCreate:
         result = runner.invoke(
             cli,
             [
-                "--bundle",
+                "--folio",
                 str(tmp_path / "test"),
                 "snapshot",
                 "create",
@@ -82,7 +82,7 @@ class TestSnapshotCreate:
 
         runner = CliRunner()
         result = runner.invoke(
-            cli, ["--bundle", str(tmp_path / "test"), "snapshot", "create", "v1.0"]
+            cli, ["--folio", str(tmp_path / "test"), "snapshot", "create", "v1.0"]
         )
 
         assert result.exit_code == 1
@@ -98,7 +98,7 @@ class TestSnapshotList:
 
         runner = CliRunner()
         result = runner.invoke(
-            cli, ["--bundle", str(tmp_path / "test"), "snapshot", "list"]
+            cli, ["--folio", str(tmp_path / "test"), "snapshot", "list"]
         )
 
         assert result.exit_code == 0
@@ -112,7 +112,7 @@ class TestSnapshotList:
 
         runner = CliRunner()
         result = runner.invoke(
-            cli, ["--bundle", str(tmp_path / "test"), "snapshot", "list"]
+            cli, ["--folio", str(tmp_path / "test"), "snapshot", "list"]
         )
 
         assert result.exit_code == 0
@@ -129,7 +129,7 @@ class TestSnapshotList:
         result = runner.invoke(
             cli,
             [
-                "--bundle",
+                "--folio",
                 str(tmp_path / "test"),
                 "snapshot",
                 "list",
@@ -166,7 +166,7 @@ class TestSnapshotShow:
 
         runner = CliRunner()
         result = runner.invoke(
-            cli, ["--bundle", str(tmp_path / "test"), "snapshot", "show", "v1.0"]
+            cli, ["--folio", str(tmp_path / "test"), "snapshot", "show", "v1.0"]
         )
 
         assert result.exit_code == 0
@@ -180,7 +180,7 @@ class TestSnapshotShow:
         runner = CliRunner()
         result = runner.invoke(
             cli,
-            ["--bundle", str(tmp_path / "test"), "snapshot", "show", "nonexistent"],
+            ["--folio", str(tmp_path / "test"), "snapshot", "show", "nonexistent"],
         )
 
         assert result.exit_code == 1
@@ -205,7 +205,7 @@ class TestSnapshotCompare:
         result = runner.invoke(
             cli,
             [
-                "--bundle",
+                "--folio",
                 str(tmp_path / "test"),
                 "snapshot",
                 "compare",
@@ -227,7 +227,7 @@ class TestSnapshotCompare:
         result = runner.invoke(
             cli,
             [
-                "--bundle",
+                "--folio",
                 str(tmp_path / "test"),
                 "snapshot",
                 "compare",
@@ -250,7 +250,7 @@ class TestSnapshotDelete:
         runner = CliRunner()
         result = runner.invoke(
             cli,
-            ["--bundle", str(tmp_path / "test"), "snapshot", "delete", "v1.0"],
+            ["--folio", str(tmp_path / "test"), "snapshot", "delete", "v1.0"],
             input="y\n",
         )
 
@@ -269,7 +269,7 @@ class TestSnapshotDelete:
         runner = CliRunner()
         result = runner.invoke(
             cli,
-            ["--bundle", str(tmp_path / "test"), "snapshot", "delete", "v1.0", "-y"],
+            ["--folio", str(tmp_path / "test"), "snapshot", "delete", "v1.0", "-y"],
         )
 
         assert result.exit_code == 0
@@ -283,7 +283,7 @@ class TestSnapshotDelete:
         runner = CliRunner()
         result = runner.invoke(
             cli,
-            ["--bundle", str(tmp_path / "test"), "snapshot", "delete", "v1.0"],
+            ["--folio", str(tmp_path / "test"), "snapshot", "delete", "v1.0"],
             input="n\n",
         )
 
@@ -312,7 +312,7 @@ class TestSnapshotGC:
         runner = CliRunner()
         result = runner.invoke(
             cli,
-            ["--bundle", str(tmp_path / "test"), "snapshot", "gc", "--dry-run"],
+            ["--folio", str(tmp_path / "test"), "snapshot", "gc", "--dry-run"],
         )
 
         assert result.exit_code == 0
@@ -326,7 +326,7 @@ class TestSnapshotGC:
 
         runner = CliRunner()
         result = runner.invoke(
-            cli, ["--bundle", str(tmp_path / "test"), "snapshot", "gc"]
+            cli, ["--folio", str(tmp_path / "test"), "snapshot", "gc"]
         )
 
         assert result.exit_code == 0
@@ -345,7 +345,7 @@ class TestSnapshotReproduce:
         runner = CliRunner()
         result = runner.invoke(
             cli,
-            ["--bundle", str(tmp_path / "test"), "snapshot", "reproduce", "v1.0"],
+            ["--folio", str(tmp_path / "test"), "snapshot", "reproduce", "v1.0"],
         )
 
         assert result.exit_code == 0
@@ -361,7 +361,7 @@ class TestSnapshotStatus:
 
         runner = CliRunner()
         result = runner.invoke(
-            cli, ["--bundle", str(tmp_path / "test"), "snapshot", "status"]
+            cli, ["--folio", str(tmp_path / "test"), "snapshot", "status"]
         )
 
         assert result.exit_code == 0
@@ -376,7 +376,7 @@ class TestSnapshotStatus:
 
         runner = CliRunner()
         result = runner.invoke(
-            cli, ["--bundle", str(tmp_path / "test"), "snapshot", "status"]
+            cli, ["--folio", str(tmp_path / "test"), "snapshot", "status"]
         )
 
         assert result.exit_code == 0
@@ -395,7 +395,7 @@ class TestSnapshotStatus:
 
         runner = CliRunner()
         result = runner.invoke(
-            cli, ["--bundle", str(tmp_path / "test"), "snapshot", "status"]
+            cli, ["--folio", str(tmp_path / "test"), "snapshot", "status"]
         )
 
         assert result.exit_code == 0
@@ -415,7 +415,7 @@ class TestSnapshotStatus:
 
         runner = CliRunner()
         result = runner.invoke(
-            cli, ["--bundle", str(tmp_path / "test"), "snapshot", "status"]
+            cli, ["--folio", str(tmp_path / "test"), "snapshot", "status"]
         )
 
         assert result.exit_code == 0
@@ -439,7 +439,7 @@ class TestSnapshotDiff:
 
         runner = CliRunner()
         result = runner.invoke(
-            cli, ["--bundle", str(tmp_path / "test"), "snapshot", "diff"]
+            cli, ["--folio", str(tmp_path / "test"), "snapshot", "diff"]
         )
 
         assert result.exit_code == 0
@@ -463,7 +463,7 @@ class TestSnapshotDiff:
 
         runner = CliRunner()
         result = runner.invoke(
-            cli, ["--bundle", str(tmp_path / "test"), "snapshot", "diff", "v1.0"]
+            cli, ["--folio", str(tmp_path / "test"), "snapshot", "diff", "v1.0"]
         )
 
         assert result.exit_code == 0
@@ -480,7 +480,7 @@ class TestSnapshotDiff:
 
         runner = CliRunner()
         result = runner.invoke(
-            cli, ["--bundle", str(tmp_path / "test"), "snapshot", "diff"]
+            cli, ["--folio", str(tmp_path / "test"), "snapshot", "diff"]
         )
 
         assert result.exit_code == 0
@@ -541,17 +541,17 @@ class TestInit:
         assert "Cancelled" in result.output
 
 
-class TestBundlePathResolution:
-    """Test bundle path resolution from different sources."""
+class TestFolioPathResolution:
+    """Test folio path resolution from different sources."""
 
-    def test_explicit_bundle_flag(self, tmp_path):
-        """Test --bundle flag."""
+    def test_explicit_folio_flag(self, tmp_path):
+        """Test --folio flag."""
         bundle_path = tmp_path / "test"
         folio = DataFolio(bundle_path)
         folio.create_snapshot("v1.0")
 
         runner = CliRunner()
-        result = runner.invoke(cli, ["--bundle", str(bundle_path), "snapshot", "list"])
+        result = runner.invoke(cli, ["--folio", str(bundle_path), "snapshot", "list"])
 
         if result.exit_code != 0:
             print(f"Exit code: {result.exit_code}")
@@ -561,14 +561,14 @@ class TestBundlePathResolution:
         assert result.exit_code == 0
         assert "v1.0" in result.output
 
-    def test_c_flag(self, tmp_path):
-        """Test -C flag (git-style)."""
+    def test_f_flag(self, tmp_path):
+        """Test -f flag."""
         bundle_path = tmp_path / "test"
         folio = DataFolio(bundle_path)
         folio.create_snapshot("v1.0")
 
         runner = CliRunner()
-        result = runner.invoke(cli, ["-C", str(bundle_path), "snapshot", "list"])
+        result = runner.invoke(cli, ["-f", str(bundle_path), "snapshot", "list"])
 
         assert result.exit_code == 0
         assert "v1.0" in result.output
@@ -584,10 +584,133 @@ class TestDescribe:
         folio.add_table("data", df)
 
         runner = CliRunner()
-        result = runner.invoke(cli, ["--bundle", str(tmp_path / "test"), "describe"])
+        result = runner.invoke(cli, ["--folio", str(tmp_path / "test"), "describe"])
 
         assert result.exit_code == 0
         # The describe method prints directly, so output should contain bundle info
+
+
+class TestVersion:
+    """Test --version flag."""
+
+    def test_version_flag(self):
+        """Test --version flag shows version."""
+        runner = CliRunner()
+        result = runner.invoke(cli, ["--version"])
+
+        assert result.exit_code == 0
+        assert "DataFolio version" in result.output
+
+    def test_version_with_command(self):
+        """Test --version works without requiring a command."""
+        runner = CliRunner()
+        result = runner.invoke(cli, ["--version"])
+
+        assert result.exit_code == 0
+        assert "DataFolio version" in result.output
+
+
+class TestValidate:
+    """Test validate command."""
+
+    def test_validate_valid_folio(self, tmp_path):
+        """Test validating a valid folio."""
+        folio = DataFolio(tmp_path / "test")
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["--folio", str(tmp_path / "test"), "validate"])
+
+        assert result.exit_code == 0
+        assert "Valid DataFolio bundle" in result.output
+
+    def test_validate_invalid_directory(self, tmp_path):
+        """Test validating an invalid directory."""
+        invalid_dir = tmp_path / "not-a-folio"
+        invalid_dir.mkdir()
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["--folio", str(invalid_dir), "validate"])
+
+        assert result.exit_code == 1
+        assert "Not a DataFolio bundle" in result.output
+
+    def test_validate_with_path_argument(self, tmp_path):
+        """Test validate with explicit path argument."""
+        folio = DataFolio(tmp_path / "test")
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["validate", str(tmp_path / "test")])
+
+        assert result.exit_code == 0
+        assert "Valid DataFolio bundle" in result.output
+
+
+class TestSnapshotNameValidation:
+    """Test snapshot name validation."""
+
+    def test_valid_snapshot_names(self, tmp_path):
+        """Test that valid snapshot names are accepted."""
+        folio = DataFolio(tmp_path / "test")
+
+        valid_names = ["v1.0", "baseline-model", "test_snapshot", "2024.01.15"]
+
+        runner = CliRunner()
+        for name in valid_names:
+            result = runner.invoke(
+                cli, ["--folio", str(tmp_path / "test"), "snapshot", "create", name]
+            )
+            assert result.exit_code == 0, f"Failed for valid name: {name}"
+
+    def test_invalid_snapshot_with_spaces(self, tmp_path):
+        """Test that snapshot names with spaces are rejected."""
+        folio = DataFolio(tmp_path / "test")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "--folio",
+                str(tmp_path / "test"),
+                "snapshot",
+                "create",
+                "my snapshot",
+            ],
+        )
+
+        assert result.exit_code == 1
+        assert "Invalid snapshot name" in result.output
+
+    def test_invalid_snapshot_with_path_separator(self, tmp_path):
+        """Test that snapshot names with path separators are rejected."""
+        folio = DataFolio(tmp_path / "test")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "--folio",
+                str(tmp_path / "test"),
+                "snapshot",
+                "create",
+                "../../../etc/passwd",
+            ],
+        )
+
+        assert result.exit_code == 1
+        assert "Invalid snapshot name" in result.output
+
+    def test_invalid_snapshot_with_special_chars(self, tmp_path):
+        """Test that snapshot names with special characters are rejected."""
+        folio = DataFolio(tmp_path / "test")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["--folio", str(tmp_path / "test"), "snapshot", "create", "test@#$%"],
+        )
+
+        assert result.exit_code == 1
+        assert "Invalid snapshot name" in result.output
 
 
 class TestErrorHandling:
@@ -597,7 +720,7 @@ class TestErrorHandling:
         """Test error when bundle doesn't exist."""
         runner = CliRunner()
         result = runner.invoke(
-            cli, ["--bundle", str(tmp_path / "nonexistent"), "snapshot", "list"]
+            cli, ["--folio", str(tmp_path / "nonexistent"), "snapshot", "list"]
         )
 
         assert result.exit_code == 1
@@ -610,7 +733,7 @@ class TestErrorHandling:
         result = runner.invoke(
             cli,
             [
-                "--bundle",
+                "--folio",
                 str(tmp_path / "test"),
                 "snapshot",
                 "show",
@@ -620,6 +743,28 @@ class TestErrorHandling:
 
         assert result.exit_code == 1
         assert "not found" in result.output
+
+    def test_snapshot_create_in_non_folio_directory(self, tmp_path):
+        """Test that creating snapshot in non-DataFolio directory fails with helpful error."""
+        # Create a directory that exists but is not a DataFolio
+        non_folio_dir = tmp_path / "not-a-folio"
+        non_folio_dir.mkdir()
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "--folio",
+                str(non_folio_dir),
+                "snapshot",
+                "create",
+                "test-snapshot",
+            ],
+        )
+
+        assert result.exit_code == 1
+        assert "Not a DataFolio bundle" in result.output
+        assert "items.json" in result.output or "metadata.json" in result.output
 
 
 if __name__ == "__main__":
