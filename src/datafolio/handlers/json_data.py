@@ -144,4 +144,8 @@ class JsonHandler(BaseHandler):
         filepath = folio._storage.join_paths(
             folio._bundle_dir, subdir, item["filename"]
         )
+
+        # Use cache if available
+        filepath = folio._get_file_path_with_cache(name, filepath)
+
         return folio._storage.read_json(filepath)

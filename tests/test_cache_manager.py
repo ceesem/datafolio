@@ -38,6 +38,48 @@ def cache_manager(cache_config):
     )
 
 
+class TestCacheConfig:
+    """Test CacheConfig initialization and defaults."""
+
+    def test_default_cache_dir(self):
+        """Test that CacheConfig uses default cache directory."""
+        config = CacheConfig(enabled=True)
+        expected_default = Path.home() / ".datafolio_cache"
+        assert config.cache_dir == expected_default
+
+    def test_none_cache_dir_uses_default(self):
+        """Test that passing None for cache_dir uses default."""
+        config = CacheConfig(enabled=True, cache_dir=None)
+        expected_default = Path.home() / ".datafolio_cache"
+        assert config.cache_dir == expected_default
+
+    def test_string_cache_dir_converted_to_path(self, temp_cache_dir):
+        """Test that string cache_dir is converted to Path."""
+        config = CacheConfig(enabled=True, cache_dir=str(temp_cache_dir))
+        assert isinstance(config.cache_dir, Path)
+        assert config.cache_dir == temp_cache_dir
+
+    def test_path_cache_dir_preserved(self, temp_cache_dir):
+        """Test that Path cache_dir is preserved."""
+        config = CacheConfig(enabled=True, cache_dir=temp_cache_dir)
+        assert isinstance(config.cache_dir, Path)
+        assert config.cache_dir == temp_cache_dir
+
+    def test_explicit_cache_dir_flag(self, temp_cache_dir):
+        """Test that explicit cache_dir sets the flag correctly."""
+        # Default cache_dir should not be marked as explicit
+        config_default = CacheConfig(enabled=True)
+        assert config_default._is_explicit_cache_dir is False
+
+        # Explicitly provided cache_dir should be marked as explicit
+        config_explicit = CacheConfig(enabled=True, cache_dir=temp_cache_dir)
+        assert config_explicit._is_explicit_cache_dir is True
+
+        # String path should also be marked as explicit
+        config_string = CacheConfig(enabled=True, cache_dir=str(temp_cache_dir))
+        assert config_string._is_explicit_cache_dir is True
+
+
 class TestCacheManagerInitialization:
     """Test cache manager initialization."""
 
@@ -77,6 +119,34 @@ class TestCacheManagerInitialization:
             ttl_override=3600,
         )
         assert manager.ttl == 3600
+
+    def test_explicit_cache_dir_used_directly(self, temp_cache_dir):
+        """Test that explicit cache_dir is used directly without bundle structure."""
+        config = CacheConfig(enabled=True, cache_dir=temp_cache_dir)
+        manager = CacheManager(
+            bundle_path="gs://test-bucket/test-bundle",
+            config=config,
+        )
+
+        # Cache dir should be exactly the provided directory
+        assert manager.cache_dir == temp_cache_dir
+        # Lock dir should be inside the cache dir
+        assert manager.lock_dir == temp_cache_dir / ".locks"
+
+    def test_default_cache_dir_uses_bundle_structure(self):
+        """Test that default cache_dir uses multi-bundle structure."""
+        config = CacheConfig(enabled=True)  # Uses default
+        manager = CacheManager(
+            bundle_path="gs://test-bucket/test-bundle",
+            config=config,
+        )
+
+        # Cache dir should include bundles/{bundle_id} structure
+        expected_default = Path.home() / ".datafolio_cache"
+        assert str(manager.cache_dir).startswith(str(expected_default / "bundles"))
+        assert manager.bundle_id in str(manager.cache_dir)
+        # Lock dir should be at the root of the cache directory
+        assert manager.lock_dir == expected_default / ".locks"
 
 
 class TestCacheOperations:

@@ -13,7 +13,10 @@ class CacheConfig:
 
     Attributes:
         enabled: Whether caching is enabled
-        cache_dir: Root directory for cache storage
+        cache_dir: Root directory for cache storage. If not explicitly provided,
+            defaults to ~/.datafolio_cache and will use a multi-bundle structure
+            with bundles/{bundle_id} subdirectories. If explicitly provided,
+            will be used as the exact cache directory for a single bundle.
         default_ttl: Default time-to-live in seconds (30 minutes)
         max_cache_size: Maximum total cache size in bytes (None = unlimited)
         max_item_size: Maximum size per item in bytes (250 MB default)
@@ -21,6 +24,7 @@ class CacheConfig:
         strict_mode: If True, fail on checksum mismatch; if False, warn and re-download
         fallback_to_stale: Use stale cache on network error
         max_stale_age: Maximum age for stale cache in seconds (24 hours)
+        _is_explicit_cache_dir: Internal flag tracking if cache_dir was explicitly provided
     """
 
     enabled: bool = False
@@ -32,13 +36,25 @@ class CacheConfig:
     strict_mode: bool = False
     fallback_to_stale: bool = True
     max_stale_age: int = 86400  # 24 hours
+    _is_explicit_cache_dir: bool = False
 
     def __post_init__(self):
-        """Ensure cache_dir is a Path object."""
-        if not isinstance(self.cache_dir, Path):
+        """Ensure cache_dir is a Path object and track if it was explicitly provided."""
+        if self.cache_dir is None:
+            # Use default if None was explicitly passed
+            self.cache_dir = Path.home() / ".datafolio_cache"
+            self._is_explicit_cache_dir = False
+        elif not isinstance(self.cache_dir, Path):
+            # String path provided - convert and mark as explicit
             self.cache_dir = Path(self.cache_dir).expanduser()
+            self._is_explicit_cache_dir = True
         else:
-            self.cache_dir = self.cache_dir.expanduser()
+            # Path object provided - check if it's the default
+            expanded = self.cache_dir.expanduser()
+            default_path = Path.home() / ".datafolio_cache"
+            # Mark as explicit only if it's not the default path
+            self._is_explicit_cache_dir = expanded != default_path
+            self.cache_dir = expanded
 
     @classmethod
     def load(cls, config_path: Optional[Path] = None) -> "CacheConfig":

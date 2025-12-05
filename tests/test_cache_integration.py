@@ -384,3 +384,54 @@ class TestCachingIntegration:
         # Get again - should hit cache
         loaded_model2 = folio.get_sklearn("test_model")
         assert loaded_model2 is not None
+
+    @patch("datafolio.folio.is_cloud_path")
+    def test_cache_with_default_cache_dir(
+        self, mock_is_cloud, temp_bundle_dir, sample_data
+    ):
+        """Test that caching works with default cache directory when cache_dir is not provided."""
+        mock_is_cloud.return_value = True
+
+        # Create folio with cache_enabled but no cache_dir specified
+        # This should use the default cache directory from CacheConfig
+        folio = DataFolio(
+            temp_bundle_dir / "test",
+            cache_enabled=True,
+            # Explicitly not passing cache_dir
+        )
+
+        # Cache manager should be initialized
+        assert folio._cache_manager is not None
+        assert folio._cache_enabled is True
+
+        # Verify the cache directory uses default with bundle structure
+        from pathlib import Path
+
+        expected_default = Path.home() / ".datafolio_cache"
+        assert folio._cache_manager.config.cache_dir == expected_default
+        # Should use multi-bundle structure
+        assert "bundles" in str(folio._cache_manager.cache_dir)
+        assert folio._cache_manager.bundle_id in str(folio._cache_manager.cache_dir)
+
+    @patch("datafolio.folio.is_cloud_path")
+    def test_cache_with_explicit_cache_dir(
+        self, mock_is_cloud, temp_bundle_dir, temp_cache_dir, sample_data
+    ):
+        """Test that explicit cache_dir is used directly without bundle structure."""
+        mock_is_cloud.return_value = True
+
+        # Create folio with explicit cache_dir
+        folio = DataFolio(
+            temp_bundle_dir / "test",
+            cache_enabled=True,
+            cache_dir=temp_cache_dir,
+        )
+
+        # Cache manager should be initialized
+        assert folio._cache_manager is not None
+        assert folio._cache_enabled is True
+
+        # Verify the cache directory is exactly the provided directory
+        assert folio._cache_manager.cache_dir == temp_cache_dir
+        # Should NOT include bundles/{bundle_id} structure
+        assert "bundles" not in str(folio._cache_manager.cache_dir)

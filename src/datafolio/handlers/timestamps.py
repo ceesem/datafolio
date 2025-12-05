@@ -151,6 +151,10 @@ class TimestampHandler(BaseHandler):
         filepath = folio._storage.join_paths(
             folio._bundle_dir, subdir, item["filename"]
         )
+
+        # Use cache if available
+        filepath = folio._get_file_path_with_cache(name, filepath)
+
         dt = folio._storage.read_timestamp(filepath)
 
         return dt.timestamp() if as_unix else dt

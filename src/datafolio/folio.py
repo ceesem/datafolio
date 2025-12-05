@@ -435,10 +435,12 @@ class DataFolio:
         if self._cache_enabled and is_cloud_path(self._bundle_dir):
             from datafolio.cache import CacheConfig, CacheManager
 
-            config = CacheConfig(
-                enabled=True,
-                cache_dir=Path(self._cache_dir) if self._cache_dir else None,
-            )
+            # Build config kwargs, only include cache_dir if explicitly provided
+            config_kwargs = {"enabled": True}
+            if self._cache_dir:
+                config_kwargs["cache_dir"] = Path(self._cache_dir)
+
+            config = CacheConfig(**config_kwargs)
             self._cache_manager = CacheManager(
                 bundle_path=self._bundle_dir,
                 config=config,
@@ -472,6 +474,72 @@ class DataFolio:
                 msg += f" (loaded from snapshot '{self._loaded_snapshot}')"
             msg += ". Open without read_only=True to make changes."
             raise RuntimeError(msg)
+
+    def _get_file_path_with_cache(self, name: str, remote_path: str) -> str:
+        """Get file path, using cache if available and enabled.
+
+        Args:
+            name: Item name
+            remote_path: Path to remote file
+
+        Returns:
+            Path to file (either cached local path or remote path)
+        """
+        # If caching not enabled, return remote path
+        if not self._cache_enabled or self._cache_manager is None:
+            return remote_path
+
+        # Get item metadata
+        item = self._items[name]
+        item_type = item["item_type"]
+        filename = item.get("filename", name)
+        checksum = item.get("checksum")
+
+        # Define fetch function for cache manager
+        def fetch_from_remote():
+            """Fetch file bytes from remote storage."""
+            import os
+
+            from datafolio.utils import resolve_path
+
+            bundle_dir = resolve_path(self._bundle_dir)
+            remote_full_path = resolve_path(remote_path)
+
+            # Check if path is within bundle or external
+            if remote_full_path.startswith(bundle_dir):
+                # Path is within bundle - use relative path with self._cf
+                relative_path = remote_full_path[len(bundle_dir) :].lstrip("/")
+                data_bytes = self._cf.get(relative_path)
+            else:
+                # External reference - create new CloudFiles instance
+                # Split into directory and filename
+                dir_path = os.path.dirname(remote_full_path)
+                file_name = os.path.basename(remote_full_path)
+                cf_external = cloudfiles.CloudFiles(dir_path)
+                data_bytes = cf_external.get(file_name)
+
+            return (data_bytes, item_type, filename)
+
+        # Try to get from cache (will fetch if needed)
+        try:
+            cached_path = self._cache_manager.get(
+                item_name=name,
+                remote_fetch_fn=fetch_from_remote,
+                remote_checksum=checksum,
+            )
+
+            if cached_path:
+                # Return local cached path as string
+                return str(cached_path)
+        except Exception as e:
+            # If caching fails, fall back to remote path
+            import logging
+
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Cache error for {name}, falling back to remote: {e}")
+
+        # Fallback to remote path
+        return remote_path
 
     def _exists(self, path: str) -> bool:
         """Check if a path exists (local or cloud).

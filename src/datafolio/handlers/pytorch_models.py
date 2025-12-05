@@ -171,6 +171,10 @@ class PyTorchHandler(BaseHandler):
         filepath = folio._storage.join_paths(
             folio._bundle_dir, subdir, item["filename"]
         )
+
+        # Use cache if available
+        filepath = folio._get_file_path_with_cache(name, filepath)
+
         bundle = folio._storage.read_pytorch(filepath)
 
         # If not reconstructing, return just the state dict

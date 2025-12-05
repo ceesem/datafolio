@@ -73,10 +73,17 @@ class CacheManager:
 
         # Normalize bundle path to filesystem-safe directory name
         self.bundle_id = self._normalize_bundle_path(bundle_path)
-        self.cache_dir = self.config.cache_dir / "bundles" / self.bundle_id
 
-        # Lock directory - create first to catch permission errors early
-        self.lock_dir = self.config.cache_dir / ".locks"
+        # If cache_dir was explicitly provided, use it directly as the bundle cache directory.
+        # Otherwise, use a multi-bundle structure with bundles/{bundle_id} subdirectories.
+        if self.config._is_explicit_cache_dir:
+            # Explicit cache_dir: use it directly for this bundle
+            self.cache_dir = self.config.cache_dir
+            self.lock_dir = self.config.cache_dir / ".locks"
+        else:
+            # Default cache_dir: use multi-bundle structure
+            self.cache_dir = self.config.cache_dir / "bundles" / self.bundle_id
+            self.lock_dir = self.config.cache_dir / ".locks"
         try:
             self.lock_dir.mkdir(parents=True, exist_ok=True)
         except PermissionError as e:
