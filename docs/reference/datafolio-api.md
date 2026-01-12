@@ -65,13 +65,6 @@ Methods for adding different types of data to a DataFolio.
 
 Methods for saving machine learning models.
 
-### PyTorch Models
-
-::: datafolio.DataFolio.add_pytorch
-    options:
-        show_source: false
-        heading_level: 3
-
 ### Scikit-learn Models
 
 ::: datafolio.DataFolio.add_sklearn
@@ -146,13 +139,6 @@ Methods for loading data from a DataFolio.
 ## Retrieving Models
 
 Methods for loading machine learning models.
-
-### PyTorch Models
-
-::: datafolio.DataFolio.get_pytorch
-    options:
-        show_source: false
-        heading_level: 3
 
 ### Scikit-learn Models
 
@@ -395,13 +381,6 @@ List of all model names in the bundle.
 print(folio.models)  # e.g., ['classifier', 'regressor']
 ```
 
-#### `pytorch_models`
-List of all PyTorch model names in the bundle.
-
-```python
-print(folio.pytorch_models)  # e.g., ['neural_net', 'transformer']
-```
-
 #### `artifacts`
 List of all artifact names in the bundle.
 
@@ -449,10 +428,10 @@ print(folio.loaded_snapshot)  # e.g., 'v1.0' or None
 | Category | Methods |
 |----------|---------|
 | **Adding Data** | `add_table()`, `add_numpy()`, `add_json()`, `add_timestamp()`, `add_data()`, `reference_table()` |
-| **Adding Models** | `add_pytorch()`, `add_sklearn()`, `add_model()` |
+| **Adding Models** | `add_sklearn()`, `add_model()` |
 | **Adding Artifacts** | `add_artifact()` |
 | **Retrieving Data** | `get_table()`, `get_numpy()`, `get_json()`, `get_timestamp()`, `get_data()`, `get_data_path()` |
-| **Retrieving Models** | `get_pytorch()`, `get_sklearn()`, `get_model()` |
+| **Retrieving Models** | `get_sklearn()`, `get_model()` |
 | **Retrieving Artifacts** | `get_artifact_path()` |
 | **Inspecting Items** | `list_contents()`, `get_table_info()`, `get_model_info()`, `get_artifact_info()`, `describe()` |
 | **Managing Items** | `delete()`, `copy()`, `validate()`, `is_valid()` |
