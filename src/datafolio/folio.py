@@ -21,6 +21,7 @@ from datafolio.utils import (
     METADATA_DIR,
     METADATA_FILE,
     MODELS_DIR,
+    SNAPSHOTS_FILE,
     TABLES_DIR,
     IncludedItem,
     IncludedTable,
@@ -28,9 +29,11 @@ from datafolio.utils import (
     TimestampItem,
     is_cloud_path,
     make_bundle_name,
+    resolve_path,
+    validate_item_name,
+    validate_snapshot_name,
+    validate_table_format,
 )
-
-from .utils import resolve_path
 
 
 class SnapshotView:
@@ -267,6 +270,7 @@ class DataFolio:
         cache_enabled: bool = False,
         cache_dir: Optional[Union[str, Path]] = None,
         cache_ttl: Optional[int] = None,
+        use_https: bool = False,
     ):
         """Initialize a new or open an existing DataFolio.
 
@@ -281,6 +285,7 @@ class DataFolio:
             cache_enabled: If True, enable local caching for remote data (default: False)
             cache_dir: Optional cache directory (default: ~/.datafolio_cache)
             cache_ttl: Optional TTL override in seconds (default: 1800 = 30 minutes)
+            use_https: If True, use HTTPS URLs for CloudFiles (for read-only access to public buckets) (default: False)
 
         Examples:
             Create new bundle with exact name:
@@ -324,12 +329,15 @@ class DataFolio:
         # Read-only mode flag
         self._read_only = read_only
 
+        # HTTPS mode flag (for read-only access to public cloud buckets)
+        self._use_https = use_https
+
         # Snapshot mode flags (set by load_snapshot())
         self._in_snapshot_mode = False
         self._loaded_snapshot: Optional[str] = None
 
         # Storage backend for all I/O operations
-        self._storage = StorageBackend()
+        self._storage = StorageBackend(use_https=use_https)
 
         # Cache manager (initialized after bundle_dir is set)
         self._cache_enabled = cache_enabled
@@ -354,6 +362,7 @@ class DataFolio:
 
         # Auto-refresh tracking for multi-instance consistency
         self._auto_refresh_enabled: bool = True  # Can be disabled if needed
+        self._in_save_operation: bool = False  # Prevent refresh during saves
 
         # Batch mode flag
         self._batch_mode = False
@@ -499,8 +508,6 @@ class DataFolio:
         def fetch_from_remote():
             """Fetch file bytes from remote storage."""
             import os
-
-            from datafolio.utils import resolve_path
 
             bundle_dir = resolve_path(self._bundle_dir)
             remote_full_path = resolve_path(remote_path)
@@ -1132,7 +1139,6 @@ For more information, see the [datafolio documentation](https://github.com/ceese
 
     def _load_manifests(self) -> None:
         """Load all manifest files from existing bundle."""
-        from datafolio.utils import SNAPSHOTS_FILE
 
         # Read metadata.json
         metadata_path = self._storage.join_paths(self._bundle_dir, METADATA_FILE)
@@ -1200,34 +1206,39 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         if self._batch_mode:
             return
 
-        path = self._storage.join_paths(self._bundle_dir, ITEMS_FILE)
+        # Set flag to prevent auto-refresh during save
+        self._in_save_operation = True
+        try:
+            path = self._storage.join_paths(self._bundle_dir, ITEMS_FILE)
 
-        # Combine current versions and snapshot versions
-        all_items = list(self._items.values()) + self._snapshot_versions
+            # Combine current versions and snapshot versions
+            all_items = list(self._items.values()) + self._snapshot_versions
 
-        # Save in simplified format: dict with items list only
-        items_data = {
-            "items": all_items,
-        }
-        self._storage.write_json(path, items_data)
+            # Save in simplified format: dict with items list only
+            items_data = {
+                "items": all_items,
+            }
+            self._storage.write_json(path, items_data)
 
-        # Update metadata timestamp when items change
-        # This allows other instances to detect staleness
-        if hasattr(self, "metadata"):
-            from datetime import datetime, timezone
+            # Update metadata timestamp when items change
+            # This allows other instances to detect staleness
+            if hasattr(self, "metadata"):
+                from datetime import datetime, timezone
 
-            # Use super() to update without triggering another save
-            super(MetadataDict, self.metadata).__setitem__(
-                "updated_at", datetime.now(timezone.utc).isoformat()
-            )
-            self._save_metadata()
+                # Use super() to update without triggering another save
+                super(MetadataDict, self.metadata).__setitem__(
+                    "updated_at", datetime.now(timezone.utc).isoformat()
+                )
+                self._save_metadata()
 
-        # Sync data accessor to update autocomplete immediately
-        self._sync_data_accessor()
+            # Sync data accessor to update autocomplete immediately
+            self._sync_data_accessor()
+        finally:
+            # Always clear the flag
+            self._in_save_operation = False
 
     def _save_snapshots(self) -> None:
         """Save snapshots.json manifest."""
-        from datafolio.utils import SNAPSHOTS_FILE
 
         if self._batch_mode:
             return
@@ -1535,8 +1546,6 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         self._check_read_only()
 
         from datetime import datetime, timezone
-
-        from datafolio.utils import validate_snapshot_name
 
         # Validate snapshot name
         validate_snapshot_name(name)
@@ -1933,13 +1942,10 @@ For more information, see the [datafolio documentation](https://github.com/ceese
                 # Delete the physical file directly by filename
                 # Don't use handler.delete() as that would delete from _items
                 try:
-                    # Determine storage directory
-                    if item_type == "included_table":
-                        subdir = TABLES_DIR
-                    elif item_type in ("model", "sklearn_model", "pytorch_model"):
-                        subdir = MODELS_DIR
-                    else:
-                        subdir = ARTIFACTS_DIR
+                    # Determine storage directory dynamically
+                    from datafolio.storage import get_storage_directory
+
+                    subdir = get_storage_directory(item_type)
 
                     # Delete the snapshot version file
                     file_path = self._storage.join_paths(
@@ -2057,18 +2063,11 @@ For more information, see the [datafolio documentation](https://github.com/ceese
                             current_filename = current_item.get("filename")
 
                             if snapshot_filename and current_filename:
-                                # Determine storage directory
+                                # Determine storage directory dynamically
+                                from datafolio.storage import get_storage_directory
+
                                 item_type = snapshot_item.get("item_type", "")
-                                if item_type == "included_table":
-                                    subdir = TABLES_DIR
-                                elif item_type in (
-                                    "model",
-                                    "sklearn_model",
-                                    "pytorch_model",
-                                ):
-                                    subdir = MODELS_DIR
-                                else:
-                                    subdir = ARTIFACTS_DIR
+                                subdir = get_storage_directory(item_type)
 
                                 # Copy snapshot file to current file
                                 snapshot_path = self._storage.join_paths(
@@ -2555,16 +2554,15 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         snapshot_filename = f"{name_part}@{first_snapshot}{ext_part}"
 
         # Get storage subdir based on item type
+        from datafolio.storage import get_storage_directory
+
         item_type = item.get("item_type", "")
-        if item_type == "included_table":
-            subdir = TABLES_DIR
-        elif item_type in ("model", "sklearn_model", "pytorch_model"):
-            subdir = MODELS_DIR
-        elif item_type in ("artifact", "numpy_array", "json_data", "timestamp"):
-            subdir = ARTIFACTS_DIR
-        else:
-            # Referenced tables don't have files to rename
+
+        # Referenced tables don't have files to rename
+        if item_type == "referenced_table":
             return
+
+        subdir = get_storage_directory(item_type)
 
         # Build full paths
         old_path = self._storage.join_paths(self._bundle_dir, subdir, current_filename)
@@ -2636,6 +2634,9 @@ For more information, see the [datafolio documentation](https://github.com/ceese
 
     def _refresh_if_needed(self) -> None:
         """Refresh manifests from disk/cloud if they've been updated externally."""
+        # Skip refresh if we're in the middle of a save operation
+        if self._in_save_operation:
+            return
         if self._check_if_stale():
             self.refresh()
 
@@ -3093,7 +3094,6 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             >>> print(folio.path)
             's3://bucket/experiments/test'
         """
-        from datafolio.utils import is_cloud_path
 
         # Cloud paths are returned as-is
         if is_cloud_path(self._bundle_dir):
@@ -3226,7 +3226,6 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             ...     num_rows=1_000_000
             ... )
         """
-        from datafolio.utils import validate_table_format
 
         # Validate inputs
         if name in self._items:
@@ -3249,7 +3248,6 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         )
 
         # Validate item name
-        from datafolio.utils import validate_item_name
 
         validate_item_name(name)
 
@@ -3319,7 +3317,6 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         self._check_read_only()
 
         # Validate item name
-        from datafolio.utils import validate_item_name
 
         validate_item_name(name)
 
@@ -3367,7 +3364,7 @@ For more information, see the [datafolio documentation](https://github.com/ceese
 
         return self
 
-    def get_table(self, name: str) -> Any:  # Returns pandas.DataFrame
+    def get_table(self, name: str, **kwargs) -> Any:  # Returns pandas.DataFrame
         """Get a table by name (works for both included and referenced).
 
         For included tables, reads from bundle directory.
@@ -3375,8 +3372,15 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         If caching is enabled (cache_enabled=True), cloud-based tables are cached locally
         for faster repeated access.
 
+        Supports all pandas.read_parquet() arguments for filtering and optimization:
+        - `columns`: List of column names to read (column pruning)
+        - `filters`: Row filtering predicates (row filtering)
+        - `engine`: Parquet engine ('pyarrow' or 'fastparquet')
+
         Args:
             name: Name of the table
+            **kwargs: Additional arguments passed to pd.read_parquet()
+                     (e.g., columns, filters, engine)
 
         Returns:
             pandas DataFrame
@@ -3387,12 +3391,23 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             FileNotFoundError: If referenced file doesn't exist
 
         Examples:
+            Basic usage:
             >>> folio = DataFolio('experiments', prefix='test')
             >>> import pandas as pd
-            >>> df = pd.DataFrame({'a': [1, 2, 3]})
+            >>> df = pd.DataFrame({'a': [1, 2, 3], 'b': [4, 5, 6]})
             >>> folio.add_table('test', df)
             >>> retrieved = folio.get_table('test')
             >>> assert len(retrieved) == 3
+
+            Column selection (read only specific columns):
+            >>> df_subset = folio.get_table('test', columns=['a'])
+            >>> assert list(df_subset.columns) == ['a']
+
+            Row filtering (requires pyarrow engine):
+            >>> df_filtered = folio.get_table('test',
+            ...     filters=[('a', '>', 1)],
+            ...     engine='pyarrow')
+            >>> assert len(df_filtered) == 2
         """
         # Auto-refresh if bundle was updated externally
         self._refresh_if_needed()
@@ -3411,7 +3426,7 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         # Get handler and delegate to it (with caching if enabled)
         registry = get_registry()
         handler = registry.get(item_type)
-        return self._get_with_cache(name, lambda: handler.get(self, name))
+        return self._get_with_cache(name, lambda: handler.get(self, name, **kwargs))
 
     def get_data_path(self, name: str) -> str:
         """Get the path to a referenced table.
@@ -3572,11 +3587,11 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         inputs: Optional[list[str]] = None,
         hyperparameters: Optional[Dict[str, Any]] = None,
         code: Optional[str] = None,
+        custom: bool = False,
     ) -> Self:
         """Add a scikit-learn style model to the bundle.
 
         Writes immediately to models/ directory and updates items.json.
-        Uses joblib for serialization.
 
         Args:
             name: Unique name for this model
@@ -3586,6 +3601,8 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             inputs: Optional list of table names used for training
             hyperparameters: Optional dict of hyperparameters
             code: Optional code snippet that trained this model
+            custom: If True, use skops format for portable pipelines with custom
+                transformers. If False (default), use joblib format.
 
         Returns:
             Self for method chaining
@@ -3603,6 +3620,9 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             ...     inputs=['training_data', 'validation_data'],
             ...     hyperparameters={'n_estimators': 100, 'max_depth': 10},
             ...     code='model.fit(X_train, y_train)')
+            >>>
+            >>> # Portable pipeline with custom transformer (skops)
+            >>> folio.add_sklearn('pipeline', custom_pipeline, custom=True)
         """
         # Validate inputs
         if not overwrite and name in self._items:
@@ -3611,18 +3631,16 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             )
 
         # Get handler and delegate storage + metadata creation
-        from datafolio.base.registry import get_registry
 
         registry = get_registry()
         handler = registry.get("model")
 
         # Handler builds metadata and writes model
         metadata = handler.add(
-            self, name, model, description=description, inputs=inputs
+            self, name, model, description=description, inputs=inputs, custom=custom
         )
 
         # Validate item name
-        from datafolio.utils import validate_item_name
 
         validate_item_name(name)
 
@@ -3650,6 +3668,7 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         model: Any,
         description: Optional[str] = None,
         overwrite: bool = False,
+        custom: bool = False,
         **kwargs,
     ) -> Self:
         """Add a model with automatic framework detection.
@@ -3663,6 +3682,7 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             model: Trained model (PyTorch or sklearn-style)
             description: Optional description
             overwrite: If True, allow overwriting existing model (default: False)
+            custom: For sklearn models, if True use skops format for portability
             **kwargs: Additional arguments passed to the specific method
                 (e.g., init_args for PyTorch, hyperparameters for sklearn)
 
@@ -3682,6 +3702,9 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             >>> import torch.nn as nn
             >>> model = MyNeuralNet(input_dim=10, hidden_dim=50)
             >>> folio.add_model('nn', model, init_args={'input_dim': 10, 'hidden_dim': 50})
+
+            Sklearn model with custom transformer (portable):
+            >>> folio.add_model('pipeline', custom_pipeline, custom=True)
         """
         # Check if PyTorch model
         if hasattr(model, "state_dict") and hasattr(model, "load_state_dict"):
@@ -3699,9 +3722,14 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             except ImportError:
                 pass
 
-        # Otherwise, assume sklearn-style (joblib-serializable)
+        # Otherwise, assume sklearn-style
         return self.add_sklearn(
-            name, model, description=description, overwrite=overwrite, **kwargs
+            name,
+            model,
+            description=description,
+            overwrite=overwrite,
+            custom=custom,
+            **kwargs,
         )
 
     def get_sklearn(self, name: str) -> Any:
@@ -3734,7 +3762,6 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             )
 
         # Delegate to handler (with caching if enabled)
-        from datafolio.base.registry import get_registry
 
         registry = get_registry()
         handler = registry.get("model")
@@ -3850,7 +3877,6 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             )
 
         # Get handler and delegate storage + metadata creation
-        from datafolio.base.registry import get_registry
 
         registry = get_registry()
         handler = registry.get("pytorch_model")
@@ -3867,7 +3893,6 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         )
 
         # Validate item name
-        from datafolio.utils import validate_item_name
 
         validate_item_name(name)
 
@@ -3943,7 +3968,6 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             )
 
         # Delegate to handler (with caching if enabled)
-        from datafolio.base.registry import get_registry
 
         registry = get_registry()
         handler = registry.get("pytorch_model")
@@ -3995,7 +4019,6 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             )
 
         # Get handler and delegate storage + metadata creation
-        from datafolio.base.registry import get_registry
 
         registry = get_registry()
         handler = registry.get("artifact")
@@ -4004,7 +4027,6 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         metadata = handler.add(self, name, str(path), description=description)
 
         # Validate item name
-        from datafolio.utils import validate_item_name
 
         validate_item_name(name)
 
@@ -4023,6 +4045,63 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         self._save_items()
 
         return self
+
+    def add_file(
+        self,
+        path: Union[str, Path],
+        name: Optional[str] = None,
+        category: Optional[str] = None,
+        description: Optional[str] = None,
+        overwrite: bool = False,
+    ) -> Self:
+        """Add a file to the bundle (convenience wrapper for add_artifact).
+
+        This is a file-centric interface that makes it easy to include
+        arbitrary files like code, documentation, configs, etc.
+
+        Args:
+            path: Path to the file to include
+            name: Optional name for this file (default: uses filename from path)
+            category: Optional category ('code', 'docs', 'configs', etc.)
+            description: Optional description
+            overwrite: If True, allow overwriting existing file (default: False)
+
+        Returns:
+            Self for method chaining
+
+        Raises:
+            ValueError: If name already exists and overwrite=False
+            FileNotFoundError: If file doesn't exist
+
+        Examples:
+            Add files using their filenames as names:
+            >>> folio = DataFolio('experiments/test')
+            >>> folio.add_file('path/to/readme.md', description='Project README')
+            >>> folio.add_file('src/train.py', category='code')
+
+            Add with custom name:
+            >>> folio.add_file('path/to/config.yaml', name='model_config')
+
+            Add and overwrite:
+            >>> folio.add_file('update.md', overwrite=True)
+
+            Method chaining:
+            >>> folio.add_file('readme.md').add_file('train.py').add_file('config.yaml')
+        """
+        # Use filename as name if not provided
+        if name is None:
+            # Use filename without extension as the name
+            # (artifact handler will add the extension back)
+            name = Path(path).stem
+
+        # Delegate to add_artifact
+        return self.add_artifact(
+            name=name,
+            path=path,
+            category=category,
+            description=description,
+            overwrite=overwrite,
+        )
 
     def get_artifact_path(self, name: str) -> str:
         """Get the path to an artifact file.
@@ -4054,7 +4133,6 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             )
 
         # Delegate to handler
-        from datafolio.base.registry import get_registry
 
         registry = get_registry()
         handler = registry.get("artifact")
@@ -4120,7 +4198,6 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         )
 
         # Validate item name
-        from datafolio.utils import validate_item_name
 
         validate_item_name(name)
 
@@ -4225,7 +4302,6 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             )
 
         # Get handler and delegate storage + metadata creation
-        from datafolio.base.registry import get_registry
 
         registry = get_registry()
         handler = registry.get("json_data")
@@ -4234,7 +4310,6 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         metadata = handler.add(self, name, data, description=description, inputs=inputs)
 
         # Validate item name
-        from datafolio.utils import validate_item_name
 
         validate_item_name(name)
 
@@ -4287,7 +4362,6 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             )
 
         # Delegate to handler
-        from datafolio.base.registry import get_registry
 
         registry = get_registry()
         handler = registry.get("json_data")
@@ -4351,7 +4425,6 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             )
 
         # Get handler and delegate storage + metadata creation
-        from datafolio.base.registry import get_registry
 
         registry = get_registry()
         handler = registry.get("timestamp")
@@ -4362,7 +4435,6 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         )
 
         # Validate item name
-        from datafolio.utils import validate_item_name
 
         validate_item_name(name)
 
@@ -4424,7 +4496,6 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             )
 
         # Delegate to handler
-        from datafolio.base.registry import get_registry
 
         registry = get_registry()
         handler = registry.get("timestamp")
@@ -4507,7 +4578,6 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             )
 
         # Validate item name
-        from datafolio.utils import validate_item_name
 
         validate_item_name(name)
 
@@ -4592,6 +4662,84 @@ For more information, see the [datafolio documentation](https://github.com/ceese
                 f"No handler registered for this type. "
                 f"Use type-specific get methods if available."
             )
+
+    def update_item(
+        self,
+        name: str,
+        description: Optional[str] = None,
+        inputs: Optional[list[str]] = None,
+        code: Optional[str] = None,
+    ) -> Self:
+        """Update metadata for an existing item.
+
+        Allows you to modify the description, inputs, or code fields
+        of an item after it's been added to the bundle.
+
+        Args:
+            name: Name of the item to update
+            description: New description (if provided, replaces existing)
+            inputs: New list of input items (if provided, replaces existing)
+            code: New code snippet (if provided, replaces existing)
+
+        Returns:
+            Self for method chaining
+
+        Raises:
+            KeyError: If item doesn't exist
+
+        Examples:
+            Update description:
+            >>> folio = DataFolio('experiments/test')
+            >>> folio.update_item('predictions', description='Model predictions on test set')
+
+            Update inputs:
+            >>> folio.update_item('final_model', inputs=['train_data', 'val_data'])
+
+            Update multiple fields:
+            >>> folio.update_item(
+            ...     'feature_matrix',
+            ...     description='Normalized feature matrix',
+            ...     inputs=['raw_data'],
+            ...     code='features = normalize(raw_data)'
+            ... )
+
+            Clear a field by passing None:
+            >>> folio.update_item('temp', code=None)  # Removes code field
+        """
+        self._check_read_only()
+
+        # Validate item exists
+        if name not in self._items:
+            raise KeyError(f"Item '{name}' not found in DataFolio")
+
+        item = self._items[name]
+
+        # Update fields if provided
+        if description is not None:
+            if description == "":
+                # Empty string removes the field
+                item.pop("description", None)
+            else:
+                item["description"] = description
+
+        if inputs is not None:
+            if not inputs:
+                # Empty list removes the field
+                item.pop("inputs", None)
+            else:
+                item["inputs"] = inputs
+
+        if code is not None:
+            if code == "":
+                # Empty string removes the field
+                item.pop("code", None)
+            else:
+                item["code"] = code
+
+        # Save updated manifest
+        self._save_items()
+
+        return self
 
     def delete(self, name: Union[str, list[str]], warn_dependents: bool = True) -> Self:
         """Delete one or more items from the DataFolio.
@@ -4761,18 +4909,20 @@ For more information, see the [datafolio documentation](https://github.com/ceese
 
     def copy(
         self,
-        new_path: Union[str, Path],
+        base_dir: Union[str, Path],
+        name: Optional[str] = None,
         metadata_updates: Optional[Dict[str, Any]] = None,
         include_items: Optional[list[str]] = None,
         exclude_items: Optional[list[str]] = None,
         random_suffix: bool = False,
     ) -> "DataFolio":
-        """Create a copy of this bundle with a new name.
+        """Create a copy of this bundle at a new location.
 
         Useful for creating derived experiments or checkpoints.
 
         Args:
-            new_path: Full path for new bundle directory
+            base_dir: Base directory for the new bundle (e.g., 'experiments' or 'gs://bucket/path')
+            name: Name for the new bundle. If None, uses the current bundle's name
             metadata_updates: Metadata fields to update/add in the copy
             include_items: If specified, only copy these items (by name)
             exclude_items: Items to exclude from copy (by name)
@@ -4785,15 +4935,19 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             ValueError: If include_items and exclude_items are both specified
 
         Examples:
-            >>> # Simple copy
-            >>> folio2 = folio.copy('experiments/exp-v2')
+            >>> # Copy to cloud storage with same name
+            >>> folio2 = folio.copy('gs://bucket/experiments')
+
+            >>> # Copy to local directory with new name
+            >>> folio2 = folio.copy('experiments', name='exp-v2')
 
             >>> # Copy with random suffix
-            >>> folio2 = folio.copy('experiments/exp-v2', random_suffix=True)
+            >>> folio2 = folio.copy('experiments', name='exp-v2', random_suffix=True)
 
             >>> # Copy with metadata updates to track parent
             >>> folio2 = folio.copy(
-            ...     'experiments/exp-v2',
+            ...     'experiments',
+            ...     name='exp-v2',
             ...     metadata_updates={
             ...         'parent_bundle': folio._bundle_dir,
             ...         'changes': 'Increased max_depth to 15'
@@ -4802,7 +4956,8 @@ For more information, see the [datafolio documentation](https://github.com/ceese
 
             >>> # Copy only specific items (e.g., for derived experiment)
             >>> folio2 = folio.copy(
-            ...     'experiments/exp-v2-tuned',
+            ...     'experiments',
+            ...     name='exp-v2-tuned',
             ...     include_items=['training_data', 'validation_data'],
             ...     metadata_updates={'status': 'in_progress'}
             ... )
@@ -4811,6 +4966,14 @@ For more information, see the [datafolio documentation](https://github.com/ceese
 
         if include_items is not None and exclude_items is not None:
             raise ValueError("Cannot specify both include_items and exclude_items")
+
+        # Extract current bundle name if not provided
+        if name is None:
+            # Get the last component of the bundle directory path
+            name = Path(self._bundle_dir).name
+
+        # Construct full path for new bundle
+        new_path = self._storage.join_paths(str(base_dir), name)
 
         # Create new bundle
         new_metadata = dict(self.metadata)
@@ -4839,112 +5002,60 @@ For more information, see the [datafolio documentation](https://github.com/ceese
                     # Just copy the reference (no data to copy)
                     new_folio._items[item_name] = dict(item)
 
-                elif item_type == "included_table":
-                    # Copy the parquet file
+                elif "filename" in item:
+                    # Copy file-based items (tables, models, arrays, JSON, etc.)
+                    # Dynamically get storage directory for this item type
+                    from datafolio.storage import get_storage_directory
+
+                    storage_dir = get_storage_directory(item_type)
+
                     src_path = self._storage.join_paths(
-                        self._bundle_dir, TABLES_DIR, item["filename"]
+                        self._bundle_dir, storage_dir, item["filename"]
                     )
                     dst_path = self._storage.join_paths(
-                        new_folio._bundle_dir, TABLES_DIR, item["filename"]
+                        new_folio._bundle_dir, storage_dir, item["filename"]
                     )
-                    if not is_cloud_path(src_path):
-                        shutil.copy2(src_path, dst_path)
-                    else:
-                        # For cloud paths, use cloudfiles
-                        # Extract directory and filename from paths
-                        src_parts = src_path.rsplit("/", 1)
-                        src_dir = src_parts[0] if len(src_parts) == 2 else ""
-                        src_filename = src_parts[-1]
 
-                        dst_parts = dst_path.rsplit("/", 1)
-                        dst_dir = dst_parts[0] if len(dst_parts) == 2 else ""
-                        dst_filename = dst_parts[-1]
+                    # Convert local paths to file:// protocol for cloudfiles
+                    src_cf_path = (
+                        src_path if is_cloud_path(src_path) else f"file://{src_path}"
+                    )
+                    dst_cf_path = (
+                        dst_path if is_cloud_path(dst_path) else f"file://{dst_path}"
+                    )
 
-                        src_cf = (
-                            cloudfiles.CloudFiles(src_dir)
-                            if src_dir
-                            else cloudfiles.CloudFiles(src_path)
+                    # Extract directory and filename from paths
+                    src_parts = src_cf_path.rsplit("/", 1)
+                    src_dir = src_parts[0] if len(src_parts) == 2 else ""
+                    src_filename = src_parts[-1]
+
+                    dst_parts = dst_cf_path.rsplit("/", 1)
+                    dst_dir = dst_parts[0] if len(dst_parts) == 2 else ""
+                    dst_filename = dst_parts[-1]
+
+                    # Use cloudfiles for all operations
+                    # Pass use_https for source (read) operations only
+                    src_cf = (
+                        cloudfiles.CloudFiles(src_dir, use_https=self._use_https)
+                        if src_dir
+                        else cloudfiles.CloudFiles(
+                            src_cf_path, use_https=self._use_https
                         )
-                        content = src_cf.get(src_filename)
-                        dst_cf = (
-                            cloudfiles.CloudFiles(dst_dir)
-                            if dst_dir
-                            else cloudfiles.CloudFiles(dst_path)
-                        )
-                        dst_cf.put(dst_filename, content)
+                    )
+                    content = src_cf.get(src_filename)
+
+                    # Destination (write) operations don't use use_https
+                    dst_cf = (
+                        cloudfiles.CloudFiles(dst_dir)
+                        if dst_dir
+                        else cloudfiles.CloudFiles(dst_cf_path)
+                    )
+                    dst_cf.put(dst_filename, content)
 
                     new_folio._items[item_name] = dict(item)
 
-                elif item_type == "model":
-                    # Copy the model file
-                    src_path = self._storage.join_paths(
-                        self._bundle_dir, MODELS_DIR, item["filename"]
-                    )
-                    dst_path = self._storage.join_paths(
-                        new_folio._bundle_dir, MODELS_DIR, item["filename"]
-                    )
-                    if not is_cloud_path(src_path):
-                        shutil.copy2(src_path, dst_path)
-                    else:
-                        # For cloud paths, use cloudfiles
-                        # Extract directory and filename from paths
-                        src_parts = src_path.rsplit("/", 1)
-                        src_dir = src_parts[0] if len(src_parts) == 2 else ""
-                        src_filename = src_parts[-1]
-
-                        dst_parts = dst_path.rsplit("/", 1)
-                        dst_dir = dst_parts[0] if len(dst_parts) == 2 else ""
-                        dst_filename = dst_parts[-1]
-
-                        src_cf = (
-                            cloudfiles.CloudFiles(src_dir)
-                            if src_dir
-                            else cloudfiles.CloudFiles(src_path)
-                        )
-                        content = src_cf.get(src_filename)
-                        dst_cf = (
-                            cloudfiles.CloudFiles(dst_dir)
-                            if dst_dir
-                            else cloudfiles.CloudFiles(dst_path)
-                        )
-                        dst_cf.put(dst_filename, content)
-
-                    new_folio._items[item_name] = dict(item)
-
-                elif item_type == "artifact":
-                    # Copy the artifact file
-                    src_path = self._storage.join_paths(
-                        self._bundle_dir, ARTIFACTS_DIR, item["filename"]
-                    )
-                    dst_path = self._storage.join_paths(
-                        new_folio._bundle_dir, ARTIFACTS_DIR, item["filename"]
-                    )
-                    if not is_cloud_path(src_path):
-                        shutil.copy2(src_path, dst_path)
-                    else:
-                        # For cloud paths, use cloudfiles
-                        # Extract directory and filename from paths
-                        src_parts = src_path.rsplit("/", 1)
-                        src_dir = src_parts[0] if len(src_parts) == 2 else ""
-                        src_filename = src_parts[-1]
-
-                        dst_parts = dst_path.rsplit("/", 1)
-                        dst_dir = dst_parts[0] if len(dst_parts) == 2 else ""
-                        dst_filename = dst_parts[-1]
-
-                        src_cf = (
-                            cloudfiles.CloudFiles(src_dir)
-                            if src_dir
-                            else cloudfiles.CloudFiles(src_path)
-                        )
-                        content = src_cf.get(src_filename)
-                        dst_cf = (
-                            cloudfiles.CloudFiles(dst_dir)
-                            if dst_dir
-                            else cloudfiles.CloudFiles(dst_path)
-                        )
-                        dst_cf.put(dst_filename, content)
-
+                else:
+                    # Handle items without files (shouldn't happen, but be defensive)
                     new_folio._items[item_name] = dict(item)
 
             # Save the new manifest

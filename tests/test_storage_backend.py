@@ -164,6 +164,16 @@ class TestFileSystemCloud:
 
         assert result is False
 
+    def test_exists_cloud_path_empty(self, storage):
+        """Test exists() with cloud path that has no files (empty prefix)."""
+        mock_cf = Mock()
+        mock_cf.list.return_value = []
+
+        with patch("cloudfiles.CloudFiles", return_value=mock_cf):
+            result = storage.exists("s3://bucket/path")
+
+        assert result is False
+
     def test_mkdir_cloud_path(self, storage):
         """Test mkdir() with cloud path (should be no-op)."""
         # Should not raise error
@@ -242,7 +252,7 @@ class TestJsonIO:
         mock_cf = Mock()
         written_content = None
 
-        def capture_put(filename, content):
+        def capture_put(filename, content, cache_control=None):
             nonlocal written_content
             written_content = content
 
@@ -334,7 +344,7 @@ class TestJoblibIO:
         mock_cf = Mock()
         written_content = None
 
-        def capture_put(filename, content):
+        def capture_put(filename, content, **kwargs):
             nonlocal written_content
             written_content = content
 
@@ -468,7 +478,7 @@ class TestPyTorchIO:
         mock_cf = Mock()
         written_content = None
 
-        def capture_put(filename, content):
+        def capture_put(filename, content, **kwargs):
             nonlocal written_content
             written_content = content
 
@@ -542,7 +552,7 @@ class TestNumpyIO:
         mock_cf = Mock()
         written_content = None
 
-        def capture_put(filename, content):
+        def capture_put(filename, content, **kwargs):
             nonlocal written_content
             written_content = content
 
@@ -605,7 +615,7 @@ class TestTimestampIO:
         mock_cf = Mock()
         written_content = None
 
-        def capture_put(filename, content):
+        def capture_put(filename, content, cache_control=None):
             nonlocal written_content
             written_content = content
 

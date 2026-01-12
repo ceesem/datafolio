@@ -2,7 +2,9 @@
 
 from pathlib import Path
 
+import numpy as np
 import pytest
+from sklearn.base import BaseEstimator, TransformerMixin
 
 from datafolio import DataFolio
 
@@ -502,3 +504,335 @@ class TestDelete:
         # Reload bundle and verify item is gone
         folio2 = DataFolio(tmp_path / "test")
         assert "data" not in folio2._items
+
+
+class TestUpdateItem:
+    """Tests for update_item() method."""
+
+    def test_update_description(self, tmp_path):
+        """Test updating item description."""
+        import numpy as np
+
+        folio = DataFolio(tmp_path / "test")
+        arr = np.array([1, 2, 3])
+        folio.add_numpy("test_array", arr)
+
+        # Initially no description
+        assert "description" not in folio._items["test_array"]
+
+        # Update description
+        folio.update_item("test_array", description="Test array for unit testing")
+        assert (
+            folio._items["test_array"]["description"] == "Test array for unit testing"
+        )
+
+    def test_update_inputs(self, tmp_path):
+        """Test updating item inputs."""
+        import numpy as np
+
+        folio = DataFolio(tmp_path / "test")
+        arr = np.array([1, 2, 3])
+        folio.add_numpy("test_array", arr)
+
+        # Update inputs
+        folio.update_item("test_array", inputs=["raw_data", "preprocessing"])
+        assert folio._items["test_array"]["inputs"] == ["raw_data", "preprocessing"]
+
+    def test_update_code(self, tmp_path):
+        """Test updating item code."""
+        import numpy as np
+
+        folio = DataFolio(tmp_path / "test")
+        arr = np.array([1, 2, 3])
+        folio.add_numpy("test_array", arr)
+
+        # Update code
+        folio.update_item("test_array", code="arr = np.array([1, 2, 3])")
+        assert folio._items["test_array"]["code"] == "arr = np.array([1, 2, 3])"
+
+    def test_update_multiple_fields(self, tmp_path):
+        """Test updating multiple fields at once."""
+        import numpy as np
+
+        folio = DataFolio(tmp_path / "test")
+        arr = np.array([1, 2, 3])
+        folio.add_numpy("test_array", arr)
+
+        # Update multiple fields
+        folio.update_item(
+            "test_array",
+            description="Updated description",
+            inputs=["new_input"],
+            code="new_code",
+        )
+
+        item = folio._items["test_array"]
+        assert item["description"] == "Updated description"
+        assert item["inputs"] == ["new_input"]
+        assert item["code"] == "new_code"
+
+    def test_clear_fields_with_empty_values(self, tmp_path):
+        """Test clearing fields with empty string/list."""
+        import numpy as np
+
+        folio = DataFolio(tmp_path / "test")
+        arr = np.array([1, 2, 3])
+        folio.add_numpy(
+            "test_array",
+            arr,
+            description="Initial description",
+            inputs=["input1"],
+            code="code1",
+        )
+
+        # Clear fields
+        folio.update_item("test_array", description="", inputs=[], code="")
+
+        item = folio._items["test_array"]
+        assert "description" not in item
+        assert "inputs" not in item
+        assert "code" not in item
+
+    def test_update_nonexistent_item_raises_error(self, tmp_path):
+        """Test that updating nonexistent item raises KeyError."""
+        import pytest
+
+        folio = DataFolio(tmp_path / "test")
+
+        with pytest.raises(KeyError, match="Item 'nonexistent' not found"):
+            folio.update_item("nonexistent", description="test")
+
+    def test_update_persists_to_disk(self, tmp_path):
+        """Test that updates persist when reloading."""
+        import numpy as np
+
+        folio = DataFolio(tmp_path / "test")
+        arr = np.array([1, 2, 3])
+        folio.add_numpy("test_array", arr)
+
+        # Update description
+        folio.update_item("test_array", description="Persisted description")
+
+        # Reload and verify
+        folio2 = DataFolio(tmp_path / "test")
+        assert folio2._items["test_array"]["description"] == "Persisted description"
+
+    def test_update_returns_self_for_chaining(self, tmp_path):
+        """Test that update_item returns self for method chaining."""
+        import numpy as np
+
+        folio = DataFolio(tmp_path / "test")
+        arr = np.array([1, 2, 3])
+        folio.add_numpy("test_array", arr)
+
+        result = folio.update_item("test_array", description="Test")
+        assert result is folio
+
+    def test_update_read_only_raises_error(self, tmp_path):
+        """Test that updating in read-only mode raises error."""
+        import numpy as np
+        import pytest
+
+        folio = DataFolio(tmp_path / "test")
+        arr = np.array([1, 2, 3])
+        folio.add_numpy("test_array", arr)
+
+        # Reopen in read-only mode
+        folio_ro = DataFolio(tmp_path / "test", read_only=True)
+
+        with pytest.raises(RuntimeError, match="read-only"):
+            folio_ro.update_item("test_array", description="Should fail")
+
+    def test_update_preserves_existing_fields(self, tmp_path):
+        """Test that updating one field doesn't affect others."""
+        import numpy as np
+
+        folio = DataFolio(tmp_path / "test")
+        arr = np.array([1, 2, 3])
+        folio.add_numpy(
+            "test_array", arr, description="Original", inputs=["input1"], code="code1"
+        )
+
+        # Update only description
+        folio.update_item("test_array", description="Updated")
+
+        item = folio._items["test_array"]
+        assert item["description"] == "Updated"
+        assert item["inputs"] == ["input1"]  # Should still be there
+        assert item["code"] == "code1"  # Should still be there
+
+
+class TestAddFile:
+    """Tests for add_file() convenience method."""
+
+    def test_add_file_with_auto_name(self, tmp_path):
+        """Test adding file with auto-generated name from filename."""
+        readme = tmp_path / "readme.md"
+        readme.write_text("# My Project")
+
+        folio = DataFolio(tmp_path / "test")
+        folio.add_file(readme, description="Project docs")
+
+        # Name should be stem (without extension)
+        assert "readme" in folio._items
+        # But filename should have extension
+        assert folio._items["readme"]["filename"] == "readme.md"
+        assert folio._items["readme"]["description"] == "Project docs"
+
+    def test_add_file_with_custom_name(self, tmp_path):
+        """Test adding file with custom name."""
+        code_file = tmp_path / "train.py"
+        code_file.write_text("import torch")
+
+        folio = DataFolio(tmp_path / "test")
+        folio.add_file(code_file, name="training_script")
+
+        assert "training_script" in folio._items
+        assert folio._items["training_script"]["filename"] == "training_script.py"
+
+    def test_add_file_with_category(self, tmp_path):
+        """Test adding file with category."""
+        config = tmp_path / "config.yaml"
+        config.write_text("key: value")
+
+        folio = DataFolio(tmp_path / "test")
+        folio.add_file(config, category="configs")
+
+        assert "config" in folio._items
+        assert folio._items["config"]["category"] == "configs"
+
+    def test_add_file_copies_content(self, tmp_path):
+        """Test that file content is actually copied."""
+        source = tmp_path / "source.txt"
+        content = "This is test content"
+        source.write_text(content)
+
+        folio = DataFolio(tmp_path / "test")
+        folio.add_file(source)
+
+        # Verify file was copied to artifacts/
+        artifacts_dir = tmp_path / "test" / "artifacts"
+        copied_file = artifacts_dir / "source.txt"
+        assert copied_file.exists()
+        assert copied_file.read_text() == content
+
+    def test_add_file_preserves_extension(self, tmp_path):
+        """Test that various file extensions are preserved."""
+        files = {
+            "script.py": "import sys",
+            "config.json": '{"key": "value"}',
+            "data.csv": "a,b,c\n1,2,3",
+            "notes.md": "# Notes",
+        }
+
+        folio = DataFolio(tmp_path / "test")
+
+        for filename, content in files.items():
+            filepath = tmp_path / filename
+            filepath.write_text(content)
+            folio.add_file(filepath)
+
+            stem = Path(filename).stem
+            assert stem in folio._items
+            assert folio._items[stem]["filename"] == filename
+
+    def test_add_file_method_chaining(self, tmp_path):
+        """Test that add_file returns self for chaining."""
+        file1 = tmp_path / "file1.txt"
+        file2 = tmp_path / "file2.txt"
+        file1.write_text("content1")
+        file2.write_text("content2")
+
+        folio = DataFolio(tmp_path / "test")
+        result = folio.add_file(file1).add_file(file2)
+
+        assert result is folio
+        assert "file1" in folio._items
+        assert "file2" in folio._items
+
+    def test_add_file_with_overwrite(self, tmp_path):
+        """Test overwriting existing file."""
+        filepath = tmp_path / "data.txt"
+        filepath.write_text("original content")
+
+        folio = DataFolio(tmp_path / "test")
+        folio.add_file(filepath, description="Original")
+
+        # Update file content
+        filepath.write_text("updated content")
+
+        # Add again with overwrite
+        folio.add_file(filepath, description="Updated", overwrite=True)
+
+        assert folio._items["data"]["description"] == "Updated"
+
+        # Verify content was updated
+        artifacts_dir = tmp_path / "test" / "artifacts"
+        assert (artifacts_dir / "data.txt").read_text() == "updated content"
+
+    def test_add_file_get_path(self, tmp_path):
+        """Test retrieving file path with get_artifact_path."""
+        source = tmp_path / "readme.md"
+        source.write_text("# README")
+
+        folio = DataFolio(tmp_path / "test")
+        folio.add_file(source)
+
+        # Get path using stem name
+        path = folio.get_artifact_path("readme")
+        assert Path(path).exists()
+        assert Path(path).read_text() == "# README"
+
+    def test_add_file_nonexistent_raises_error(self, tmp_path):
+        """Test that adding nonexistent file raises error."""
+        import pytest
+
+        folio = DataFolio(tmp_path / "test")
+
+        with pytest.raises(FileNotFoundError):
+            folio.add_file(tmp_path / "nonexistent.txt")
+
+
+# Custom transformer for testing skops portability
+class PercentileClipper(BaseEstimator, TransformerMixin):
+    """Clip values to percentile range to remove outliers."""
+
+    def __init__(self, lower=1, upper=99):
+        self.lower = lower
+        self.upper = upper
+
+    def fit(self, X, y=None):
+        self.lower_bound_ = np.percentile(X, self.lower, axis=0)
+        self.upper_bound_ = np.percentile(X, self.upper, axis=0)
+        return self
+
+    def transform(self, X):
+        return np.clip(X, self.lower_bound_, self.upper_bound_)
+
+
+def test_percentile_clipper_roundtrip(tmp_path):
+    """Test RobustScaler + PercentileClipper pipeline (user's use case)."""
+    from sklearn.pipeline import Pipeline
+    from sklearn.preprocessing import RobustScaler
+
+    # Create and fit pipeline
+    pipeline = Pipeline(
+        [("scaler", RobustScaler()), ("clipper", PercentileClipper(lower=1, upper=99))]
+    )
+
+    X = np.random.randn(100, 5)
+    X[0, 0] = 1000  # Add outlier
+    pipeline.fit(X)
+
+    # Save with skops
+    folio = DataFolio(tmp_path / "analysis")
+    folio.add_sklearn("preprocessing_pipeline", pipeline, custom=True)
+
+    # Load in "different analysis project" (simulate by creating new folio)
+    folio2 = DataFolio(tmp_path / "analysis")
+    loaded = folio2.get_sklearn("preprocessing_pipeline")
+
+    # Verify it works
+    X_test = np.random.randn(10, 5)
+    result = loaded.transform(X_test)
+    assert result.shape == X_test.shape

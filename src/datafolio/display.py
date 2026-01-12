@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any, Dict, Optional
 if TYPE_CHECKING:
     from datafolio.folio import DataFolio
 
-from datafolio.utils import ARTIFACTS_DIR, MODELS_DIR, TABLES_DIR, is_cloud_path
+from datafolio.utils import is_cloud_path
 
 
 class DisplayFormatter:
@@ -662,13 +662,16 @@ class DisplayFormatter:
         item_type = item.get("item_type", "")
 
         # Determine the subdirectory based on item type
-        if item_type == "included_table":
-            subdir = TABLES_DIR
-        elif item_type in ["model", "pytorch_model"]:
-            subdir = MODELS_DIR
-        elif item_type in ["artifact", "numpy_array", "json_data", "timestamp"]:
-            subdir = ARTIFACTS_DIR
-        else:
+        from datafolio.storage import get_storage_directory
+
+        # Referenced tables don't have local files
+        if item_type == "referenced_table":
+            return None
+
+        try:
+            subdir = get_storage_directory(item_type)
+        except KeyError:
+            # Unknown item type
             return None
 
         # Construct full path

@@ -4,53 +4,71 @@
 
 DataFolio helps you organize, version, and track your data science experiments by storing datasets, models, and artifacts in a simple, transparent directory structure. Everything is saved as plain files (Parquet, JSON, pickle) that you can inspect, version with git, or backup to any storage system.
 
-## Features
+## Why DataFolio?
 
-- **Universal Data Management**: Single `add_data()` method automatically handles DataFrames, numpy arrays, dicts, lists, and scalars
-- **Model Support**: Save and load scikit-learn and PyTorch models with full metadata tracking
-- **Data Lineage**: Track inputs and dependencies between datasets and models
-- **External References**: Point to data stored externally (S3, local paths) without copying
-- **Multi-Instance Sync**: Automatic refresh when multiple notebooks/processes access the same bundle
-- **Autocomplete Access**: IDE-friendly `folio.data.item_name.content` syntax with full autocomplete support
-- **Smart Metadata Display**: Automatic metadata truncation and formatting in `describe()`
-- **Item Management**: Delete items with dependency tracking and warnings
-- **Git-Friendly**: All data stored as standard file formats in a simple directory structure
-- **Type-Safe**: Full type hints and comprehensive error handling
-- **Snapshots**: Create immutable checkpoints of experiments with copy-on-write versioning
-- **CLI Tools**: Command-line interface for snapshot management and bundle operations
+Ever trained a model with great results, then lost it while experimenting? Or struggled to remember which dataset produced which model? Or needed to reproduce results from months ago?
 
-## Quick Start
+DataFolio solves these problems with a simple, filesystem-based approach—no servers, no databases, just files you can inspect and version control.
+
+## Quick Example: The Story of a Good Model
 
 ```python
 from datafolio import DataFolio
-import pandas as pd
-import numpy as np
+from sklearn.ensemble import RandomForestClassifier
 
-# Create a new folio
-folio = DataFolio('experiments/my_experiment')
+# You've been working on a classification problem
+folio = DataFolio('experiments/fraud_detection')
 
-# Add any type of data with a single method
-folio.add_data('results', df)                          # DataFrame
-folio.add_data('embeddings', np.array([1, 2, 3]))    # Numpy array
-folio.add_data('config', {'lr': 0.01})                # Dict/JSON
-folio.add_data('accuracy', 0.95)                      # Scalar
+# Process your data
+folio.add_table('training_data', processed_df,
+    description='Cleaned transaction data with engineered features')
 
-# Retrieve data (automatically returns correct type)
-df = folio.get_data('results')           # Returns DataFrame
-arr = folio.get_data('embeddings')       # Returns numpy array
-config = folio.get_data('config')        # Returns dict
+# Train a model - it gets 89% accuracy! 🎉
+model = RandomForestClassifier(n_estimators=100, max_depth=10)
+model.fit(X_train, y_train)
 
-# Or use autocomplete-friendly access
-df = folio.data.results.content          # Same as get_data()
-arr = folio.data.embeddings.content
-config = folio.data.config.content
+# Save it with metadata
+folio.add_model('classifier', model,
+    description='Random forest classifier',
+    inputs=['training_data'])
+folio.metadata['accuracy'] = 0.89
+folio.metadata['status'] = 'promising'
 
-# View everything (including custom metadata)
+# View everything
 folio.describe()
 
-# Clean up temporary items
-folio.delete('temp_data')
+# Create a snapshot before experimenting - it's free insurance!
+folio.create_snapshot('v1-baseline',
+    description='89% accuracy baseline model',
+    tags=['baseline', 'validated'])
+
+# Now experiment freely - try a neural network
+new_model = train_experimental_model()
+folio.add_model('classifier', new_model, overwrite=True)
+folio.metadata['accuracy'] = 0.85  # Worse! 😞
+
+# No problem - load the good version back
+baseline = DataFolio.load_snapshot('experiments/fraud_detection', 'v1-baseline')
+good_model = baseline.get_model('classifier')  # Your 89% model is safe!
+
+# Deploy the good one to production
+deploy_to_production(good_model)
 ```
+
+This is the core DataFolio workflow: track your data, models, and results; snapshot before experimenting; never lose good work.
+
+## Key Features
+
+- **Universal Data Management** - Single `add_data()` method handles DataFrames, numpy arrays, dicts, lists, and scalars
+- **Model Support** - Save and load scikit-learn and PyTorch models with full metadata
+- **Snapshots** - Create immutable checkpoints of experiments with copy-on-write versioning (no data duplication!)
+- **Data Lineage** - Track inputs and dependencies between datasets and models
+- **Autocomplete Access** - IDE-friendly `folio.data.item_name.content` syntax with full autocomplete
+- **Multi-Instance Sync** - Multiple notebooks/processes can safely access the same bundle
+- **Cloud Storage** - Works with local paths, S3, GCS, Azure, and more
+- **Caching** - Smart caching for remote data reduces download times
+- **Git-Friendly** - All data stored as standard file formats in a simple directory structure
+- **CLI Tools** - Command-line interface for snapshot management and bundle operations
 
 ## Installation
 
@@ -58,500 +76,156 @@ folio.delete('temp_data')
 pip install datafolio
 ```
 
-## Core Concepts
+## Learn More
 
-### Generic Data Methods
+**New to DataFolio?** Start with the [Getting Started Guide](guides/getting-started.md) for a comprehensive tutorial.
 
-The `add_data()` and `get_data()` methods provide a unified interface for all data types:
+**Specific Topics:**
+- [Snapshots Guide](guides/snapshots.md) - Version control for experiments
+- [DataFolio API Reference](reference/datafolio-api.md) - All methods and properties
+- [CLI Reference](reference/cli.md) - Command-line tools
+- [Complete API](reference/api.md) - Full API documentation
 
-```python
-# add_data() automatically detects type and uses the appropriate method
-folio.add_data('my_data', data)  # Works with DataFrame, array, dict, list, scalar
+## Common Use Cases
 
-# get_data() automatically detects stored type and returns correct format
-data = folio.get_data('my_data')  # Returns original type
-```
-
-Supported data types:
-- **DataFrames** (`pd.DataFrame`) → stored as Parquet
-- **Numpy arrays** (`np.ndarray`) → stored as `.npy`
-- **JSON data** (`dict`, `list`, `int`, `float`, `str`, `bool`, `None`) → stored as JSON
-- **External references** → metadata only, data stays in original location
-
-### Multi-Instance Access
-
-DataFolio automatically keeps multiple instances synchronized when accessing the same bundle:
+### Experiment Tracking
 
 ```python
-# Notebook 1: Create and update bundle
-folio1 = DataFolio('experiments/shared')
-folio1.add_data('results', df)
+# Track everything about your experiment
+folio = DataFolio('experiments/model_v2')
+folio.metadata['experiment'] = 'hyperparameter_tuning'
+folio.metadata['date'] = '2025-01-20'
 
-# Notebook 2: Open same bundle
-folio2 = DataFolio('experiments/shared')
+# Save data, models, and results
+folio.add_table('features', feature_df)
+folio.add_model('model', trained_model)
+folio.add_json('metrics', {'accuracy': 0.92, 'f1': 0.89})
 
-# Notebook 1: Add more data
-folio1.add_data('analysis', new_df)
-
-# Notebook 2: Automatically sees new data!
-folio2.describe()  # Shows both 'results' and 'analysis'
-analysis = folio2.get_data('analysis')  # Works immediately ✅
+# Create snapshot at milestones
+folio.create_snapshot('v2.0-production', tags=['production'])
 ```
 
-All read operations (`describe()`, `list_contents()`, `get_*()` methods, and `folio.data` accessors) automatically refresh from disk when changes are detected, ensuring you always see the latest data without manual intervention.
-
-### Data Types
-
-#### Tables (DataFrames)
-
-Store pandas DataFrames as Parquet files:
+### Reproducible Research
 
 ```python
-# Add table
-folio.add_table('training_data', df,
-    description='Training dataset with 10k samples',
-    inputs=['raw_data'])
+# Paper submission: snapshot your exact results
+folio.create_snapshot('neurips-2025-submission',
+    description='Results in paper Table 3',
+    tags=['paper', 'published'])
 
-# Reference external data (no copy)
-folio.reference_table('raw_data',
-    reference='s3://bucket/data.parquet',
-    description='Original raw data')
-
-# Retrieve
-df = folio.get_table('training_data')
+# Six months later: reviewers ask for clarification
+paper_version = DataFolio.load_snapshot('research/exp', 'neurips-2025-submission')
+exact_model = paper_version.get_model('classifier')
+exact_data = paper_version.get_table('test_data')
 ```
 
-#### Numpy Arrays
-
-Store numpy arrays with full metadata:
+### Team Collaboration
 
 ```python
-# Add array
-array = np.random.randn(100, 128)
-folio.add_numpy('embeddings', array,
-    description='Model embeddings',
-    inputs=['training_data'])
+# Use cloud storage for team access
+folio = DataFolio('s3://team-bucket/shared-experiment',
+    cache_enabled=True)  # Cache for faster local access
 
-# Retrieve
-arr = folio.get_numpy('embeddings')  # Returns numpy array with original shape/dtype
+# Everyone sees the same data
+df = folio.get_table('results')
+model = folio.get_model('classifier')
+
+# Compare different team members' approaches
+baseline = DataFolio.load_snapshot('s3://team-bucket/shared', 'alice-baseline')
+variant = DataFolio.load_snapshot('s3://team-bucket/shared', 'bob-neural-net')
 ```
 
-Metadata includes:
-- Shape and dtype
-- Description and inputs (lineage)
-- Code context (optional)
+## What Makes DataFolio Different?
 
-#### JSON Data
+| | DataFolio | MLflow | Weights & Biases |
+|---|---|---|---|
+| **Setup** | Zero - just a directory | Requires server | Requires account |
+| **Storage** | Files on disk/cloud | Database + artifacts | Cloud service |
+| **Inspection** | Direct file access | Via API | Via web UI |
+| **Versioning** | Snapshots (copy-on-write) | Runs (separate copies) | Versions (cloud) |
+| **Sharing** | Copy directory/git | Share server access | Share workspace |
+| **Cost** | Free | Free (self-hosted) | Free tier + paid |
 
-Store configuration, metrics, or any JSON-serializable data:
-
-```python
-# Store different types
-folio.add_json('config', {'lr': 0.01, 'batch_size': 32})
-folio.add_json('metrics', {'accuracy': 0.95, 'f1': 0.92})
-folio.add_json('classes', ['cat', 'dog', 'bird'])
-folio.add_json('best_score', 0.95)
-
-# Retrieve
-config = folio.get_json('config')  # Returns dict
-classes = folio.get_json('classes')  # Returns list
-score = folio.get_json('best_score')  # Returns float
-```
-
-### Models
-
-#### Scikit-learn Models
-
-```python
-from sklearn.ensemble import RandomForestClassifier
-
-# Train and save
-clf = RandomForestClassifier(n_estimators=100)
-clf.fit(X_train, y_train)
-
-folio.add_model('classifier', clf,
-    description='Random forest classifier',
-    hyperparameters={'n_estimators': 100},
-    inputs=['training_data'])
-
-# Load
-clf = folio.get_model('classifier')
-```
-
-#### PyTorch Models
-
-Full support for PyTorch models with optional class serialization:
-
-```python
-import torch.nn as nn
-
-class MyModel(nn.Module):
-    def __init__(self, input_dim, hidden_dim):
-        super().__init__()
-        self.fc1 = nn.Linear(input_dim, hidden_dim)
-        self.fc2 = nn.Linear(hidden_dim, 1)
-
-    def forward(self, x):
-        return self.fc2(torch.relu(self.fc1(x)))
-
-# Save model
-model = MyModel(input_dim=10, hidden_dim=50)
-folio.add_pytorch('neural_net', model,
-    description='Simple feedforward network',
-    init_args={'input_dim': 10, 'hidden_dim': 50},
-    save_class=True)  # Optional: serialize class definition
-
-# Load model (three options)
-# 1. State dict only
-state_dict = folio.get_pytorch('neural_net', reconstruct=False)
-
-# 2. Provide model class
-model = folio.get_pytorch('neural_net', model_class=MyModel)
-
-# 3. Auto-reconstruct (if class is importable)
-model = folio.get_pytorch('neural_net')
-```
-
-#### Universal Model Interface
-
-Use `add_model()` and `get_model()` for automatic model type detection:
-
-```python
-# Works for both sklearn and PyTorch
-folio.add_model('my_model', model)  # Auto-detects type
-loaded = folio.get_model('my_model')  # Auto-detects type
-```
-
-### Data Lineage
-
-Track dependencies between datasets and models:
-
-```python
-# Create dependency chain
-folio.reference_table('raw', reference='s3://bucket/raw.parquet')
-folio.add_table('clean', cleaned_df, inputs=['raw'])
-folio.add_table('features', feature_df, inputs=['clean'])
-folio.add_model('model', clf, inputs=['features'])
-
-# Lineage is preserved in metadata and shown in describe()
-```
-
-### Describe Your Folio
-
-The `describe()` method provides a compact overview of all data with smart metadata display:
-
-```python
-# Print to console
-folio.describe()
-
-# Get as string
-summary = folio.describe(return_string=True)
-
-# Show empty sections
-folio.describe(show_empty=True)
-
-# Limit metadata fields shown (default: 10)
-folio.describe(max_metadata_fields=5)
-```
-
-Example output:
-
-```
-DataFolio: experiments/my_experiment
-====================================
-
-Tables (2):
-  • raw (reference): Original raw data
-    ↳ path: s3://bucket/raw.parquet
-  • features: Engineered features
-    ↳ inputs: clean
-    ↳ shape: [10000, 50]
-
-Numpy Arrays (1):
-  • embeddings: Model embeddings
-    ↳ shape: [100, 128], dtype: float64
-    ↳ inputs: training_data
-
-JSON Data (2):
-  • config: Model configuration
-    ↳ type: dict
-  • accuracy: Final accuracy score
-    ↳ type: float
-
-PyTorch Models (1):
-  • neural_net: Feedforward network
-    ↳ init_args: input_dim=10, hidden_dim=50
-    ↳ inputs: features
-
-Metadata (5):
-  • experiment_name: my_experiment
-  • model_version: v2.1
-  • learning_rate: 0.001
-  • tags: ['neural_net', 'classification', 'production'] (list, 3 items)
-  • description: My experiment description that is quite lo... (truncated)
-  ... and 3 more fields
-```
-
-The metadata section automatically:
-- Filters out internal fields (like `_datafolio`, `created_at`, `updated_at`)
-- Truncates long strings with ellipsis
-- Shows type and count for collections (lists, dicts)
-- Limits display to `max_metadata_fields` (default: 10)
-
-### Delete Items
-
-Remove items from your folio with the `delete()` method:
-
-```python
-# Delete single item
-folio.delete('old_model')
-
-# Delete multiple items
-folio.delete(['temp_data', 'debug_plot', 'old_model'])
-
-# Delete without dependency warnings
-folio.delete('item', warn_dependents=False)
-```
-
-The `delete()` method:
-- Removes items from the manifest and deletes associated files
-- Validates all items exist before deleting any (transaction-like)
-- Warns if deleted items have dependents (but allows deletion)
-- Supports method chaining
-- Works with both single items (string) and multiple items (list)
-
-```python
-# Example: Clean up temporary items
-folio = DataFolio('experiments/test')
-folio.add_data('temp1', [1, 2, 3])
-folio.add_data('temp2', [4, 5, 6])
-folio.add_data('final', [7, 8, 9], inputs=['temp1', 'temp2'])
-
-# Delete temporary data (warns about 'final' dependency)
-folio.delete(['temp1', 'temp2'])
-# Warning: Deleting 'temp1' which is used by: final. Those items may have broken lineage.
-# Warning: Deleting 'temp2' which is used by: final. Those items may have broken lineage.
-
-# Delete without warnings
-folio.delete(['temp1', 'temp2'], warn_dependents=False)
-```
-
-### Autocomplete-Friendly Data Access
-
-Access your data with autocomplete support using the `folio.data` property:
-
-```python
-# Attribute-style access (autocomplete-friendly!)
-df = folio.data.results.content          # Get DataFrame
-desc = folio.data.results.description    # Get description
-type_str = folio.data.results.type       # Get item type
-inputs = folio.data.results.inputs       # Get lineage inputs
-deps = folio.data.results.dependents     # Get dependents
-meta = folio.data.results.metadata       # Get full metadata dict
-
-# Dictionary-style access
-df = folio.data['results'].content
-model = folio.data['classifier'].content
-
-# Works for all data types
-arr = folio.data.embeddings.content      # numpy array
-cfg = folio.data.config.content          # dict
-model = folio.data.classifier.content    # model object
-
-# Artifacts return file path
-with open(folio.data.plot.content, 'rb') as f:
-    img = f.read()
-
-# Path property for referenced tables and artifacts
-external_path = folio.data.raw_data.path  # e.g., 's3://bucket/raw.parquet'
-```
-
-The `ItemProxy` returned by `folio.data.item_name` provides:
-- `.content` - Returns the actual data (DataFrame, array, dict, model, or file path)
-- `.description` - Description string
-- `.type` - Item type ('referenced_table', 'included_table', 'model', etc.)
-- `.path` - File path (for referenced tables and artifacts)
-- `.inputs` - List of input dependencies
-- `.dependents` - List of items that depend on this item
-- `.metadata` - Full metadata dictionary
-
-In IPython/Jupyter, `folio.data.<TAB>` shows all available items with autocomplete!
+DataFolio is perfect when you want:
+- Full control over your data
+- Simple filesystem-based storage
+- Git-friendly versioning
+- No external dependencies
+- Cloud storage without cloud services
 
 ## Directory Structure
 
-DataFolio creates a transparent directory structure:
+DataFolio creates an intuitive, inspectable directory structure:
 
 ```
 experiments/my_experiment/
-├── metadata.json              # Folio metadata
+├── items.json                # Manifest of all items
+├── metadata.json             # Bundle metadata
+├── snapshots.json            # Snapshot registry
+│
 ├── tables/
-│   ├── results.parquet       # DataFrame storage
-│   └── results.json          # Table metadata
-├── numpy/
-│   ├── embeddings.npy        # Numpy array storage
-│   └── embeddings.json       # Array metadata
-├── json/
-│   ├── config.json           # JSON data
-│   └── config_meta.json      # JSON metadata
+│   └── features.parquet      # DataFrames as Parquet
+│
 ├── models/
-│   ├── classifier.pkl        # Sklearn model
-│   └── classifier.json       # Model metadata
+│   └── classifier.joblib     # Scikit-learn models
+│
 ├── pytorch_models/
-│   ├── neural_net.pth        # PyTorch state dict
-│   └── neural_net.json       # PyTorch metadata
+│   ├── neural_net.pth        # PyTorch state dicts
+│   └── neural_net_class.pkl  # PyTorch class definitions
+│
+├── numpy/
+│   └── embeddings.npy        # Numpy arrays
+│
 └── artifacts/
-    └── plot.png              # Any file type
+    ├── config.json           # JSON data
+    ├── plot.png              # Images
+    └── report.pdf            # Any file type
 ```
 
-## API Reference
+All files use standard formats you can open with any tool!
 
-See the [API Reference](reference/api.md) for complete method documentation.
+## Quick CLI Reference
 
-## Examples
+```bash
+# Initialize a new bundle
+datafolio init my_experiment
 
-### Complete ML Workflow
+# Describe bundle contents
+datafolio describe
 
-```python
-from datafolio import DataFolio
-import pandas as pd
-import numpy as np
-from sklearn.ensemble import RandomForestClassifier
+# Create a snapshot
+datafolio snapshot create v1.0 -d "Baseline model" --tags baseline,production
 
-# Initialize
-folio = DataFolio('experiments/classifier_v1')
+# List snapshots
+datafolio snapshot list
 
-# Reference external data
-folio.add_data('raw', reference='s3://bucket/raw.csv',
-    description='Raw training data from database')
+# Compare two snapshots
+datafolio snapshot compare v1.0 v2.0
 
-# Add processed data
-folio.add_data('clean', cleaned_df,
-    description='Cleaned and preprocessed data',
-    inputs=['raw'])
-
-# Add features
-folio.add_data('features', feature_df,
-    description='Engineered features',
-    inputs=['clean'])
-
-# Save embeddings
-embeddings = np.random.randn(1000, 128)
-folio.add_data('embeddings', embeddings,
-    description='Model embeddings',
-    inputs=['features'])
-
-# Save configuration
-folio.add_data('config', {
-    'model_type': 'random_forest',
-    'n_estimators': 100,
-    'max_depth': 10
-})
-
-# Train and save model
-clf = RandomForestClassifier(**folio.get_data('config'))
-clf.fit(X_train, y_train)
-
-folio.add_model('classifier', clf,
-    description='Random forest classifier',
-    hyperparameters=folio.get_data('config'),
-    inputs=['features'])
-
-# Save metrics
-folio.add_data('metrics', {
-    'accuracy': 0.95,
-    'f1': 0.92,
-    'precision': 0.94
-})
-
-# Add custom metadata to the folio itself
-folio.metadata['experiment_name'] = 'rf_baseline'
-folio.metadata['tags'] = ['classification', 'production']
-folio.metadata['notes'] = 'Baseline random forest model for production deployment'
-
-# View summary (shows data and custom metadata)
-folio.describe()
-
-# Access data with autocomplete
-config = folio.data.config.content
-metrics = folio.data.metrics.content
-trained_model = folio.data.classifier.content
-
-# Clean up intermediate data
-folio.delete('embeddings')
+# Show current status vs last snapshot
+datafolio snapshot status
 ```
 
-### PyTorch Deep Learning Workflow
-
-```python
-import torch
-import torch.nn as nn
-from datafolio import DataFolio
-
-# Define model
-class CNN(nn.Module):
-    def __init__(self, num_classes=10):
-        super().__init__()
-        self.conv1 = nn.Conv2d(3, 32, 3)
-        self.fc = nn.Linear(32 * 30 * 30, num_classes)
-
-    def forward(self, x):
-        x = torch.relu(self.conv1(x))
-        x = x.view(x.size(0), -1)
-        return self.fc(x)
-
-# Create folio
-folio = DataFolio('experiments/cnn_v1')
-
-# Save training config
-config = {
-    'num_classes': 10,
-    'learning_rate': 0.001,
-    'batch_size': 32,
-    'epochs': 50
-}
-folio.add_data('config', config)
-
-# Train model
-model = CNN(num_classes=config['num_classes'])
-# ... training code ...
-
-# Save model
-folio.add_pytorch('cnn', model,
-    description='CNN for image classification',
-    init_args={'num_classes': 10},
-    save_class=True)
-
-# Save training history
-history = {
-    'train_loss': [0.5, 0.3, 0.2],
-    'val_loss': [0.6, 0.4, 0.3],
-    'val_acc': [0.7, 0.8, 0.85]
-}
-folio.add_data('history', history)
-
-# Later: load and use
-loaded_model = folio.get_pytorch('cnn', model_class=CNN)
-loaded_model.eval()
-```
+See the [CLI Reference](reference/cli.md) for complete documentation.
 
 ## Best Practices
 
-1. **Use descriptive names**: `add_data('training_features', ...)` not `add_data('data1', ...)`
-2. **Track lineage**: Always specify `inputs` to track data dependencies
-3. **Add descriptions**: Help future you understand what each item contains
-4. **Use custom metadata**: Store experiment context in `folio.metadata` for better tracking
-5. **Leverage autocomplete**: Use `folio.data.item_name.content` for cleaner, more discoverable code
-6. **Clean up regularly**: Use `delete()` to remove temporary or obsolete items
-7. **Version control**: Commit your folio directories to git (data is stored efficiently)
-8. **Use references**: For large external datasets, use `reference` to avoid copying
-9. **Check describe()**: Regularly review your folio with `folio.describe()` to see data and metadata
-10. **Share across notebooks**: Multiple DataFolio instances can safely access the same bundle - changes are automatically detected and synchronized
-11. **Snapshot before major changes**: Create snapshots before experimenting with new approaches—it's free insurance
-12. **Tag snapshots meaningfully**: Use tags like `baseline`, `production`, `paper` to organize versions
+1. **Use descriptive names** - `'training_features'` not `'data1'`
+2. **Track lineage** - Always specify `inputs` parameter
+3. **Add descriptions** - Help future you understand your work
+4. **Snapshot before major changes** - It's free insurance
+5. **Use tags** - Organize snapshots with `baseline`, `production`, `paper`
+6. **Leverage autocomplete** - Use `folio.data.item_name.content`
+7. **Clean up regularly** - Delete temporary items with `folio.delete()`
+8. **Version control** - Commit bundles to git for team collaboration
+
+## Get Started
+
+Ready to organize your experiments? Check out the [Getting Started Guide](guides/getting-started.md) for a step-by-step tutorial.
 
 ## Development
 
-See [CLAUDE.md](https://github.com/caseysm/datafolio/blob/main/CLAUDE.md) for development guidelines.
+See [CLAUDE.md](https://github.com/ceesem/datafolio/blob/main/CLAUDE.md) for development guidelines.
 
 ## License
 

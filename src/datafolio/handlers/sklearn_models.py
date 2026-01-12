@@ -114,7 +114,7 @@ class SklearnHandler(BaseHandler):
 
         # LightGBM
         try:
-            import lightgbm as lgb
+            import lightgbm as lgb  # type: ignore
 
             if isinstance(data, (lgb.LGBMModel, lgb.Booster)):
                 return True
@@ -123,7 +123,7 @@ class SklearnHandler(BaseHandler):
 
         # CatBoost
         try:
-            import catboost as cb
+            import catboost as cb  # type: ignore
 
             if isinstance(data, cb.CatBoost):
                 return True
@@ -149,12 +149,13 @@ class SklearnHandler(BaseHandler):
         model: Any,
         description: Optional[str] = None,
         inputs: Optional[list[str]] = None,
+        custom: bool = False,
         **kwargs,
     ) -> Dict[str, Any]:
-        """Add joblib-serializable model to folio.
+        """Add sklearn model to folio.
 
         Writes the model to storage and builds complete metadata including:
-        - Basic info: filename, model type
+        - Basic info: filename, model type, serialization format
         - Model info: sklearn version (if sklearn is installed and model is sklearn estimator)
         - Lineage: inputs and description
         - Timestamps: creation time
@@ -162,16 +163,18 @@ class SklearnHandler(BaseHandler):
         Args:
             folio: DataFolio instance
             name: Item name
-            model: Model to store (sklearn estimator or any joblib-serializable object)
+            model: Model to store (sklearn estimator or any sklearn-compatible object)
             description: Optional description
             inputs: Optional lineage inputs
+            custom: If True, use skops format for portable pipelines with custom
+                transformers. If False (default), use joblib format.
             **kwargs: Additional arguments (currently unused)
 
         Returns:
             Complete metadata dict for this model
 
         Raises:
-            ImportError: If joblib is not installed
+            ImportError: If required serialization library is not installed
         """
         # Try to get sklearn version if available (optional)
         sklearn_version = None
@@ -182,13 +185,17 @@ class SklearnHandler(BaseHandler):
         except ImportError:
             pass
 
-        # Build filename
-        filename = f"{name}.joblib"
+        # Build filename based on custom flag
+        extension = ".skops" if custom else ".joblib"
+        filename = f"{name}{extension}"
         subdir = self.get_storage_subdir()
         filepath = folio._storage.join_paths(folio._bundle_dir, subdir, filename)
 
-        # Write model to storage
-        folio._storage.write_joblib(filepath, model)
+        # Write model to storage based on custom flag
+        if custom:
+            folio._storage.write_skops(filepath, model)
+        else:
+            folio._storage.write_joblib(filepath, model)
 
         # Calculate checksum
         checksum = folio._storage.calculate_checksum(filepath)
@@ -200,6 +207,7 @@ class SklearnHandler(BaseHandler):
             "filename": filename,
             "checksum": checksum,
             "model_type": type(model).__name__,
+            "serialization_format": "skops" if custom else "joblib",
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
 
@@ -216,7 +224,7 @@ class SklearnHandler(BaseHandler):
         return metadata
 
     def get(self, folio: "DataFolio", name: str, **kwargs) -> Any:
-        """Load joblib-serialized model from folio.
+        """Load sklearn model from folio.
 
         Args:
             folio: DataFolio instance
@@ -228,9 +236,12 @@ class SklearnHandler(BaseHandler):
 
         Raises:
             KeyError: If item doesn't exist
-            ImportError: If joblib is not installed
+            ImportError: If required serialization library is not installed
         """
+        # Determine format from metadata (default to joblib for legacy models)
         item = folio._items[name]
+        format = item.get("serialization_format", "joblib")
+
         subdir = self.get_storage_subdir()
         filepath = folio._storage.join_paths(
             folio._bundle_dir, subdir, item["filename"]
@@ -239,4 +250,11 @@ class SklearnHandler(BaseHandler):
         # Use cache if available
         filepath = folio._get_file_path_with_cache(name, filepath)
 
-        return folio._storage.read_joblib(filepath)
+        # Load with appropriate backend
+        if format == "skops":
+            return folio._storage.read_skops(filepath)
+        elif format == "joblib":
+            return folio._storage.read_joblib(filepath)
+        else:
+            # Fallback for unknown formats
+            return folio._storage.read_joblib(filepath)

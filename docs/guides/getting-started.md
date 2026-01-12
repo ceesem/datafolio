@@ -241,6 +241,129 @@ loaded_clf = folio.get_model('classifier')
 predictions = loaded_clf.predict(X_test)
 ```
 
+### Custom Models with Skops
+
+DataFolio supports custom sklearn-compatible models using [skops](https://skops.readthedocs.io/). This is particularly useful for pipelines with custom transformers that need to be portable across environments.
+
+**When to use skops format (`custom=True`):**
+- Pipelines with custom transformers that need to work across different machines
+- Models that need to be deployed without access to the original class definitions
+- Better security for model deployment (skops provides secure serialization)
+
+**Key requirement:** Custom transformers must inherit from sklearn base classes:
+
+```python
+from sklearn.base import BaseEstimator, TransformerMixin
+import numpy as np
+
+# ✅ CORRECT: Inherits from sklearn mixins
+class PercentileClipper(BaseEstimator, TransformerMixin):
+    """Custom transformer that clips values to percentile bounds."""
+
+    def __init__(self, lower=1, upper=99):
+        self.lower = lower
+        self.upper = upper
+
+    def fit(self, X, y=None):
+        self.lower_bound_ = np.percentile(X, self.lower, axis=0)
+        self.upper_bound_ = np.percentile(X, self.upper, axis=0)
+        return self
+
+    def transform(self, X):
+        return np.clip(X, self.lower_bound_, self.upper_bound_)
+
+# ❌ WRONG: Plain class without sklearn mixins
+class BadTransformer:  # Won't work with skops!
+    def fit(self, X, y=None):
+        return self
+    def transform(self, X):
+        return X
+```
+
+**Why inherit from `BaseEstimator` and `TransformerMixin`?**
+- `BaseEstimator`: Provides `get_params()` and `set_params()` methods required by sklearn
+- `TransformerMixin`: Provides `fit_transform()` method automatically
+- Ensures compatibility with sklearn's Pipeline and other utilities
+- Required for skops to properly serialize and deserialize your custom class
+
+**Using custom transformers in pipelines:**
+
+```python
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LogisticRegression
+
+# Create pipeline with custom transformer
+pipeline = Pipeline([
+    ('clipper', PercentileClipper(lower=5, upper=95)),
+    ('scaler', StandardScaler()),
+    ('clf', LogisticRegression())
+])
+
+# Fit pipeline
+X_train = np.random.randn(100, 5)
+y_train = np.random.randint(0, 2, 100)
+pipeline.fit(X_train, y_train)
+
+# Save with skops format (custom=True)
+folio.add_sklearn('custom_pipeline', pipeline,
+    custom=True,  # Uses skops for portability
+    description='Pipeline with custom percentile clipper')
+
+# Load in a different environment (doesn't need PercentileClipper class!)
+folio2 = DataFolio('path/to/bundle')
+loaded_pipeline = folio2.get_sklearn('custom_pipeline')
+predictions = loaded_pipeline.predict(X_test)
+```
+
+**Comparison of serialization formats:**
+
+| Format | When to Use | Pros | Cons |
+|--------|------------|------|------|
+| **joblib** (default) | Standard sklearn models, XGBoost, LightGBM | Fast, widely supported | Requires class definitions on load |
+| **skops** (`custom=True`) | Custom transformers, deployment | Portable, more secure | Slightly slower |
+
+```python
+# Joblib format (default)
+folio.add_sklearn('model', pipeline)  # Uses joblib
+
+# Skops format (portable)
+folio.add_sklearn('model', pipeline, custom=True)  # Uses skops
+
+# Both work through generic add_model() too
+folio.add_model('model', pipeline, custom=True)
+```
+
+**Best practices for custom transformers:**
+
+1. **Always inherit from sklearn base classes:**
+   ```python
+   from sklearn.base import BaseEstimator, TransformerMixin
+
+   class MyTransformer(BaseEstimator, TransformerMixin):
+       ...
+   ```
+
+2. **Store fitted parameters with trailing underscore:**
+   ```python
+   def fit(self, X, y=None):
+       self.mean_ = np.mean(X)  # Fitted params end with _
+       return self
+   ```
+
+3. **Initialize all parameters in `__init__`:**
+   ```python
+   def __init__(self, threshold=0.5):
+       self.threshold = threshold  # Store all params
+   ```
+
+4. **Always return `self` from `fit()`:**
+   ```python
+   def fit(self, X, y=None):
+       # ... fitting logic ...
+       return self  # Required for sklearn API
+   ```
+
 ### PyTorch Models
 
 ```python

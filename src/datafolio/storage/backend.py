@@ -26,6 +26,85 @@ class StorageBackend:
         >>> data = storage.read_json('/path/to/data.json')
     """
 
+    def __init__(self, use_https: bool = False):
+        """Initialize StorageBackend.
+
+        Args:
+            use_https: If True, use HTTPS URLs for CloudFiles read operations (default: False)
+        """
+        self._use_https = use_https
+
+    def _split_cloud_path(self, path: str) -> tuple[str, str]:
+        """Split cloud path into directory and filename.
+
+        Args:
+            path: Cloud path (e.g., 's3://bucket/dir/file.txt')
+
+        Returns:
+            Tuple of (dir_path, filename). If no directory, returns ('', filename).
+
+        Examples:
+            >>> storage._split_cloud_path('s3://bucket/dir/file.txt')
+            ('s3://bucket/dir', 'file.txt')
+            >>> storage._split_cloud_path('s3://bucket/file.txt')
+            ('s3://bucket', 'file.txt')
+        """
+        parts = path.rsplit("/", 1)
+        if len(parts) == 2:
+            return parts[0], parts[1]
+        else:
+            return "", parts[0]
+
+    def _get_cloud_client(self, path: str, use_https: bool = False) -> Any:
+        """Get CloudFiles client for a given path.
+
+        Args:
+            path: Cloud path (e.g., 's3://bucket/dir/file.txt')
+            use_https: If True, use HTTPS URLs for read operations
+
+        Returns:
+            CloudFiles instance configured for the path
+
+        Examples:
+            >>> storage._get_cloud_client('s3://bucket/dir/file.txt')
+            <CloudFiles instance>
+        """
+        from cloudfiles import CloudFiles
+
+        dir_path, filename = self._split_cloud_path(path)
+        if dir_path:
+            return CloudFiles(dir_path, use_https=use_https), filename
+        else:
+            return CloudFiles(path, use_https=use_https), filename
+
+    def _cloud_write_bytes(self, path: str, data: bytes) -> None:
+        """Write bytes to cloud storage.
+
+        Args:
+            path: Cloud path
+            data: Bytes to write
+
+        Examples:
+            >>> storage._cloud_write_bytes('s3://bucket/file.txt', b'data')
+        """
+        cf, filename = self._get_cloud_client(path)
+        cf.put(filename, data)
+
+    def _cloud_read_bytes(self, path: str) -> bytes:
+        """Read bytes from cloud storage.
+
+        Args:
+            path: Cloud path
+
+        Returns:
+            File contents as bytes
+
+        Examples:
+            >>> data = storage._cloud_read_bytes('s3://bucket/file.txt')
+        """
+        cf, filename = self._get_cloud_client(path, use_https=self._use_https)
+        return cf.get(filename)
+
     def exists(self, path: str) -> bool:
         """Check if a path exists (local or cloud).
 
@@ -50,22 +129,20 @@ class StorageBackend:
                 # Check if it looks like a file (has extension) or directory
                 if "." in path.split("/")[-1]:
                     # Looks like a file - try to get it
-                    parts = path.rsplit("/", 1)
-                    if len(parts) == 2:
-                        dir_path, filename = parts
-                        cf = CloudFiles(dir_path)
-                        result = cf.get(filename)
-                        return result is not None
-                    else:
-                        cf = CloudFiles(path)
-                        result = cf.get(path)
-                        return result is not None
+                    dir_path, filename = self._split_cloud_path(path)
+                    cf = (
+                        CloudFiles(dir_path, use_https=self._use_https)
+                        if dir_path
+                        else CloudFiles(path, use_https=self._use_https)
+                    )
+                    result = cf.get(filename if dir_path else path)
+                    return result is not None
                 else:
                     # Looks like a directory - check if prefix exists
-                    cf = CloudFiles(path)
-                    # Try to list - if it works, directory exists
-                    list(cf.list())
-                    return True
+                    cf = CloudFiles(path, use_https=self._use_https)
+                    # Try to list - if any items exist, directory exists
+                    items = list(cf.list())
+                    return len(items) > 0
             except:
                 return False
         else:
@@ -122,15 +199,7 @@ class StorageBackend:
             >>> storage.delete_file('/path/to/file.json')
         """
         if is_cloud_path(path):
-            from cloudfiles import CloudFiles
-
-            parts = path.rsplit("/", 1)
-            if len(parts) == 2:
-                dir_path, filename = parts
-            else:
-                dir_path = ""
-                filename = parts[0]
-            cf = CloudFiles(dir_path) if dir_path else CloudFiles(path)
+            cf, filename = self._get_cloud_client(path)
             cf.delete(filename)
         else:
             path_obj = Path(path)
@@ -149,18 +218,9 @@ class StorageBackend:
             >>> storage.copy_file('/local/file.txt', 's3://bucket/file.txt')
         """
         if is_cloud_path(dst):
-            from cloudfiles import CloudFiles
-
             with open(src, "rb") as f:
                 content = f.read()
-            parts = dst.rsplit("/", 1)
-            if len(parts) == 2:
-                dir_path, filename = parts
-            else:
-                dir_path = ""
-                filename = parts[0]
-            cf = CloudFiles(dir_path) if dir_path else CloudFiles(dst)
-            cf.put(filename, content)
+            self._cloud_write_bytes(dst, content)
         else:
             import shutil
 
@@ -218,17 +278,9 @@ class StorageBackend:
         )
 
         if is_cloud_path(path):
-            from cloudfiles import CloudFiles
-
-            # Extract directory and filename
-            parts = path.rsplit("/", 1)
-            if len(parts) == 2:
-                dir_path, filename = parts
-            else:
-                dir_path = ""
-                filename = parts[0]
-            cf = CloudFiles(dir_path) if dir_path else CloudFiles(path)
-            cf.put(filename, content)
+            cf, filename = self._get_cloud_client(path)
+            # Disable caching for manifest files to ensure fresh reads
+            cf.put(filename, content, cache_control="no-cache")
         else:
             with open(path, "wb") as f:
                 f.write(content)
@@ -253,16 +305,7 @@ class StorageBackend:
         import orjson
 
         if is_cloud_path(path):
-            from cloudfiles import CloudFiles
-
-            parts = path.rsplit("/", 1)
-            if len(parts) == 2:
-                dir_path, filename = parts
-            else:
-                dir_path = ""
-                filename = parts[0]
-            cf = CloudFiles(dir_path) if dir_path else CloudFiles(path)
-            content = cf.get(filename)
+            content = self._cloud_read_bytes(path)
 
             # Handle case where file doesn't exist or is empty
             if content is None:
@@ -333,26 +376,12 @@ class StorageBackend:
         import joblib
 
         if is_cloud_path(path):
-            # Write to temp file, then upload
-            import tempfile
+            # Serialize to BytesIO
+            buffer = io.BytesIO()
+            joblib.dump(obj, buffer)
+            data = buffer.getvalue()
 
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".joblib") as tmp:
-                joblib.dump(obj, tmp.name)
-                with open(tmp.name, "rb") as f:
-                    content = f.read()
-                # Upload
-                from cloudfiles import CloudFiles
-
-                parts = path.rsplit("/", 1)
-                if len(parts) == 2:
-                    dir_path, filename = parts
-                else:
-                    dir_path = ""
-                    filename = parts[0]
-                cf = CloudFiles(dir_path) if dir_path else CloudFiles(path)
-                cf.put(filename, content)
-                # Cleanup
-                Path(tmp.name).unlink()
+            self._cloud_write_bytes(path, data)
         else:
             joblib.dump(obj, path)
 
@@ -372,27 +401,59 @@ class StorageBackend:
         import joblib
 
         if is_cloud_path(path):
-            # Download to temp file, then load
-            import tempfile
+            data = self._cloud_read_bytes(path)
 
-            from cloudfiles import CloudFiles
-
-            parts = path.rsplit("/", 1)
-            if len(parts) == 2:
-                dir_path, filename = parts
-            else:
-                dir_path = ""
-                filename = parts[0]
-            cf = CloudFiles(dir_path) if dir_path else CloudFiles(path)
-            content = cf.get(filename)
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".joblib") as tmp:
-                tmp.write(content)
-                tmp.flush()
-                obj = joblib.load(tmp.name)
-                Path(tmp.name).unlink()
-                return obj
+            # Deserialize from BytesIO
+            buffer = io.BytesIO(data)
+            return joblib.load(buffer)
         else:
             return joblib.load(path)
+
+    def write_skops(self, path: str, obj: Any) -> None:
+        """Write object with skops (local or cloud).
+
+        Args:
+            path: File path
+            obj: Object to serialize
+
+        Examples:
+            >>> storage = StorageBackend()
+            >>> storage.write_skops('/path/to/model.skops', model)
+        """
+        import skops.io as sio
+
+        # Serialize to bytes
+        data = sio.dumps(obj)
+
+        if is_cloud_path(path):
+            self._cloud_write_bytes(path, data)
+        else:
+            Path(path).write_bytes(data)
+
+    def read_skops(self, path: str) -> Any:
+        """Read object with skops (local or cloud).
+
+        Args:
+            path: File path
+
+        Returns:
+            Deserialized object
+
+        Examples:
+            >>> storage = StorageBackend()
+            >>> model = storage.read_skops('/path/to/model.skops')
+        """
+        import skops.io as sio
+
+        if is_cloud_path(path):
+            data = self._cloud_read_bytes(path)
+        else:
+            data = Path(path).read_bytes()
+
+        # Get untrusted types and trust them all (user's own models)
+        # In skops 0.10+, trusted=True is not allowed due to CVE-2024-37065
+        unknown_types = sio.get_untrusted_types(data=data)
+        return sio.loads(data, trusted=unknown_types)
 
     # =========================================================================
     # PyTorch I/O
@@ -469,16 +530,7 @@ class StorageBackend:
                 with open(tmp.name, "rb") as f:
                     content = f.read()
                 # Upload
-                from cloudfiles import CloudFiles
-
-                parts = path.rsplit("/", 1)
-                if len(parts) == 2:
-                    dir_path, filename = parts
-                else:
-                    dir_path = ""
-                    filename = parts[0]
-                cf = CloudFiles(dir_path) if dir_path else CloudFiles(path)
-                cf.put(filename, content)
+                self._cloud_write_bytes(path, content)
                 # Cleanup
                 Path(tmp.name).unlink()
         else:
@@ -510,16 +562,7 @@ class StorageBackend:
             # Download to temp file, then load
             import tempfile
 
-            from cloudfiles import CloudFiles
-
-            parts = path.rsplit("/", 1)
-            if len(parts) == 2:
-                dir_path, filename = parts
-            else:
-                dir_path = ""
-                filename = parts[0]
-            cf = CloudFiles(dir_path) if dir_path else CloudFiles(path)
-            content = cf.get(filename)
+            content = self._cloud_read_bytes(path)
             with tempfile.NamedTemporaryFile(delete=False, suffix=".pt") as tmp:
                 tmp.write(content)
                 tmp.flush()
@@ -561,16 +604,7 @@ class StorageBackend:
                 with open(tmp.name, "rb") as f:
                     content = f.read()
                 # Upload
-                from cloudfiles import CloudFiles
-
-                parts = path.rsplit("/", 1)
-                if len(parts) == 2:
-                    dir_path, filename = parts
-                else:
-                    dir_path = ""
-                    filename = parts[0]
-                cf = CloudFiles(dir_path) if dir_path else CloudFiles(path)
-                cf.put(filename, content)
+                self._cloud_write_bytes(path, content)
                 # Cleanup
                 Path(tmp.name).unlink()
         else:
@@ -602,16 +636,7 @@ class StorageBackend:
             # Download to temp file, then load
             import tempfile
 
-            from cloudfiles import CloudFiles
-
-            parts = path.rsplit("/", 1)
-            if len(parts) == 2:
-                dir_path, filename = parts
-            else:
-                dir_path = ""
-                filename = parts[0]
-            cf = CloudFiles(dir_path) if dir_path else CloudFiles(path)
-            content = cf.get(filename)
+            content = self._cloud_read_bytes(path)
             with tempfile.NamedTemporaryFile(delete=False, suffix=".npy") as tmp:
                 tmp.write(content)
                 tmp.flush()
