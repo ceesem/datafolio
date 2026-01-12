@@ -6,7 +6,9 @@
 
 **A lightweight, filesystem-based data versioning and experiment tracking library for Python.**
 
-DataFolio helps you organize, version, and track your data science experiments by storing datasets, models, and artifacts in a simple, transparent directory structure. Everything is saved as plain files (Parquet, JSON, pickle) that you can inspect, version with git, or backup to any storage system.
+DataFolio helps you organize, version, and track your data science experiments by storing datasets, models, and artifacts in a simple, transparent directory structure. Everything is saved as plain files (Parquet, JSON, etc) that you can inspect, version with git, or backup to any storage system.
+
+Note: DataFolio has been an exercise in how extensively I can use Claude Code. Currently all work has been done via Mr Claude, but now that it's getting very useful for workflows I might transition over to more manual curation.
 
 ## Features
 
