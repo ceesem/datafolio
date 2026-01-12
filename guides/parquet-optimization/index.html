@@ -1,0 +1,1701 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://ceesem.github.io/datafolio/guides/parquet-optimization/">
+      
+      
+        <link rel="prev" href="../caching/">
+      
+      
+        <link rel="next" href="../../reference/datafolio-api/">
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.6.21">
+    
+    
+      
+        <title>Parquet Optimization - DataFolio Documentation</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.2a3383ac.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Bitter:300,300i,400,400i,700,700i%7CInconsolata:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Bitter";--md-code-font:"Inconsolata"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="blue-grey" data-md-color-accent="deep-orange">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#advanced-parquet-operations" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="DataFolio Documentation" class="md-header__button md-logo" aria-label="DataFolio Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            DataFolio Documentation
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Parquet Optimization
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/ceesem/datafolio" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.0.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    ceesem/datafolio
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  About
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../getting-started/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Getting Started
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Guides
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../reference/datafolio-api/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  API Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../changelog/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Changelog
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+  
+
+<nav class="md-nav md-nav--primary md-nav--lifted md-nav--integrated" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="DataFolio Documentation" class="md-nav__button md-logo" aria-label="DataFolio Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    DataFolio Documentation
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/ceesem/datafolio" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.0.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    ceesem/datafolio
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    About
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Getting Started
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+    
+    
+      
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    Guides
+    
+  </span>
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_3" id="__nav_3_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            Guides
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../models/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Working with Models
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../snapshots/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Snapshots
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../caching/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Caching
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    Parquet Optimization
+    
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    Parquet Optimization
+    
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#why-parquet" class="md-nav__link">
+    <span class="md-ellipsis">
+      Why Parquet?
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#quick-example-the-problem" class="md-nav__link">
+    <span class="md-ellipsis">
+      Quick Example: The Problem
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#column-selection-column-pruning" class="md-nav__link">
+    <span class="md-ellipsis">
+      Column Selection (Column Pruning)
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Column Selection (Column Pruning)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#basic-column-selection" class="md-nav__link">
+    <span class="md-ellipsis">
+      Basic Column Selection
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#performance-impact" class="md-nav__link">
+    <span class="md-ellipsis">
+      Performance Impact
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#use-cases" class="md-nav__link">
+    <span class="md-ellipsis">
+      Use Cases
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#row-filtering-predicate-pushdown" class="md-nav__link">
+    <span class="md-ellipsis">
+      Row Filtering (Predicate Pushdown)
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Row Filtering (Predicate Pushdown)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#basic-filtering" class="md-nav__link">
+    <span class="md-ellipsis">
+      Basic Filtering
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#filter-syntax" class="md-nav__link">
+    <span class="md-ellipsis">
+      Filter Syntax
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#complex-filters" class="md-nav__link">
+    <span class="md-ellipsis">
+      Complex Filters
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#performance-impact_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      Performance Impact
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#combining-column-selection-and-filtering" class="md-nav__link">
+    <span class="md-ellipsis">
+      Combining Column Selection and Filtering
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Combining Column Selection and Filtering">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#real-world-example-fraud-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      Real-World Example: Fraud Detection
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#working-with-large-datasets" class="md-nav__link">
+    <span class="md-ellipsis">
+      Working with Large Datasets
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Working with Large Datasets">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pattern-1-iterative-processing" class="md-nav__link">
+    <span class="md-ellipsis">
+      Pattern 1: Iterative Processing
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pattern-2-sample-first-analyze-later" class="md-nav__link">
+    <span class="md-ellipsis">
+      Pattern 2: Sample First, Analyze Later
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pattern-3-progressive-loading" class="md-nav__link">
+    <span class="md-ellipsis">
+      Pattern 3: Progressive Loading
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#memory-optimization-tips" class="md-nav__link">
+    <span class="md-ellipsis">
+      Memory Optimization Tips
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Memory Optimization Tips">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-check-available-columns-first" class="md-nav__link">
+    <span class="md-ellipsis">
+      1. Check Available Columns First
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-use-appropriate-data-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      2. Use Appropriate Data Types
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-read-only-what-youll-use" class="md-nav__link">
+    <span class="md-ellipsis">
+      3. Read Only What You'll Use
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#advanced-pyarrow-tables" class="md-nav__link">
+    <span class="md-ellipsis">
+      Advanced: PyArrow Tables
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#integration-with-duckdb" class="md-nav__link">
+    <span class="md-ellipsis">
+      Integration with DuckDB
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cloud-storage-optimization" class="md-nav__link">
+    <span class="md-ellipsis">
+      Cloud Storage Optimization
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Cloud Storage Optimization">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#caching-for-repeated-access" class="md-nav__link">
+    <span class="md-ellipsis">
+      Caching for Repeated Access
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#minimize-data-transfer" class="md-nav__link">
+    <span class="md-ellipsis">
+      Minimize Data Transfer
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#best-practices" class="md-nav__link">
+    <span class="md-ellipsis">
+      Best Practices
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Best Practices">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-always-specify-columns" class="md-nav__link">
+    <span class="md-ellipsis">
+      1. Always Specify Columns
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-use-filters-for-time-series-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      2. Use Filters for Time-Series Data
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-combine-with-good-data-organization" class="md-nav__link">
+    <span class="md-ellipsis">
+      3. Combine with Good Data Organization
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-check-your-filters-work" class="md-nav__link">
+    <span class="md-ellipsis">
+      4. Check Your Filters Work
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#common-patterns" class="md-nav__link">
+    <span class="md-ellipsis">
+      Common Patterns
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Common Patterns">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pattern-top-n-analysis" class="md-nav__link">
+    <span class="md-ellipsis">
+      Pattern: Top N Analysis
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pattern-time-window-analysis" class="md-nav__link">
+    <span class="md-ellipsis">
+      Pattern: Time-Window Analysis
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pattern-ab-test-analysis" class="md-nav__link">
+    <span class="md-ellipsis">
+      Pattern: A/B Test Analysis
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      Troubleshooting
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Troubleshooting">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#error-filter-not-supported" class="md-nav__link">
+    <span class="md-ellipsis">
+      Error: "filter '...' not supported"
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#error-column-x-does-not-exist" class="md-nav__link">
+    <span class="md-ellipsis">
+      Error: "Column 'x' does not exist"
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#slow-performance-despite-filtering" class="md-nav__link">
+    <span class="md-ellipsis">
+      Slow Performance Despite Filtering
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      Summary
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#learn-more" class="md-nav__link">
+    <span class="md-ellipsis">
+      Learn More
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+    
+    
+      
+        
+        
+      
+    
+    <li class="md-nav__item md-nav__item--pruned md-nav__item--nested">
+      
+        
+  
+  
+  
+    <a href="../../reference/datafolio-api/" class="md-nav__link">
+      
+  
+  
+  <span class="md-ellipsis">
+    API Reference
+    
+  </span>
+  
+
+      
+        <span class="md-nav__icon md-icon"></span>
+      
+    </a>
+  
+
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Changelog
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="advanced-parquet-operations">Advanced Parquet Operations</h1>
+<p>DataFolio stores tables as Parquet files, leveraging Parquet's powerful filtering and optimization capabilities. This guide shows you how to work efficiently with large datasets using column selection, row filtering, and other advanced techniques.</p>
+<h2 id="why-parquet">Why Parquet?</h2>
+<p>Parquet is a columnar storage format designed for analytics workloads:</p>
+<ul>
+<li><strong>Column pruning</strong> - Read only the columns you need</li>
+<li><strong>Row filtering</strong> - Filter data at the file level before loading into memory</li>
+<li><strong>Compression</strong> - Efficient storage with various compression algorithms</li>
+<li><strong>Metadata</strong> - Store schema, statistics for query optimization</li>
+<li><strong>Cloud-optimized</strong> - Works well with S3, GCS, and other cloud storage</li>
+</ul>
+<h2 id="quick-example-the-problem">Quick Example: The Problem</h2>
+<pre><code class="language-python"># Problem: 100GB table, but you only need 2 columns and 1% of rows
+folio = DataFolio('s3://huge-bucket/analysis')
+
+# Bad: Loads entire 100GB into memory! 💥
+df = folio.get_table('transactions')  # OOM error!
+df_filtered = df[df['amount'] &gt; 1000][['user_id', 'amount']]
+
+# Good: Loads only ~1GB (filtered subset) ✅
+df_filtered = folio.get_table('transactions',
+    columns=['user_id', 'amount'],
+    filters=[('amount', '&gt;', 1000)],
+    engine='pyarrow')
+</code></pre>
+<p>This is the power of column selection and row filtering - work with massive datasets efficiently.</p>
+<h2 id="column-selection-column-pruning">Column Selection (Column Pruning)</h2>
+<p>Read only the columns you need, reducing memory usage and load time.</p>
+<h3 id="basic-column-selection">Basic Column Selection</h3>
+<pre><code class="language-python">folio = DataFolio('experiments/analysis')
+
+# Full table has 50 columns
+df_full = folio.get_table('user_events')  # Loads all 50 columns
+
+# Read only specific columns
+df_subset = folio.get_table('user_events',
+    columns=['user_id', 'timestamp', 'event_type'])  # Loads only 3 columns
+</code></pre>
+<h3 id="performance-impact">Performance Impact</h3>
+<pre><code class="language-python">import time
+
+# Example: 10M rows × 50 columns = 4GB
+start = time.time()
+df_full = folio.get_table('large_table')
+full_time = time.time() - start
+print(f&quot;Full table: {full_time:.2f}s, {df_full.memory_usage().sum() / 1e9:.2f} GB&quot;)
+# Full table: 12.3s, 4.2 GB
+
+# Read only 5 columns
+start = time.time()
+df_subset = folio.get_table('large_table',
+    columns=['col1', 'col2', 'col3', 'col4', 'col5'])
+subset_time = time.time() - start
+print(f&quot;5 columns: {subset_time:.2f}s, {df_subset.memory_usage().sum() / 1e9:.2f} GB&quot;)
+# 5 columns: 1.8s, 0.4 GB
+# 6.8x faster, 10x less memory!
+</code></pre>
+<h3 id="use-cases">Use Cases</h3>
+<p><strong>Data Exploration</strong></p>
+<pre><code class="language-python"># Quick peek at data without loading everything
+summary = folio.get_table('user_data',
+    columns=['user_id', 'signup_date', 'country'])
+
+print(summary.head())
+print(summary['country'].value_counts())
+</code></pre>
+<p><strong>Feature Engineering</strong></p>
+<pre><code class="language-python"># Load only features needed for this model
+features = ['age', 'income', 'education', 'job_title']
+target = 'churn'
+
+df = folio.get_table('training_data',
+    columns=features + [target])
+
+X = df[features]
+y = df[target]
+</code></pre>
+<h2 id="row-filtering-predicate-pushdown">Row Filtering (Predicate Pushdown)</h2>
+<p>Filter rows at the Parquet file level before loading into memory. This is <strong>much</strong> more efficient than loading everything and filtering in pandas.</p>
+<h3 id="basic-filtering">Basic Filtering</h3>
+<p>Row filtering requires the <code>pyarrow</code> engine:</p>
+<pre><code class="language-python"># Filter rows where amount &gt; 1000
+df = folio.get_table('transactions',
+    filters=[('amount', '&gt;', 1000)],
+    engine='pyarrow')
+
+# Multiple conditions (AND)
+df = folio.get_table('transactions',
+    filters=[
+        ('amount', '&gt;', 1000),
+        ('country', '==', 'US')
+    ],
+    engine='pyarrow')
+</code></pre>
+<h3 id="filter-syntax">Filter Syntax</h3>
+<p>PyArrow supports these filter operators:</p>
+<pre><code class="language-python"># Comparisons
+[('age', '&gt;', 18)]           # Greater than
+[('age', '&gt;=', 18)]          # Greater than or equal
+[('age', '&lt;', 65)]           # Less than
+[('age', '&lt;=', 65)]          # Less than or equal
+[('status', '==', 'active')] # Equal
+[('status', '!=', 'banned')] # Not equal
+
+# Set membership
+[('country', 'in', ['US', 'CA', 'MX'])]
+[('country', 'not in', ['XX', 'YY'])]
+</code></pre>
+<h3 id="complex-filters">Complex Filters</h3>
+<p>Combine multiple conditions:</p>
+<pre><code class="language-python"># AND conditions (list of tuples)
+df = folio.get_table('users',
+    filters=[
+        ('age', '&gt;=', 18),
+        ('age', '&lt;', 65),
+        ('country', 'in', ['US', 'CA', 'UK'])
+    ],
+    engine='pyarrow')
+
+# OR conditions (list of lists)
+# Get users who are either (age &lt; 18) OR (country == 'US')
+df = folio.get_table('users',
+    filters=[
+        [('age', '&lt;', 18)],
+        [('country', '==', 'US')]
+    ],
+    engine='pyarrow')
+
+# Complex: (age &gt;= 18 AND country == 'US') OR (status == 'premium')
+df = folio.get_table('users',
+    filters=[
+        [('age', '&gt;=', 18), ('country', '==', 'US')],
+        [('status', '==', 'premium')]
+    ],
+    engine='pyarrow')
+</code></pre>
+<h3 id="performance-impact_1">Performance Impact</h3>
+<pre><code class="language-python"># Example: 100M rows, filter returns 1M rows
+
+# Bad: Load all 100M rows, then filter (slow!) 💥
+df = folio.get_table('events')  # 30s, 8GB memory
+df_filtered = df[df['event_type'] == 'purchase']  # Another 5s
+
+# Good: Filter at file level (fast!) ✅
+df_filtered = folio.get_table('events',
+    filters=[('event_type', '==', 'purchase')],
+    engine='pyarrow')  # 2s, 80MB memory
+# 17.5x faster, 100x less memory!
+</code></pre>
+<h2 id="combining-column-selection-and-filtering">Combining Column Selection and Filtering</h2>
+<p>The real power comes from combining both techniques:</p>
+<pre><code class="language-python"># Dataset: 1B rows × 100 columns = 800GB
+# Goal: Get user_id and amount for large transactions in 2024
+
+# Optimal approach: Filter first, select columns
+df = folio.get_table('transactions',
+    columns=['user_id', 'amount', 'timestamp'],  # Only 3 columns
+    filters=[
+        ('timestamp', '&gt;=', '2024-01-01'),
+        ('timestamp', '&lt;', '2025-01-01'),
+        ('amount', '&gt;', 10000)
+    ],
+    engine='pyarrow')
+
+# Loads only ~500MB instead of 800GB! 🎉
+</code></pre>
+<h3 id="real-world-example-fraud-detection">Real-World Example: Fraud Detection</h3>
+<pre><code class="language-python">from datafolio import DataFolio
+
+folio = DataFolio('s3://fraud-detection/production',
+    cache_enabled=True)  # Cache for repeated access
+
+# Full dataset: 10TB of transaction data
+# We need: Recent high-value transactions from flagged countries
+
+df = folio.get_table('transactions',
+    # Only these columns
+    columns=[
+        'transaction_id',
+        'user_id',
+        'amount',
+        'country',
+        'timestamp',
+        'merchant_id'
+    ],
+    # Filter to recent, high-value, suspicious countries
+    filters=[
+        ('timestamp', '&gt;=', '2024-12-01'),  # Last month
+        ('amount', '&gt;', 5000),              # Large amounts
+        ('country', 'in', ['XX', 'YY', 'ZZ'])  # Flagged countries
+    ],
+    engine='pyarrow')
+
+# Result: ~2GB loaded instead of 10TB
+# Now train fraud detection model
+from sklearn.ensemble import RandomForestClassifier
+
+model = RandomForestClassifier()
+# ... feature engineering and training ...
+
+# Save everything
+folio.add_table('flagged_transactions', df)
+folio.add_model('fraud_detector', model,
+    inputs=['transactions'])
+folio.metadata['filtered_rows'] = len(df)
+folio.metadata['date_range'] = '2024-12'
+</code></pre>
+<h2 id="working-with-large-datasets">Working with Large Datasets</h2>
+<h3 id="pattern-1-iterative-processing">Pattern 1: Iterative Processing</h3>
+<p>For datasets too large to fit in memory, process in chunks:</p>
+<pre><code class="language-python"># Get list of unique dates
+info = folio.get_table_info('huge_dataset')
+# Assume we know the date range: 2020-01-01 to 2024-12-31
+
+from datetime import datetime, timedelta
+import pandas as pd
+
+results = []
+start_date = datetime(2020, 1, 1)
+end_date = datetime(2024, 12, 31)
+current_date = start_date
+
+while current_date &lt; end_date:
+    next_date = current_date + timedelta(days=30)
+
+    # Load one month at a time
+    df_month = folio.get_table('huge_dataset',
+        filters=[
+            ('date', '&gt;=', current_date.strftime('%Y-%m-%d')),
+            ('date', '&lt;', next_date.strftime('%Y-%m-%d'))
+        ],
+        engine='pyarrow')
+
+    # Process this month
+    monthly_stats = df_month.groupby('category').agg({
+        'amount': ['sum', 'mean', 'count']
+    })
+    results.append(monthly_stats)
+
+    current_date = next_date
+
+# Combine results
+final_results = pd.concat(results)
+folio.add_table('monthly_statistics', final_results)
+</code></pre>
+<h3 id="pattern-2-sample-first-analyze-later">Pattern 2: Sample First, Analyze Later</h3>
+<pre><code class="language-python"># 1. Get a sample to develop your analysis
+df_sample = folio.get_table('massive_dataset',
+    filters=[('random_partition', '==', 0)],  # 1% sample
+    engine='pyarrow')
+
+# 2. Develop and test your analysis on the sample
+def analyze_data(df):
+    # Your analysis logic
+    return df.groupby('category').agg({'value': 'mean'})
+
+# 3. Test on sample
+result_sample = analyze_data(df_sample)
+print(&quot;Sample results:&quot;, result_sample)
+
+# 4. Run on full dataset
+df_full = folio.get_table('massive_dataset')
+result_full = analyze_data(df_full)
+folio.add_table('analysis_results', result_full)
+</code></pre>
+<h3 id="pattern-3-progressive-loading">Pattern 3: Progressive Loading</h3>
+<pre><code class="language-python"># Load increasingly detailed data as needed
+
+# Step 1: Load summary columns for filtering
+df_summary = folio.get_table('user_behavior',
+    columns=['user_id', 'total_spend', 'num_purchases'])
+
+# Step 2: Identify users of interest
+high_value_users = df_summary[df_summary['total_spend'] &gt; 10000]['user_id']
+
+# Step 3: Load detailed data only for those users
+df_detailed = folio.get_table('user_behavior',
+    filters=[('user_id', 'in', high_value_users.tolist())],
+    engine='pyarrow')
+# All columns, but only for high-value users
+</code></pre>
+<h2 id="memory-optimization-tips">Memory Optimization Tips</h2>
+<h3 id="1-check-available-columns-first">1. Check Available Columns First</h3>
+<pre><code class="language-python"># See what columns are available without loading data
+info = folio.get_table_info('my_table')
+print(&quot;Available columns:&quot;, info.get('columns', []))
+print(&quot;Total rows:&quot;, info.get('num_rows'))
+print(&quot;Total columns:&quot;, info.get('num_cols'))
+
+# Now load only what you need
+df = folio.get_table('my_table',
+    columns=['col1', 'col2', 'col3'])
+</code></pre>
+<h3 id="2-use-appropriate-data-types">2. Use Appropriate Data Types</h3>
+<pre><code class="language-python"># Load with optimized dtypes
+df = folio.get_table('user_data',
+    columns=['user_id', 'age', 'country'])
+
+# Convert to more efficient types
+df['user_id'] = df['user_id'].astype('uint32')  # If IDs are small integers
+df['age'] = df['age'].astype('uint8')           # Age fits in uint8
+df['country'] = df['country'].astype('category') # Categorical for repeated strings
+
+# Memory savings can be 50-90%!
+</code></pre>
+<h3 id="3-read-only-what-youll-use">3. Read Only What You'll Use</h3>
+<pre><code class="language-python"># Bad: Load everything, then filter
+df = folio.get_table('events')  # 10GB
+active_users = df[df['status'] == 'active']['user_id'].unique()
+
+# Good: Filter first, then load
+df_active = folio.get_table('events',
+    columns=['user_id', 'status'],
+    filters=[('status', '==', 'active')],
+    engine='pyarrow')  # 100MB
+active_users = df_active['user_id'].unique()
+</code></pre>
+<h2 id="advanced-pyarrow-tables">Advanced: PyArrow Tables</h2>
+<p>For maximum performance, work with PyArrow tables directly:</p>
+<pre><code class="language-python">import pyarrow.parquet as pq
+
+# Get the file path
+folio = DataFolio('experiments/data')
+
+# For included tables, get the bundle path
+bundle_path = folio.path
+table_info = folio.get_table_info('my_table')
+file_path = f&quot;{bundle_path}/tables/{table_info['filename']}&quot;
+
+# Read as PyArrow table (zero-copy, very fast)
+table = pq.read_table(file_path,
+    columns=['col1', 'col2'],
+    filters=[('col1', '&gt;', 100)])
+
+# Work with PyArrow (often faster than pandas)
+print(f&quot;Rows: {table.num_rows}&quot;)
+print(f&quot;Schema: {table.schema}&quot;)
+
+# Convert to pandas only when needed
+df = table.to_pandas()
+
+# Or: Reference tables work directly
+ref_path = folio.get_data_path('referenced_table')
+table = pq.read_table(ref_path, columns=['a', 'b'])
+</code></pre>
+<h2 id="integration-with-duckdb">Integration with DuckDB</h2>
+<p>For complex queries on large datasets, use DuckDB:</p>
+<pre><code class="language-python">import duckdb
+
+folio = DataFolio('s3://my-bucket/analysis')
+
+# Get path to table
+table_path = folio.get_data_path('large_table')
+
+# Query with DuckDB (very fast, minimal memory)
+result = duckdb.query(f&quot;&quot;&quot;
+    SELECT
+        category,
+        AVG(amount) as avg_amount,
+        COUNT(*) as count
+    FROM read_parquet('{table_path}')
+    WHERE amount &gt; 100
+    AND date &gt;= '2024-01-01'
+    GROUP BY category
+    ORDER BY avg_amount DESC
+    LIMIT 100
+&quot;&quot;&quot;).to_df()
+
+# Save results
+folio.add_table('category_summary', result,
+    description='Top 100 categories by average amount',
+    inputs=['large_table'])
+</code></pre>
+<h2 id="cloud-storage-optimization">Cloud Storage Optimization</h2>
+<h3 id="caching-for-repeated-access">Caching for Repeated Access</h3>
+<pre><code class="language-python"># Enable caching for cloud data
+folio = DataFolio('s3://my-bucket/experiment',
+    cache_enabled=True,
+    cache_dir='/fast/local/disk')
+
+# First access: Downloads from S3 (slow)
+df1 = folio.get_table('data',
+    filters=[('country', '==', 'US')],
+    engine='pyarrow')  # 30s
+
+# Second access: Reads from local cache (fast!)
+df2 = folio.get_table('data',
+    filters=[('country', '==', 'CA')],
+    engine='pyarrow')  # 0.5s
+
+# Note: Different filters still benefit from cached file
+</code></pre>
+<h3 id="minimize-data-transfer">Minimize Data Transfer</h3>
+<pre><code class="language-python"># Bad: Transfer entire file from S3, then filter locally
+folio = DataFolio('s3://huge-bucket/data')
+df = folio.get_table('transactions')  # Transfers 50GB!
+df_us = df[df['country'] == 'US']     # Then filters locally
+
+# Good: Filter on S3, transfer only results
+df_us = folio.get_table('transactions',
+    columns=['id', 'amount', 'date'],
+    filters=[('country', '==', 'US')],
+    engine='pyarrow')  # Transfers only 500MB
+</code></pre>
+<h2 id="best-practices">Best Practices</h2>
+<h3 id="1-always-specify-columns">1. Always Specify Columns</h3>
+<pre><code class="language-python"># Default: Read all columns
+df = folio.get_table('data')  # All columns
+
+# Better: Specify exactly what you need
+df = folio.get_table('data',
+    columns=['essential_col1', 'essential_col2'])
+</code></pre>
+<h3 id="2-use-filters-for-time-series-data">2. Use Filters for Time-Series Data</h3>
+<pre><code class="language-python"># Analyze only recent data
+df = folio.get_table('events',
+    filters=[('timestamp', '&gt;=', '2024-12-01')],
+    engine='pyarrow')
+</code></pre>
+<h3 id="3-combine-with-good-data-organization">3. Combine with Good Data Organization</h3>
+<pre><code class="language-python"># When saving data, include useful columns for filtering
+df['year'] = df['date'].dt.year
+df['month'] = df['date'].dt.month
+
+folio.add_table('data_with_partitions', df)
+
+# Later: Fast filtering
+df_2024 = folio.get_table('data_with_partitions',
+    filters=[('year', '==', 2024)],
+    engine='pyarrow')
+</code></pre>
+<h3 id="4-check-your-filters-work">4. Check Your Filters Work</h3>
+<pre><code class="language-python"># Verify filter syntax before processing huge files
+df_test = folio.get_table('data',
+    filters=[('category', 'in', ['A', 'B'])],
+    engine='pyarrow')
+
+if len(df_test) &gt; 0:
+    print(&quot;Filter works! Processing full dataset...&quot;)
+else:
+    print(&quot;No data matched filter - check column names/values&quot;)
+</code></pre>
+<h2 id="common-patterns">Common Patterns</h2>
+<h3 id="pattern-top-n-analysis">Pattern: Top N Analysis</h3>
+<pre><code class="language-python"># Find top users by spend, without loading everyone
+df_all = folio.get_table('user_spending',
+    columns=['user_id', 'total_spend'])
+
+top_users = df_all.nlargest(1000, 'total_spend')['user_id']
+
+# Load full details only for top users
+df_top = folio.get_table('user_details',
+    filters=[('user_id', 'in', top_users.tolist())],
+    engine='pyarrow')
+</code></pre>
+<h3 id="pattern-time-window-analysis">Pattern: Time-Window Analysis</h3>
+<pre><code class="language-python">from datetime import datetime, timedelta
+
+# Analyze last 7 days
+end_date = datetime.now()
+start_date = end_date - timedelta(days=7)
+
+df = folio.get_table('events',
+    columns=['user_id', 'event_type', 'timestamp', 'value'],
+    filters=[
+        ('timestamp', '&gt;=', start_date.strftime('%Y-%m-%d')),
+        ('timestamp', '&lt;', end_date.strftime('%Y-%m-%d'))
+    ],
+    engine='pyarrow')
+
+# Analyze this week's data
+summary = df.groupby('event_type').agg({'value': 'sum'})
+folio.add_table(f'weekly_summary_{start_date:%Y%m%d}', summary)
+</code></pre>
+<h3 id="pattern-ab-test-analysis">Pattern: A/B Test Analysis</h3>
+<pre><code class="language-python"># Load only treatment group data
+df_treatment = folio.get_table('experiment_data',
+    columns=['user_id', 'conversion', 'revenue'],
+    filters=[('group', '==', 'treatment')],
+    engine='pyarrow')
+
+df_control = folio.get_table('experiment_data',
+    columns=['user_id', 'conversion', 'revenue'],
+    filters=[('group', '==', 'control')],
+    engine='pyarrow')
+
+# Compare
+print(f&quot;Treatment: {df_treatment['conversion'].mean():.2%}&quot;)
+print(f&quot;Control: {df_control['conversion'].mean():.2%}&quot;)
+</code></pre>
+<h2 id="troubleshooting">Troubleshooting</h2>
+<h3 id="error-filter-not-supported">Error: "filter '...' not supported"</h3>
+<p>Use <code>engine='pyarrow'</code>:</p>
+<pre><code class="language-python"># Wrong
+df = folio.get_table('data', filters=[('a', '&gt;', 1)])  # Error!
+
+# Right
+df = folio.get_table('data',
+    filters=[('a', '&gt;', 1)],
+    engine='pyarrow')  # Works!
+</code></pre>
+<h3 id="error-column-x-does-not-exist">Error: "Column 'x' does not exist"</h3>
+<p>Check available columns:</p>
+<pre><code class="language-python">info = folio.get_table_info('data')
+print(&quot;Available columns:&quot;, info.get('columns', []))
+</code></pre>
+<h3 id="slow-performance-despite-filtering">Slow Performance Despite Filtering</h3>
+<ul>
+<li>Ensure you're using <code>engine='pyarrow'</code></li>
+<li>Check filter selectivity (how many rows match)</li>
+<li>Consider breaking into smaller chunks</li>
+<li>Enable caching for cloud data</li>
+</ul>
+<h2 id="summary">Summary</h2>
+<table>
+<thead>
+<tr>
+<th>Technique</th>
+<th>Use When</th>
+<th>Performance Gain</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Column selection</strong></td>
+<td>You need only some columns</td>
+<td>5-50x faster, 5-50x less memory</td>
+</tr>
+<tr>
+<td><strong>Row filtering</strong></td>
+<td>You need only some rows</td>
+<td>10-1000x faster, 10-1000x less memory</td>
+</tr>
+<tr>
+<td><strong>Both combined</strong></td>
+<td>Large datasets</td>
+<td>50-10000x faster!</td>
+</tr>
+<tr>
+<td><strong>Caching</strong></td>
+<td>Cloud storage, repeated access</td>
+<td>10-100x faster on subsequent reads</td>
+</tr>
+<tr>
+<td><strong>PyArrow engine</strong></td>
+<td>Any filtering</td>
+<td>Required for filters</td>
+</tr>
+<tr>
+<td><strong>Chunked processing</strong></td>
+<td>Data too large for memory</td>
+<td>Enables processing unlimited data</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Golden Rule:</strong> Always filter and select at the Parquet level, never load everything into memory first!</p>
+<h2 id="learn-more">Learn More</h2>
+<ul>
+<li><a href="../getting-started/">Getting Started Guide</a> - Basic DataFolio usage</li>
+<li><a href="../snapshots/">Snapshots Guide</a> - Version your filtered datasets</li>
+<li><a href="../../reference/datafolio-api/">DataFolio API Reference</a> - All <code>get_table()</code> options</li>
+<li><a href="https://pandas.pydata.org/docs/reference/api/pandas.read_parquet.html">Pandas read_parquet docs</a> - Full parameter reference</li>
+<li><a href="https://arrow.apache.org/docs/python/parquet.html#filtering">PyArrow filtering docs</a> - Advanced filter syntax</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      <script id="__config" type="application/json">{"base": "../..", "features": ["navigation.indexes", "navigation.instant", "navigation.prune", "navigation.tabs", "navigation.tabs.sticky", "toc.follow", "toc.integrate", "navigation.top", "search.suggest", "search.highlight", "search.share", "content.code.copy", "header.autohide"], "search": "../../assets/javascripts/workers/search.973d3a69.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.f55a23d4.min.js"></script>
+      
+    
+  </body>
+</html>

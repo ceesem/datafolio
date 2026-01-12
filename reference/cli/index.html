@@ -1,0 +1,1589 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://ceesem.github.io/datafolio/reference/cli/">
+      
+      
+        <link rel="prev" href="../datafolio-api/">
+      
+      
+        <link rel="next" href="../api/">
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.6.21">
+    
+    
+      
+        <title>Command Line Interface (CLI) - DataFolio Documentation</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.2a3383ac.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Bitter:300,300i,400,400i,700,700i%7CInconsolata:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Bitter";--md-code-font:"Inconsolata"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="blue-grey" data-md-color-accent="deep-orange">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#datafolio-cli-reference" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="DataFolio Documentation" class="md-header__button md-logo" aria-label="DataFolio Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            DataFolio Documentation
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Command Line Interface (CLI)
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/ceesem/datafolio" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.0.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    ceesem/datafolio
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  About
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../guides/getting-started/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Getting Started
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../guides/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Guides
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../datafolio-api/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  API Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../changelog/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Changelog
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+  
+
+<nav class="md-nav md-nav--primary md-nav--lifted md-nav--integrated" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="DataFolio Documentation" class="md-nav__button md-logo" aria-label="DataFolio Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    DataFolio Documentation
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/ceesem/datafolio" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.0.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    ceesem/datafolio
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    About
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Getting Started
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+    
+    
+      
+        
+        
+      
+    
+    <li class="md-nav__item md-nav__item--pruned md-nav__item--nested">
+      
+        
+  
+  
+  
+    <a href="../../guides/" class="md-nav__link">
+      
+  
+  
+  <span class="md-ellipsis">
+    Guides
+    
+  </span>
+  
+
+      
+        <span class="md-nav__icon md-icon"></span>
+      
+    </a>
+  
+
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+    
+    
+      
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    API Reference
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            API Reference
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../datafolio-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    DataFolio Methods
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    CLI Reference
+    
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    CLI Reference
+    
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#installation" class="md-nav__link">
+    <span class="md-ellipsis">
+      Installation
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#global-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      Global Options
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Global Options">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#setting-default-folio-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      Setting Default Folio Path
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      Commands
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Commands">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#init-initialize-a-bundle" class="md-nav__link">
+    <span class="md-ellipsis">
+      init - Initialize a Bundle
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#describe-show-bundle-information" class="md-nav__link">
+    <span class="md-ellipsis">
+      describe - Show Bundle Information
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validate-validate-bundle" class="md-nav__link">
+    <span class="md-ellipsis">
+      validate - Validate Bundle
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#snapshot-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      Snapshot Commands
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Snapshot Commands">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#snapshot-create-create-snapshot" class="md-nav__link">
+    <span class="md-ellipsis">
+      snapshot create - Create Snapshot
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#snapshot-list-list-snapshots" class="md-nav__link">
+    <span class="md-ellipsis">
+      snapshot list - List Snapshots
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#snapshot-show-show-snapshot-details" class="md-nav__link">
+    <span class="md-ellipsis">
+      snapshot show - Show Snapshot Details
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#snapshot-compare-compare-snapshots" class="md-nav__link">
+    <span class="md-ellipsis">
+      snapshot compare - Compare Snapshots
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#snapshot-diff-diff-against-snapshot" class="md-nav__link">
+    <span class="md-ellipsis">
+      snapshot diff - Diff Against Snapshot
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#snapshot-status-show-bundle-status" class="md-nav__link">
+    <span class="md-ellipsis">
+      snapshot status - Show Bundle Status
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#snapshot-delete-delete-snapshot" class="md-nav__link">
+    <span class="md-ellipsis">
+      snapshot delete - Delete Snapshot
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#snapshot-gc-garbage-collection" class="md-nav__link">
+    <span class="md-ellipsis">
+      snapshot gc - Garbage Collection
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#snapshot-reproduce-show-reproduction-instructions" class="md-nav__link">
+    <span class="md-ellipsis">
+      snapshot reproduce - Show Reproduction Instructions
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#usage-examples" class="md-nav__link">
+    <span class="md-ellipsis">
+      Usage Examples
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Usage Examples">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#common-workflows" class="md-nav__link">
+    <span class="md-ellipsis">
+      Common Workflows
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Common Workflows">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-create-and-manage-a-bundle" class="md-nav__link">
+    <span class="md-ellipsis">
+      1. Create and Manage a Bundle
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-track-progress-with-snapshots" class="md-nav__link">
+    <span class="md-ellipsis">
+      2. Track Progress with Snapshots
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-validate-and-inspect-bundles" class="md-nav__link">
+    <span class="md-ellipsis">
+      3. Validate and Inspect Bundles
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-cleanup-old-snapshots" class="md-nav__link">
+    <span class="md-ellipsis">
+      4. Cleanup Old Snapshots
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#integration-with-python-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      Integration with Python API
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#environment-variables" class="md-nav__link">
+    <span class="md-ellipsis">
+      Environment Variables
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#scripting-with-the-cli" class="md-nav__link">
+    <span class="md-ellipsis">
+      Scripting with the CLI
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Scripting with the CLI">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#bash-script-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      Bash Script Example
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#json-output-for-processing" class="md-nav__link">
+    <span class="md-ellipsis">
+      JSON Output for Processing
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#exit-codes" class="md-nav__link">
+    <span class="md-ellipsis">
+      Exit Codes
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#getting-help" class="md-nav__link">
+    <span class="md-ellipsis">
+      Getting Help
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Complete API
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Changelog
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="datafolio-cli-reference">DataFolio CLI Reference</h1>
+<p>DataFolio provides a command-line interface for managing bundles and snapshots without writing Python code.</p>
+<h2 id="installation">Installation</h2>
+<p>The CLI is automatically available after installing datafolio:</p>
+<pre><code class="language-bash">pip install datafolio
+</code></pre>
+<h2 id="global-options">Global Options</h2>
+<p>All commands support these global options:</p>
+<pre><code class="language-bash">datafolio [OPTIONS] COMMAND [ARGS]...
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>-f, --folio PATH</code></td>
+<td>Path to DataFolio bundle (default: current directory or <code>DATAFOLIO_PATH</code> env var)</td>
+</tr>
+<tr>
+<td><code>--version</code></td>
+<td>Show version and exit</td>
+</tr>
+<tr>
+<td><code>--help</code></td>
+<td>Show help message</td>
+</tr>
+</tbody>
+</table>
+<h3 id="setting-default-folio-path">Setting Default Folio Path</h3>
+<p>You can set a default folio path using the environment variable:</p>
+<pre><code class="language-bash">export DATAFOLIO_PATH=/path/to/my/bundle
+datafolio describe  # Uses DATAFOLIO_PATH
+</code></pre>
+<p>Or specify it explicitly:</p>
+<pre><code class="language-bash">datafolio -f /path/to/my/bundle describe
+</code></pre>
+<hr />
+<h2 id="commands">Commands</h2>
+<h3 id="init-initialize-a-bundle"><code>init</code> - Initialize a Bundle</h3>
+<p>Create a new DataFolio bundle.</p>
+<pre><code class="language-bash">datafolio init [PATH]
+</code></pre>
+<p><strong>Arguments:</strong>
+- <code>PATH</code> (optional): Directory to create bundle in (default: current directory)</p>
+<p><strong>Examples:</strong></p>
+<pre><code class="language-bash"># Create bundle in current directory
+datafolio init
+
+# Create bundle in specific directory
+datafolio init my_analysis
+
+# Create with custom path
+datafolio init /data/experiments/exp_001
+</code></pre>
+<p><strong>Output:</strong></p>
+<pre><code>✓ Initialized new DataFolio at: /data/experiments/exp_001
+</code></pre>
+<hr />
+<h3 id="describe-show-bundle-information"><code>describe</code> - Show Bundle Information</h3>
+<p>Display detailed information about a bundle including items, metadata, and lineage.</p>
+<pre><code class="language-bash">datafolio describe [OPTIONS]
+</code></pre>
+<p><strong>Options:</strong>
+| Option | Description |
+|--------|-------------|
+| <code>--json</code> | Output in JSON format |
+| <code>--verbose, -v</code> | Show detailed item information |</p>
+<p><strong>Examples:</strong></p>
+<pre><code class="language-bash"># Basic description
+datafolio describe
+
+# Detailed output
+datafolio describe --verbose
+
+# JSON output for scripting
+datafolio describe --json &gt; bundle_info.json
+
+# Describe specific bundle
+datafolio -f /path/to/bundle describe
+</code></pre>
+<p><strong>Output:</strong></p>
+<pre><code>DataFolio: my_analysis
+Path: /data/experiments/exp_001
+
+Bundle Metadata:
+  project: analysis
+  created: 2024-01-15
+
+Items (5):
+  Tables (3):
+    - raw_data (100 rows, 5 cols)
+    - processed_data (100 rows, 8 cols)
+    - results (50 rows, 3 cols)
+
+  Models (1):
+    - classifier (sklearn_model)
+
+  Artifacts (1):
+    - config.yaml
+</code></pre>
+<hr />
+<h3 id="validate-validate-bundle"><code>validate</code> - Validate Bundle</h3>
+<p>Check if a directory is a valid DataFolio bundle.</p>
+<pre><code class="language-bash">datafolio validate [PATH]
+</code></pre>
+<p><strong>Arguments:</strong>
+- <code>PATH</code> (optional): Directory to validate (default: current directory)</p>
+<p><strong>Examples:</strong></p>
+<pre><code class="language-bash"># Validate current directory
+datafolio validate
+
+# Validate specific path
+datafolio validate /data/experiments/exp_001
+</code></pre>
+<p><strong>Output:</strong></p>
+<p>✅ Valid bundle:</p>
+<pre><code>✓ Valid DataFolio bundle
+  - items.json: valid
+  - 5 items found
+  - No issues detected
+</code></pre>
+<p>❌ Invalid bundle:</p>
+<pre><code>✗ Not a valid DataFolio bundle
+  - Missing items.json
+  - Directory structure incomplete
+</code></pre>
+<p><strong>Exit Codes:</strong>
+- <code>0</code>: Valid bundle
+- <code>1</code>: Invalid bundle</p>
+<hr />
+<h2 id="snapshot-commands">Snapshot Commands</h2>
+<p>Manage snapshots (read-only copies) of your bundle state.</p>
+<h3 id="snapshot-create-create-snapshot"><code>snapshot create</code> - Create Snapshot</h3>
+<p>Create a new snapshot of the current bundle state.</p>
+<pre><code class="language-bash">datafolio snapshot create NAME [OPTIONS]
+</code></pre>
+<p><strong>Arguments:</strong>
+- <code>NAME</code>: Unique name for the snapshot (e.g., 'v1.0', 'baseline', '2024-01-15')</p>
+<p><strong>Options:</strong>
+| Option | Description |
+|--------|-------------|
+| <code>-d, --description TEXT</code> | Description of this snapshot |
+| <code>--tags TEXT</code> | Comma-separated tags |
+| <code>--metadata KEY=VALUE</code> | Additional metadata (can be used multiple times) |</p>
+<p><strong>Examples:</strong></p>
+<pre><code class="language-bash"># Simple snapshot
+datafolio snapshot create v1.0
+
+# With description
+datafolio snapshot create baseline -d &quot;Initial baseline results&quot;
+
+# With tags
+datafolio snapshot create exp_001 --tags &quot;experiment,baseline,validated&quot;
+
+# With custom metadata
+datafolio snapshot create v2.0 \
+  -d &quot;Improved model&quot; \
+  --metadata accuracy=0.95 \
+  --metadata model=transformer
+</code></pre>
+<p><strong>Output:</strong></p>
+<pre><code>✓ Created snapshot 'v1.0'
+  Items: 5 tables, 1 model, 1 artifact
+  Time: 2024-01-15 14:30:00 UTC
+</code></pre>
+<hr />
+<h3 id="snapshot-list-list-snapshots"><code>snapshot list</code> - List Snapshots</h3>
+<p>List all snapshots in the bundle.</p>
+<pre><code class="language-bash">datafolio snapshot list [OPTIONS]
+</code></pre>
+<p><strong>Options:</strong>
+| Option | Description |
+|--------|-------------|
+| <code>--json</code> | Output in JSON format |
+| <code>--verbose, -v</code> | Show detailed information |</p>
+<p><strong>Examples:</strong></p>
+<pre><code class="language-bash"># List all snapshots
+datafolio snapshot list
+
+# Detailed listing
+datafolio snapshot list --verbose
+
+# JSON output
+datafolio snapshot list --json
+</code></pre>
+<p><strong>Output:</strong></p>
+<pre><code>Snapshots (3):
+
+  v1.0
+    Created: 2024-01-15 14:30:00
+    Items: 7
+    Description: Initial baseline
+
+  v1.1
+    Created: 2024-01-16 10:15:00
+    Items: 8
+    Description: Added validation data
+
+  v2.0
+    Created: 2024-01-17 15:45:00
+    Items: 9
+    Description: Improved model (accuracy=0.95)
+</code></pre>
+<hr />
+<h3 id="snapshot-show-show-snapshot-details"><code>snapshot show</code> - Show Snapshot Details</h3>
+<p>Display detailed information about a specific snapshot.</p>
+<pre><code class="language-bash">datafolio snapshot show NAME
+</code></pre>
+<p><strong>Arguments:</strong>
+- <code>NAME</code>: Snapshot name</p>
+<p><strong>Examples:</strong></p>
+<pre><code class="language-bash">datafolio snapshot show v1.0
+</code></pre>
+<p><strong>Output:</strong></p>
+<pre><code>Snapshot: v1.0
+Created: 2024-01-15 14:30:00 UTC
+Description: Initial baseline results
+
+Items (7):
+  Tables (5):
+    - raw_data (v1)
+    - processed_data (v1)
+    - train_data (v1)
+    - test_data (v1)
+    - results (v1)
+
+  Models (1):
+    - classifier (v1)
+
+  Artifacts (1):
+    - config.yaml (v1)
+
+Metadata:
+  accuracy: 0.92
+  model_type: random_forest
+</code></pre>
+<hr />
+<h3 id="snapshot-compare-compare-snapshots"><code>snapshot compare</code> - Compare Snapshots</h3>
+<p>Compare two snapshots to see what changed.</p>
+<pre><code class="language-bash">datafolio snapshot compare SNAPSHOT1 SNAPSHOT2
+</code></pre>
+<p><strong>Arguments:</strong>
+- <code>SNAPSHOT1</code>: First snapshot name
+- <code>SNAPSHOT2</code>: Second snapshot name</p>
+<p><strong>Examples:</strong></p>
+<pre><code class="language-bash">datafolio snapshot compare v1.0 v2.0
+</code></pre>
+<p><strong>Output:</strong></p>
+<pre><code>Comparing v1.0 → v2.0
+
+Added (2):
+  + new_features (table)
+  + updated_model (model)
+
+Modified (1):
+  ~ results (table): rows changed 50 → 75
+
+Removed (0):
+
+Summary:
+  2 additions, 1 modification, 0 deletions
+</code></pre>
+<hr />
+<h3 id="snapshot-diff-diff-against-snapshot"><code>snapshot diff</code> - Diff Against Snapshot</h3>
+<p>Show changes between current state and a snapshot.</p>
+<pre><code class="language-bash">datafolio snapshot diff [SNAPSHOT]
+</code></pre>
+<p><strong>Arguments:</strong>
+- <code>SNAPSHOT</code> (optional): Snapshot name (default: latest snapshot)</p>
+<p><strong>Examples:</strong></p>
+<pre><code class="language-bash"># Compare with latest snapshot
+datafolio snapshot diff
+
+# Compare with specific snapshot
+datafolio snapshot diff v1.0
+</code></pre>
+<p><strong>Output:</strong></p>
+<pre><code>Changes since v1.0:
+
+Modified (2):
+  ~ results (table): updated
+  ~ classifier (model): updated
+
+Added (1):
+  + validation_results (table)
+
+Current state has 3 changes from snapshot v1.0
+</code></pre>
+<hr />
+<h3 id="snapshot-status-show-bundle-status"><code>snapshot status</code> - Show Bundle Status</h3>
+<p>Show current bundle state compared to the last snapshot.</p>
+<pre><code class="language-bash">datafolio snapshot status
+</code></pre>
+<p><strong>Examples:</strong></p>
+<pre><code class="language-bash">datafolio snapshot status
+</code></pre>
+<p><strong>Output:</strong></p>
+<pre><code>Current Status:
+
+Last snapshot: v2.0 (2024-01-17 15:45:00)
+
+Changes since v2.0:
+  Modified: 1 item
+  Added: 0 items
+  Deleted: 0 items
+
+Modified items:
+  ~ results (table): 75 → 100 rows
+
+💡 Tip: Create a new snapshot to save current state
+      datafolio snapshot create v2.1
+</code></pre>
+<hr />
+<h3 id="snapshot-delete-delete-snapshot"><code>snapshot delete</code> - Delete Snapshot</h3>
+<p>Delete a snapshot from the bundle.</p>
+<pre><code class="language-bash">datafolio snapshot delete NAME [OPTIONS]
+</code></pre>
+<p><strong>Arguments:</strong>
+- <code>NAME</code>: Snapshot name to delete</p>
+<p><strong>Options:</strong>
+| Option | Description |
+|--------|-------------|
+| <code>--force</code> | Skip confirmation prompt |
+| <code>--cleanup-orphans</code> | Also remove orphaned item versions |</p>
+<p><strong>Examples:</strong></p>
+<pre><code class="language-bash"># Delete with confirmation
+datafolio snapshot delete old_experiment
+
+# Force delete without confirmation
+datafolio snapshot delete old_experiment --force
+
+# Delete and cleanup orphaned versions
+datafolio snapshot delete old_experiment --cleanup-orphans
+</code></pre>
+<p><strong>Output:</strong></p>
+<pre><code>⚠ Warning: This will permanently delete snapshot 'old_experiment'
+Continue? [y/N]: y
+✓ Deleted snapshot 'old_experiment'
+</code></pre>
+<hr />
+<h3 id="snapshot-gc-garbage-collection"><code>snapshot gc</code> - Garbage Collection</h3>
+<p>Clean up orphaned item versions that are no longer referenced by any snapshot.</p>
+<pre><code class="language-bash">datafolio snapshot gc [OPTIONS]
+</code></pre>
+<p><strong>Options:</strong>
+| Option | Description |
+|--------|-------------|
+| <code>--dry-run</code> | Show what would be deleted without actually deleting |
+| <code>--verbose, -v</code> | Show detailed information |</p>
+<p><strong>Examples:</strong></p>
+<pre><code class="language-bash"># Dry run to see what would be deleted
+datafolio snapshot gc --dry-run
+
+# Actually perform cleanup
+datafolio snapshot gc
+
+# Verbose output
+datafolio snapshot gc --verbose
+</code></pre>
+<p><strong>Output:</strong></p>
+<pre><code>Scanning for orphaned versions...
+
+Would delete (3):
+  - results.v1.parquet (orphaned since v1.0 deleted)
+  - old_model.v2.pkl (no longer referenced)
+  - temp_data.v1.parquet (orphaned)
+
+Total space to free: 45.2 MB
+
+Run without --dry-run to perform cleanup
+</code></pre>
+<hr />
+<h3 id="snapshot-reproduce-show-reproduction-instructions"><code>snapshot reproduce</code> - Show Reproduction Instructions</h3>
+<p>Generate instructions for reproducing a snapshot.</p>
+<pre><code class="language-bash">datafolio snapshot reproduce NAME
+</code></pre>
+<p><strong>Arguments:</strong>
+- <code>NAME</code>: Snapshot name</p>
+<p><strong>Examples:</strong></p>
+<pre><code class="language-bash">datafolio snapshot reproduce v1.0
+</code></pre>
+<p><strong>Output:</strong></p>
+<pre><code>Reproduction Instructions for Snapshot: v1.0
+
+To reproduce this exact state:
+
+1. Load the snapshot:
+   ```python
+   import datafolio
+   folio = datafolio.DataFolio.load_snapshot('v1.0')
+   ```
+
+2. Items in this snapshot:
+   - raw_data (table)
+   - processed_data (table)
+   - classifier (model)
+   - config.yaml (artifact)
+
+3. Dependencies:
+   raw_data → processed_data → classifier
+
+4. Metadata:
+   - Created: 2024-01-15 14:30:00 UTC
+   - Python: 3.10.2
+   - datafolio: 0.2.0
+
+5. To export this snapshot:
+   ```python
+   folio.export_snapshot('v1.0', '/path/to/export')
+   ```
+</code></pre>
+<hr />
+<h2 id="usage-examples">Usage Examples</h2>
+<h3 id="common-workflows">Common Workflows</h3>
+<h4 id="1-create-and-manage-a-bundle">1. Create and Manage a Bundle</h4>
+<pre><code class="language-bash"># Initialize new bundle
+datafolio init my_analysis
+
+# Work with Python to add data...
+# (see Python API documentation)
+
+# Create snapshot when ready
+datafolio -f my_analysis snapshot create baseline -d &quot;Initial results&quot;
+
+# View bundle info
+datafolio -f my_analysis describe
+</code></pre>
+<h4 id="2-track-progress-with-snapshots">2. Track Progress with Snapshots</h4>
+<pre><code class="language-bash"># After initial analysis
+datafolio snapshot create v1.0 -d &quot;Initial model&quot;
+
+# Continue working...
+
+# Create another snapshot
+datafolio snapshot create v1.1 -d &quot;Improved preprocessing&quot;
+
+# Compare versions
+datafolio snapshot compare v1.0 v1.1
+
+# Check what changed since last snapshot
+datafolio snapshot diff
+</code></pre>
+<h4 id="3-validate-and-inspect-bundles">3. Validate and Inspect Bundles</h4>
+<pre><code class="language-bash"># Validate bundle structure
+datafolio validate /path/to/bundle
+
+# View detailed description
+datafolio -f /path/to/bundle describe --verbose
+
+# List all snapshots
+datafolio -f /path/to/bundle snapshot list
+</code></pre>
+<h4 id="4-cleanup-old-snapshots">4. Cleanup Old Snapshots</h4>
+<pre><code class="language-bash"># List all snapshots
+datafolio snapshot list
+
+# Delete old experiments
+datafolio snapshot delete old_experiment
+
+# Clean up orphaned versions
+datafolio snapshot gc
+</code></pre>
+<hr />
+<h2 id="integration-with-python-api">Integration with Python API</h2>
+<p>The CLI complements the Python API. A typical workflow:</p>
+<pre><code class="language-python"># Python: Create and populate bundle
+import datafolio
+import pandas as pd
+
+folio = datafolio.DataFolio('my_analysis')
+folio.add_table('results', df)
+folio.add_model('classifier', model)
+</code></pre>
+<pre><code class="language-bash"># CLI: Create snapshot
+datafolio -f my_analysis snapshot create v1.0 -d &quot;Initial results&quot;
+
+# CLI: Validate
+datafolio -f my_analysis validate
+
+# CLI: View status
+datafolio -f my_analysis describe
+</code></pre>
+<pre><code class="language-python"># Python: Load snapshot later
+folio = datafolio.DataFolio.load_snapshot('v1.0')
+results = folio.get_table('results')
+</code></pre>
+<hr />
+<h2 id="environment-variables">Environment Variables</h2>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>DATAFOLIO_PATH</code></td>
+<td>Default path for folio operations</td>
+</tr>
+<tr>
+<td><code>DATAFOLIO_CACHE_ENABLED</code></td>
+<td>Enable caching ('true'/'false')</td>
+</tr>
+<tr>
+<td><code>DATAFOLIO_CACHE_DIR</code></td>
+<td>Cache directory path</td>
+</tr>
+<tr>
+<td><code>DATAFOLIO_CACHE_TTL</code></td>
+<td>Cache TTL in seconds</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Example:</strong></p>
+<pre><code class="language-bash">export DATAFOLIO_PATH=/data/experiments/current
+export DATAFOLIO_CACHE_ENABLED=true
+export DATAFOLIO_CACHE_DIR=/tmp/datafolio_cache
+
+# Now CLI commands use these defaults
+datafolio describe
+datafolio snapshot list
+</code></pre>
+<hr />
+<h2 id="scripting-with-the-cli">Scripting with the CLI</h2>
+<p>The CLI is designed for use in scripts and automation:</p>
+<h3 id="bash-script-example">Bash Script Example</h3>
+<pre><code class="language-bash">#!/bin/bash
+
+# Validate bundle
+if ! datafolio validate /data/bundle; then
+    echo &quot;Invalid bundle!&quot;
+    exit 1
+fi
+
+# Create dated snapshot
+DATE=$(date +%Y-%m-%d)
+datafolio -f /data/bundle snapshot create &quot;daily_$DATE&quot; \
+    -d &quot;Daily backup&quot; \
+    --tags &quot;automated,backup&quot;
+
+# Cleanup old snapshots (keep last 7 days)
+# ... (custom logic to delete old snapshots)
+
+echo &quot;Backup complete: daily_$DATE&quot;
+</code></pre>
+<h3 id="json-output-for-processing">JSON Output for Processing</h3>
+<pre><code class="language-bash"># Get bundle info as JSON
+INFO=$(datafolio describe --json)
+
+# Extract item count using jq
+TABLE_COUNT=$(echo &quot;$INFO&quot; | jq '.tables | length')
+echo &quot;Bundle has $TABLE_COUNT tables&quot;
+
+# List snapshots as JSON
+SNAPSHOTS=$(datafolio snapshot list --json)
+LATEST=$(echo &quot;$SNAPSHOTS&quot; | jq -r '.[0].name')
+echo &quot;Latest snapshot: $LATEST&quot;
+</code></pre>
+<hr />
+<h2 id="exit-codes">Exit Codes</h2>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td>Success</td>
+</tr>
+<tr>
+<td>1</td>
+<td>Error (invalid arguments, bundle not found, operation failed)</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Validation failed (for <code>validate</code> command)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="getting-help">Getting Help</h2>
+<p>For any command, use <code>--help</code>:</p>
+<pre><code class="language-bash">datafolio --help
+datafolio snapshot --help
+datafolio snapshot create --help
+</code></pre>
+<p>For more detailed documentation, see:
+- <a href="../datafolio-api/">Python API Reference</a>
+- <a href="../../guides/getting-started/">Getting Started Guide</a>
+- <a href="../../guides/snapshots/">Snapshots Guide</a></p>
+
+
+
+
+
+
+
+  
+  
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      <script id="__config" type="application/json">{"base": "../..", "features": ["navigation.indexes", "navigation.instant", "navigation.prune", "navigation.tabs", "navigation.tabs.sticky", "toc.follow", "toc.integrate", "navigation.top", "search.suggest", "search.highlight", "search.share", "content.code.copy", "header.autohide"], "search": "../../assets/javascripts/workers/search.973d3a69.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.f55a23d4.min.js"></script>
+      
+    
+  </body>
+</html>
