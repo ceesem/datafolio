@@ -60,7 +60,7 @@ This is the core DataFolio workflow: track your data, models, and results; snaps
 ## Key Features
 
 - **Universal Data Management** - Single `add_data()` method handles DataFrames, numpy arrays, dicts, lists, and scalars
-- **Model Support** - Save and load scikit-learn and PyTorch models with full metadata
+- **Model Support** - Save and load scikit-learn models with full metadata
 - **Snapshots** - Create immutable checkpoints of experiments with copy-on-write versioning (no data duplication!)
 - **Data Lineage** - Track inputs and dependencies between datasets and models
 - **Autocomplete Access** - IDE-friendly `folio.data.item_name.content` syntax with full autocomplete
@@ -168,10 +168,6 @@ experiments/my_experiment/
 │
 ├── models/
 │   └── classifier.joblib     # Scikit-learn models
-│
-├── pytorch_models/
-│   ├── neural_net.pth        # PyTorch state dicts
-│   └── neural_net_class.pkl  # PyTorch class definitions
 │
 ├── numpy/
 │   └── embeddings.npy        # Numpy arrays

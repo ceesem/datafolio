@@ -43,7 +43,6 @@ class TestItemTypeMapping:
             "numpy_array",
             "json_data",
             "model",
-            "pytorch_model",
             "artifact",
             "timestamp",
         }
@@ -57,7 +56,6 @@ class TestItemTypeMapping:
     def test_model_types_mapped_correctly(self):
         """Test that model types map to MODELS category."""
         assert ITEM_TYPE_TO_CATEGORY["model"] == StorageCategory.MODELS
-        assert ITEM_TYPE_TO_CATEGORY["pytorch_model"] == StorageCategory.MODELS
 
     def test_artifact_types_mapped_correctly(self):
         """Test that artifact types map to ARTIFACTS category."""
@@ -97,7 +95,7 @@ class TestCategoryFunctions:
 
     def test_get_storage_directory_for_model(self):
         """Test getting directory for model item type."""
-        directory = get_storage_directory("pytorch_model")
+        directory = get_storage_directory("model")
         assert directory == "models"
 
     def test_get_storage_directory_for_artifact(self):

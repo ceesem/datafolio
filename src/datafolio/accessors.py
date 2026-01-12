@@ -327,7 +327,7 @@ class DataAccessor:
 
         for category, item_list in [
             ("Tables", contents["referenced_tables"] + contents["included_tables"]),
-            ("Models", contents["models"] + contents["pytorch_models"]),
+            ("Models", contents["models"]),
             ("Numpy Arrays", contents["numpy_arrays"]),
             ("JSON Data", contents["json_data"]),
             ("Artifacts", contents["artifacts"]),

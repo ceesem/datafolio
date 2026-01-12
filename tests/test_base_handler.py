@@ -214,7 +214,6 @@ class TestGlobalRegistry:
             JsonHandler,
             NumpyHandler,
             PandasHandler,
-            PyTorchHandler,
             ReferenceTableHandler,
             SklearnHandler,
             TimestampHandler,
@@ -227,7 +226,6 @@ class TestGlobalRegistry:
         register_handler(TimestampHandler())
         register_handler(ArtifactHandler())
         register_handler(SklearnHandler())
-        register_handler(PyTorchHandler())
 
     def test_register_handler_function(self):
         """Test register_handler convenience function."""

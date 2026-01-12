@@ -278,42 +278,6 @@ class DisplayFormatter:
                 lines.append("  (none)")
             lines.append("")
 
-        # PyTorch Models
-        pytorch_models = contents["pytorch_models"]
-        if pytorch_models or show_empty:
-            lines.append(f"PyTorch Models ({len(pytorch_models)}):")
-            if pytorch_models:
-                for name in pytorch_models:
-                    item = self._folio._items[name]
-                    desc = item.get("description", "(no description)")
-                    lines.append(f"  • {name}: {desc}")
-                    # Show file size if available
-                    filesize = self._get_item_filesize(item)
-                    if filesize is not None:
-                        lines.append(f"    ↳ size: {self._format_filesize(filesize)}")
-                    # Show lineage if present
-                    if "inputs" in item and item["inputs"]:
-                        lines.append(f"    ↳ inputs: {', '.join(item['inputs'])}")
-                    if "hyperparameters" in item and item["hyperparameters"]:
-                        # Show a few key hyperparameters
-                        hps = item["hyperparameters"]
-                        hp_str = ", ".join(f"{k}={v}" for k, v in list(hps.items())[:3])
-                        if len(hps) > 3:
-                            hp_str += f", ... ({len(hps) - 3} more)"
-                        lines.append(f"    ↳ hyperparameters: {hp_str}")
-                    if "init_args" in item and item["init_args"]:
-                        # Show init args
-                        init_args = item["init_args"]
-                        init_str = ", ".join(
-                            f"{k}={v}" for k, v in list(init_args.items())[:3]
-                        )
-                        if len(init_args) > 3:
-                            init_str += f", ... ({len(init_args) - 3} more)"
-                        lines.append(f"    ↳ init_args: {init_str}")
-            else:
-                lines.append("  (none)")
-            lines.append("")
-
         # Artifacts
         artifacts = contents["artifacts"]
         if artifacts or show_empty:

@@ -101,7 +101,7 @@ DataFolio supports multiple data types, each optimized for its use case:
 | **Tables** | DataFrames | Parquet |
 | **Numpy Arrays** | Embeddings, tensors | `.npy` |
 | **JSON** | Configs, metrics, lists | `.json` |
-| **Models** | sklearn, PyTorch | `.joblib`, `.pth` |
+| **Models** | sklearn | `.joblib`, `.skops` |
 | **Artifacts** | Images, PDFs, any file | Original format |
 | **References** | External data (S3, etc.) | Metadata only |
 
@@ -363,50 +363,6 @@ folio.add_model('model', pipeline, custom=True)
        # ... fitting logic ...
        return self  # Required for sklearn API
    ```
-
-### PyTorch Models
-
-```python
-import torch
-import torch.nn as nn
-
-# Define model
-class MyModel(nn.Module):
-    def __init__(self, input_dim, hidden_dim):
-        super().__init__()
-        self.fc1 = nn.Linear(input_dim, hidden_dim)
-        self.fc2 = nn.Linear(hidden_dim, 1)
-
-    def forward(self, x):
-        return self.fc2(torch.relu(self.fc1(x)))
-
-# Train model
-model = MyModel(input_dim=10, hidden_dim=50)
-# ... training code ...
-
-# Save model (three options)
-
-# 1. Save with class definition (recommended)
-folio.add_pytorch('neural_net', model,
-    description='Feedforward network',
-    init_args={'input_dim': 10, 'hidden_dim': 50},
-    save_class=True)  # Saves class definition too
-
-# 2. Save state dict only
-folio.add_pytorch('neural_net', model,
-    init_args={'input_dim': 10, 'hidden_dim': 50})
-
-# Load model (three options)
-
-# 1. Auto-reconstruct (if class is importable)
-loaded = folio.get_pytorch('neural_net')
-
-# 2. Provide model class
-loaded = folio.get_pytorch('neural_net', model_class=MyModel)
-
-# 3. Get state dict only
-state_dict = folio.get_pytorch('neural_net', reconstruct=False)
-```
 
 ## Data Lineage
 
@@ -693,10 +649,6 @@ experiments/my_experiment/
 ├── models/
 │   └── classifier.joblib     # Scikit-learn models
 │
-├── pytorch_models/
-│   ├── neural_net.pth       # PyTorch state dicts
-│   └── neural_net_class.pkl # PyTorch class (if save_class=True)
-│
 ├── numpy/
 │   └── embeddings.npy       # Numpy arrays
 │
@@ -709,8 +661,7 @@ experiments/my_experiment/
 All files use standard formats:
 - **Parquet** for DataFrames (efficient, columnar)
 - **JSON** for configs and metrics (human-readable)
-- **Joblib** for scikit-learn models
-- **PyTorch** `.pth` for PyTorch models
+- **Joblib/Skops** for scikit-learn models
 - **Numpy** `.npy` for arrays
 
 You can inspect any file directly without DataFolio!

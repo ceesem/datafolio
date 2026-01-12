@@ -100,7 +100,6 @@ class TestListContents:
             "json_data": [],
             "timestamps": [],
             "models": [],
-            "pytorch_models": [],
             "artifacts": [],
         }
 
@@ -117,7 +116,6 @@ class TestListContents:
             "json_data",
             "timestamps",
             "models",
-            "pytorch_models",
             "artifacts",
         }
         assert set(contents.keys()) == expected_keys

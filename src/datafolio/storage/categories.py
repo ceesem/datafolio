@@ -17,7 +17,7 @@ class StorageCategory(Enum):
 
     Categories:
         TABLES: Tabular data (pandas DataFrames, references)
-        MODELS: Machine learning models (sklearn, PyTorch)
+        MODELS: Machine learning models (sklearn)
         ARTIFACTS: Miscellaneous data (arrays, JSON, files, timestamps)
         VIEWS: Saved queries and virtual tables (reserved for future use)
 
@@ -59,7 +59,6 @@ ITEM_TYPE_TO_CATEGORY: Dict[str, StorageCategory] = {
     "json_data": StorageCategory.ARTIFACTS,
     # Models
     "model": StorageCategory.MODELS,
-    "pytorch_model": StorageCategory.MODELS,
     # Artifacts and timestamps
     "artifact": StorageCategory.ARTIFACTS,
     "timestamp": StorageCategory.ARTIFACTS,

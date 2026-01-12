@@ -760,122 +760,6 @@ class DataFolio:
         else:
             return joblib.load(path)
 
-    def _write_pytorch(
-        self,
-        path: str,
-        model: Any,
-        init_args: Optional[Dict[str, Any]] = None,
-        save_class: bool = False,
-    ) -> None:
-        """Write PyTorch model state dict with metadata (local or cloud).
-
-        Saves a dictionary containing:
-        - state_dict: Model weights
-        - metadata: Class name, module, and optional init args
-        - serialized_class: Optional dill-serialized class (if save_class=True)
-
-        Args:
-            path: File path
-            model: PyTorch model (will save state_dict)
-            init_args: Optional dict of args needed to instantiate the model
-            save_class: If True, use dill to serialize the model class
-        """
-        try:
-            import torch
-        except ImportError:
-            raise ImportError(
-                "PyTorch is required to save PyTorch models. "
-                "Install with: pip install torch"
-            )
-
-        # Prepare save bundle
-        save_bundle = {
-            "state_dict": model.state_dict(),
-            "metadata": {
-                "model_class": model.__class__.__name__,
-                "model_module": model.__class__.__module__,
-            },
-        }
-
-        if init_args is not None:
-            save_bundle["metadata"]["init_args"] = init_args
-
-        # Optionally serialize class with dill
-        if save_class:
-            try:
-                import dill
-
-                save_bundle["serialized_class"] = dill.dumps(model.__class__)
-            except ImportError:
-                raise ImportError(
-                    "dill is required when save_class=True. "
-                    "Install with: pip install dill"
-                )
-
-        if is_cloud_path(path):
-            # Write to temp file, then upload
-            import tempfile
-
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".pt") as tmp:
-                torch.save(save_bundle, tmp.name)
-                with open(tmp.name, "rb") as f:
-                    content = f.read()
-                # Upload
-                from cloudfiles import CloudFiles
-
-                parts = path.rsplit("/", 1)
-                if len(parts) == 2:
-                    dir_path, filename = parts
-                else:
-                    dir_path = ""
-                    filename = parts[0]
-                cf = CloudFiles(dir_path) if dir_path else CloudFiles(path)
-                cf.put(filename, content)
-                # Cleanup
-                Path(tmp.name).unlink()
-        else:
-            torch.save(save_bundle, path)
-
-    def _read_pytorch(self, path: str) -> Dict[str, Any]:
-        """Read PyTorch model bundle (local or cloud).
-
-        Args:
-            path: File path
-
-        Returns:
-            Dictionary containing state_dict, metadata, and optionally serialized_class
-        """
-        try:
-            import torch
-        except ImportError:
-            raise ImportError(
-                "PyTorch is required to load PyTorch models. "
-                "Install with: pip install torch"
-            )
-
-        if is_cloud_path(path):
-            # Download to temp file, then load
-            import tempfile
-
-            from cloudfiles import CloudFiles
-
-            parts = path.rsplit("/", 1)
-            if len(parts) == 2:
-                dir_path, filename = parts
-            else:
-                dir_path = ""
-                filename = parts[0]
-            cf = CloudFiles(dir_path) if dir_path else CloudFiles(path)
-            content = cf.get(filename)
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".pt") as tmp:
-                tmp.write(content)
-                tmp.flush()
-                bundle = torch.load(tmp.name, weights_only=False)
-                Path(tmp.name).unlink()
-                return bundle
-        else:
-            return torch.load(path, weights_only=False)
-
     def _write_numpy(self, path: str, array: Any) -> None:
         """Write numpy array to file (local or cloud).
 
@@ -1025,7 +909,7 @@ This directory was created by [datafolio](https://github.com/ceesem/datafolio) v
 - `metadata.json` - User metadata and timestamps
 - `items.json` - Manifest of all data items (tables, models, artifacts)
 - `tables/` - Parquet files for included tables
-- `models/` - Serialized ML models (sklearn, PyTorch)
+- `models/` - Serialized ML models (sklearn)
 - `artifacts/` - Plots, configs, numpy arrays, JSON data, and other files
 
 ## Usage
@@ -2680,10 +2564,6 @@ For more information, see the [datafolio documentation](https://github.com/ceese
                     import joblib
 
                     joblib.dump(data, tmp_path)
-                elif item_type in ("pytorch_model", "pytorch_state_dict"):
-                    import torch
-
-                    torch.save(data, tmp_path)
                 else:
                     # For other types, try generic serialization
                     import joblib
@@ -2712,10 +2592,6 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             import joblib
 
             return joblib.load(cache_path)
-        elif item_type in ("pytorch_model", "pytorch_state_dict"):
-            import torch
-
-            return torch.load(cache_path, weights_only=False)
         else:
             # Generic deserialization
             import joblib
@@ -2850,7 +2726,7 @@ For more information, see the [datafolio documentation](https://github.com/ceese
 
         Returns:
             Dictionary with keys 'referenced_tables', 'included_tables', 'numpy_arrays',
-            'json_data', 'timestamps', 'models', 'pytorch_models', and 'artifacts',
+            'json_data', 'timestamps', 'models', and 'artifacts',
             each containing a list of names
 
         Examples:
@@ -2859,7 +2735,7 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             >>> folio.add_numpy('embeddings', np.array([1, 2, 3]))
             >>> folio.list_contents()
             {'referenced_tables': ['data1'], 'included_tables': [], 'numpy_arrays': ['embeddings'],
-             'json_data': [], 'timestamps': [], 'models': [], 'pytorch_models': [], 'artifacts': []}
+             'json_data': [], 'timestamps': [], 'models': [], 'artifacts': []}
         """
         # Auto-refresh if bundle was updated externally
         self._refresh_if_needed()
@@ -2895,11 +2771,6 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             for name, item in self._items.items()
             if item.get("item_type") == "model"
         ]
-        pytorch_models = [
-            name
-            for name, item in self._items.items()
-            if item.get("item_type") == "pytorch_model"
-        ]
         artifacts = [
             name
             for name, item in self._items.items()
@@ -2913,7 +2784,6 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             "json_data": json_data,
             "timestamps": timestamps,
             "models": models,
-            "pytorch_models": pytorch_models,
             "artifacts": artifacts,
         }
 
@@ -2954,25 +2824,6 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             name
             for name, item in self._items.items()
             if item.get("item_type") == "model"
-        ]
-
-    @property
-    def pytorch_models(self) -> list[str]:
-        """Get list of PyTorch model names.
-
-        Returns:
-            List of PyTorch model names (strings)
-
-        Examples:
-            >>> folio = DataFolio('experiments', prefix='test')
-            >>> folio.add_pytorch('neural_net', model)
-            >>> folio.pytorch_models
-            ['neural_net']
-        """
-        return [
-            name
-            for name, item in self._items.items()
-            if item.get("item_type") == "pytorch_model"
         ]
 
     @property
@@ -3671,20 +3522,18 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         custom: bool = False,
         **kwargs,
     ) -> Self:
-        """Add a model with automatic framework detection.
+        """Add a scikit-learn style model to the bundle.
 
-        Automatically detects PyTorch vs sklearn-style models and uses the
-        appropriate serialization method. For fine-grained control, use
-        add_sklearn() or add_pytorch().
+        This is a convenience method that delegates to add_sklearn().
 
         Args:
             name: Unique name for this model
-            model: Trained model (PyTorch or sklearn-style)
+            model: Trained sklearn-style model
             description: Optional description
             overwrite: If True, allow overwriting existing model (default: False)
-            custom: For sklearn models, if True use skops format for portability
-            **kwargs: Additional arguments passed to the specific method
-                (e.g., init_args for PyTorch, hyperparameters for sklearn)
+            custom: If True use skops format for portability (required for custom transformers)
+            **kwargs: Additional arguments passed to add_sklearn()
+                (e.g., hyperparameters, inputs, code)
 
         Returns:
             Self for method chaining
@@ -3693,36 +3542,13 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             ValueError: If name already exists and overwrite=False
 
         Examples:
-            Sklearn model:
             >>> from sklearn.ensemble import RandomForestClassifier
             >>> model = RandomForestClassifier()
             >>> folio.add_model('clf', model, hyperparameters={'n_estimators': 100})
 
-            PyTorch model:
-            >>> import torch.nn as nn
-            >>> model = MyNeuralNet(input_dim=10, hidden_dim=50)
-            >>> folio.add_model('nn', model, init_args={'input_dim': 10, 'hidden_dim': 50})
-
-            Sklearn model with custom transformer (portable):
+            With custom transformer (portable):
             >>> folio.add_model('pipeline', custom_pipeline, custom=True)
         """
-        # Check if PyTorch model
-        if hasattr(model, "state_dict") and hasattr(model, "load_state_dict"):
-            try:
-                import torch.nn as nn
-
-                if isinstance(model, nn.Module):
-                    return self.add_pytorch(
-                        name,
-                        model,
-                        description=description,
-                        overwrite=overwrite,
-                        **kwargs,
-                    )
-            except ImportError:
-                pass
-
-        # Otherwise, assume sklearn-style
         return self.add_sklearn(
             name,
             model,
@@ -3768,19 +3594,16 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         return self._get_with_cache(name, lambda: handler.get(self, name))
 
     def get_model(self, name: str, **kwargs) -> Any:
-        """Get a model by name with automatic type detection.
+        """Get a scikit-learn style model by name.
 
-        Automatically detects whether the model is PyTorch or sklearn-style
-        and uses the appropriate loader. For fine-grained control, use
-        get_sklearn() or get_pytorch().
+        This is a convenience method that delegates to get_sklearn().
 
         If caching is enabled (cache_enabled=True), cloud-based models are cached locally
         for faster repeated access.
 
         Args:
             name: Name of the model
-            **kwargs: Additional arguments passed to get_pytorch() if it's a PyTorch model
-                (e.g., model_class, reconstruct)
+            **kwargs: Additional arguments (currently unused, kept for backward compatibility)
 
         Returns:
             The model object
@@ -3791,9 +3614,7 @@ For more information, see the [datafolio documentation](https://github.com/ceese
 
         Examples:
             >>> folio = DataFolio('experiments/test')
-            >>> # Works for both sklearn and PyTorch models
-            >>> sklearn_model = folio.get_model('classifier')
-            >>> pytorch_model = folio.get_model('neural_net', model_class=MyModel)
+            >>> model = folio.get_model('classifier')
         """
         # Auto-refresh if bundle was updated externally
         self._refresh_if_needed()
@@ -3807,178 +3628,8 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         # Dispatch based on item type
         if item_type == "model":
             return self.get_sklearn(name)
-        elif item_type == "pytorch_model":
-            return self.get_pytorch(name, **kwargs)
         else:
             raise ValueError(f"Item '{name}' is not a model (type: {item_type})")
-
-    def add_pytorch(
-        self,
-        name: str,
-        model: Any,
-        description: Optional[str] = None,
-        overwrite: bool = False,
-        inputs: Optional[list[str]] = None,
-        hyperparameters: Optional[Dict[str, Any]] = None,
-        init_args: Optional[Dict[str, Any]] = None,
-        save_class: bool = False,
-        code: Optional[str] = None,
-    ) -> Self:
-        """Add a PyTorch model to the bundle.
-
-        Saves the model's state_dict along with metadata about the model class.
-        Follows PyTorch best practices by saving state_dict rather than full model.
-
-        Args:
-            name: Unique name for this model
-            model: PyTorch model to save (state_dict will be extracted)
-            description: Optional description
-            overwrite: If True, allow overwriting existing model (default: False)
-            inputs: Optional list of table names used for training
-            hyperparameters: Optional dict of hyperparameters
-            init_args: Optional dict of arguments needed to instantiate the model class
-            save_class: If True, use dill to serialize the model class for reconstruction
-            code: Optional code snippet that trained this model
-
-        Returns:
-            Self for method chaining
-
-        Raises:
-            ValueError: If name already exists and overwrite=False
-            ImportError: If torch (or dill when save_class=True) is not installed
-
-        Examples:
-            Basic usage:
-            >>> import torch.nn as nn
-            >>> class MyModel(nn.Module):
-            ...     def __init__(self, input_dim, hidden_dim):
-            ...         super().__init__()
-            ...         self.fc1 = nn.Linear(input_dim, hidden_dim)
-            ...         self.fc2 = nn.Linear(hidden_dim, 1)
-            ...     def forward(self, x):
-            ...         return self.fc2(torch.relu(self.fc1(x)))
-            >>> model = MyModel(10, 50)
-            >>> # ... train model ...
-            >>> folio.add_pytorch('my_model', model,
-            ...     description='Simple feedforward network',
-            ...     inputs=['training_data'],
-            ...     hyperparameters={'input_dim': 10, 'hidden_dim': 50},
-            ...     init_args={'input_dim': 10, 'hidden_dim': 50})
-
-            With class serialization:
-            >>> folio.add_pytorch('my_model', model,
-            ...     save_class=True,  # Saves the class definition with dill
-            ...     init_args={'input_dim': 10, 'hidden_dim': 50})
-        """
-        # Validate inputs
-        if not overwrite and name in self._items:
-            raise ValueError(
-                f"Item '{name}' already exists in this DataFolio. Use overwrite=True to replace it."
-            )
-
-        # Get handler and delegate storage + metadata creation
-
-        registry = get_registry()
-        handler = registry.get("pytorch_model")
-
-        # Handler builds metadata and writes model
-        metadata = handler.add(
-            self,
-            name,
-            model,
-            description=description,
-            inputs=inputs,
-            init_args=init_args,
-            save_class=save_class,
-        )
-
-        # Validate item name
-
-        validate_item_name(name)
-
-        # Add extra fields not handled by base handler
-        if hyperparameters is not None:
-            metadata["hyperparameters"] = hyperparameters
-        if code is not None:
-            metadata["code"] = code
-        if save_class:
-            metadata["has_serialized_class"] = True
-
-        # Initialize snapshot fields for new items
-        if "in_snapshots" not in metadata:
-            metadata["in_snapshots"] = []
-        if "is_current" not in metadata:
-            metadata["is_current"] = True
-
-        self._items[name] = metadata
-
-        self._save_items()
-
-        return self
-
-    def get_pytorch(
-        self,
-        name: str,
-        model_class: Optional[type] = None,
-        reconstruct: bool = True,
-    ) -> Any:
-        """Get a PyTorch model by name.
-
-        Can return either the state_dict only, or a reconstructed model.
-        Supports caching for cloud bundles when caching is enabled.
-
-        Args:
-            name: Name of the model
-            model_class: Optional model class to use for reconstruction.
-                If provided, must accept **init_args from manifest.
-            reconstruct: If True, attempt to reconstruct the model (default: True).
-                If False, returns just the state_dict.
-
-        Returns:
-            If reconstruct=False: Returns state_dict dictionary
-            If reconstruct=True: Returns reconstructed model with weights loaded
-
-        Raises:
-            KeyError: If model name doesn't exist
-            ValueError: If named item is not a pytorch_model
-            ImportError: If torch is not installed
-            RuntimeError: If reconstruction fails
-
-        Examples:
-            Get state_dict only:
-            >>> folio = DataFolio('experiments/test')
-            >>> state_dict = folio.get_pytorch('my_model', reconstruct=False)
-            >>> # Manually load into your model
-            >>> model = MyModel(10, 50)
-            >>> model.load_state_dict(state_dict)
-
-            Reconstruct with provided class:
-            >>> model = folio.get_pytorch('my_model', model_class=MyModel)
-
-            Auto-reconstruct (requires model class to be importable):
-            >>> model = folio.get_pytorch('my_model')  # Tries to find class automatically
-        """
-        if name not in self._items:
-            raise KeyError(f"Model '{name}' not found in DataFolio")
-
-        item = self._items[name]
-        if item.get("item_type") != "pytorch_model":
-            raise ValueError(
-                f"Item '{name}' is not a PyTorch model (type: {item.get('item_type')})"
-            )
-
-        # Delegate to handler (with caching if enabled)
-
-        registry = get_registry()
-        handler = registry.get("pytorch_model")
-
-        # Use caching if available
-        return self._get_with_cache(
-            name,
-            lambda: handler.get(
-                self, name, model_class=model_class, reconstruct=reconstruct
-            ),
-        )
 
     def add_artifact(
         self,
@@ -4572,7 +4223,7 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             raise TypeError(
                 f"Unsupported data type: {type(data).__name__}. "
                 f"No handler found for this type. "
-                f"Supported types: pandas.DataFrame, numpy.ndarray, torch.nn.Module, "
+                f"Supported types: pandas.DataFrame, numpy.ndarray, "
                 f"sklearn models, dict, list, datetime, file paths, or JSON scalars. "
                 f"Use explicit add_*() methods for more control."
             )
@@ -5195,8 +4846,6 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             self.get_table(item_name)
         elif item_type == "sklearn_model":
             self.get_sklearn(item_name)
-        elif item_type == "pytorch_model":
-            self.get_pytorch(item_name)
         else:
             # For other types, just invalidate (don't auto-fetch)
             pass

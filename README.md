@@ -11,7 +11,7 @@ DataFolio helps you organize, version, and track your data science experiments b
 ## Features
 
 - **Universal Data Management**: Single `add_data()` method automatically handles DataFrames, numpy arrays, dicts, lists, and scalars
-- **Model Support**: Save and load scikit-learn and PyTorch models with full metadata tracking
+- **Model Support**: Save and load scikit-learn models with full metadata tracking
 - **Data Lineage**: Track inputs and dependencies between datasets and models
 - **External References**: Point to data stored externally (S3, local paths) without copying
 - **Multi-Instance Sync**: Automatic refresh when multiple notebooks/processes access the same bundle
@@ -293,60 +293,6 @@ folio.describe()
 config = folio.data.config.content
 metrics = folio.data.metrics.content
 trained_model = folio.data.classifier.content
-```
-
-### PyTorch Deep Learning
-
-```python
-import torch
-import torch.nn as nn
-from datafolio import DataFolio
-
-# Define model
-class CNN(nn.Module):
-    def __init__(self, num_classes=10):
-        super().__init__()
-        self.conv1 = nn.Conv2d(3, 32, 3)
-        self.fc = nn.Linear(32 * 30 * 30, num_classes)
-
-    def forward(self, x):
-        x = torch.relu(self.conv1(x))
-        x = x.view(x.size(0), -1)
-        return self.fc(x)
-
-# Create folio
-folio = DataFolio('experiments/cnn_v1')
-
-# Save training config
-config = {
-    'num_classes': 10,
-    'learning_rate': 0.001,
-    'batch_size': 32,
-    'epochs': 50
-}
-folio.add_data('config', config)
-
-# Train model
-model = CNN(num_classes=config['num_classes'])
-# ... training code ...
-
-# Save model
-folio.add_pytorch('cnn', model,
-    description='CNN for image classification',
-    init_args={'num_classes': 10},
-    save_class=True)
-
-# Save training history
-history = {
-    'train_loss': [0.5, 0.3, 0.2],
-    'val_loss': [0.6, 0.4, 0.3],
-    'val_acc': [0.7, 0.8, 0.85]
-}
-folio.add_data('history', history)
-
-# Later: load and use
-loaded_model = folio.get_pytorch('cnn', model_class=CNN)
-loaded_model.eval()
 ```
 
 ## Best Practices

@@ -1,6 +1,6 @@
 # Working with Models
 
-This guide covers everything you need to know about storing and loading machine learning models in DataFolio, including scikit-learn models, PyTorch models, and custom transformers.
+This guide covers everything you need to know about storing and loading machine learning models in DataFolio, including scikit-learn models and custom transformers.
 
 ## Quick Start
 
@@ -307,10 +307,6 @@ print(f"Predictions: {predictions[:5]}")
 print(f"Probabilities: {probabilities[:5]}")
 ```
 
-## PyTorch Models
-
-DataFolio supports PyTorch models with three different serialization strategies. See the [Getting Started Guide](getting-started.md#pytorch-models) for details.
-
 ## Model Metadata
 
 Add rich metadata to track model provenance:
@@ -341,17 +337,14 @@ folio.add_sklearn('classifier', model,
 All models can be loaded with type-specific or generic methods:
 
 ```python
-# Type-specific methods
+# Type-specific method
 clf = folio.get_sklearn('classifier')
-nn = folio.get_pytorch('neural_net')
 
-# Generic method (auto-detects type)
+# Generic method (delegates to get_sklearn)
 clf = folio.get_model('classifier')
-nn = folio.get_model('neural_net')
 
 # Data accessor (autocomplete-friendly)
 clf = folio.data.classifier.content
-nn = folio.data.neural_net.content
 ```
 
 ## Common Patterns
@@ -466,10 +459,6 @@ folio.add_sklearn('new_model', model, custom=True)
 **Q: What if I don't inherit from BaseEstimator/TransformerMixin?**
 
 A: Skops serialization will fail. Always inherit from these classes for custom transformers.
-
-**Q: Can I use skops with PyTorch models?**
-
-A: No, skops is specifically for sklearn-compatible models. PyTorch models use `.pth` files.
 
 **Q: How do I know which format a model uses?**
 
