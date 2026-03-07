@@ -189,6 +189,27 @@ def is_cloud_path(path: Union[str, Path]) -> bool:
     return path_str.startswith(cloud_prefixes)
 
 
+def is_http_path(path: Union[str, Path]) -> bool:
+    """Check if a path is an HTTP or HTTPS URL.
+
+    Args:
+        path: Path to check
+
+    Returns:
+        True if path starts with http:// or https://
+
+    Examples:
+        >>> is_http_path('https://raw.githubusercontent.com/user/repo/main/folio')
+        True
+        >>> is_http_path('s3://bucket/folio')
+        False
+        >>> is_http_path('/local/path')
+        False
+    """
+    path_str = str(path)
+    return path_str.startswith("http://") or path_str.startswith("https://")
+
+
 def resolve_path(
     path: Union[str, Path],
     base_dir: Optional[Union[str, Path]] = None,

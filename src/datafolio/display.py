@@ -5,10 +5,11 @@ descriptions of DataFolio bundles, including item listings, metadata,
 lineage information, and file sizes.
 """
 
+import fnmatch
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 if TYPE_CHECKING:
     from datafolio.folio import DataFolio
@@ -38,6 +39,9 @@ class DisplayFormatter:
         show_empty: bool = False,
         max_metadata_fields: int = 10,
         snapshot: Optional[str] = None,
+        pattern: Optional[str] = None,
+        include_archived: bool = False,
+        show_paths: bool = False,
     ) -> Optional[str]:
         """Generate a human-readable description of all items in the bundle.
 
@@ -48,6 +52,13 @@ class DisplayFormatter:
             show_empty: If True, show empty sections (e.g., "Models (0): (none)")
             max_metadata_fields: Maximum number of metadata fields to display (default: 10)
             snapshot: Optional snapshot name to describe. If provided, shows details of that snapshot instead.
+            pattern: Optional glob pattern to filter items by name (e.g. 'examples/*',
+                '*/weights', 'phase?/*'). Uses fnmatch rules — '*' matches any sequence
+                of characters including '/'.
+            include_archived: If True, show archived (hidden) items. Defaults to False.
+            show_paths: If True, show the file path for each item. Especially useful
+                for cloud-hosted folios where paths can be shared with collaborators
+                who don't use datafolio.
 
         Returns:
             None if return_string=False (prints to stdout), otherwise returns the description string
@@ -62,6 +73,11 @@ class DisplayFormatter:
               • raw_data (reference): Training data
               • results: Model results
                 ↳ inputs: raw_data
+
+            Filter to a directory group:
+            >>> folio.describe('examples/*')
+            Tables (1):
+              • examples/results: Experiment results
 
             Describe a specific snapshot:
             >>> folio.describe(snapshot='v1.0')
@@ -87,6 +103,14 @@ class DisplayFormatter:
 
             Limit metadata fields shown:
             >>> folio.describe(max_metadata_fields=5)
+
+            Show file paths for sharing with collaborators:
+            >>> folio.describe(show_paths=True)
+            Tables (2):
+              • raw_data (reference): Training data
+                ↳ path: s3://data-lake/raw.parquet
+              • results: Model results
+                ↳ path: s3://bucket/my-run/tables/results.parquet
         """
         # Auto-refresh if bundle was updated externally
         self._folio._refresh_if_needed()
@@ -166,7 +190,13 @@ class DisplayFormatter:
                 lines.append("  (none)")
             lines.append("")
 
-        contents = self._folio.list_contents()
+        contents = self._folio.list_contents(include_archived=include_archived)
+
+        # Apply glob pattern filter if provided
+        if pattern is not None:
+            contents = {
+                key: fnmatch.filter(names, pattern) for key, names in contents.items()
+            }
 
         # Combine referenced and included tables
         ref_tables = contents["referenced_tables"]
@@ -181,7 +211,7 @@ class DisplayFormatter:
                     item = self._folio._items[name]
                     desc = item.get("description", "(no description)")
                     lines.append(f"  • {name} (reference): {desc}")
-                    # Show path for referenced tables
+                    # Show path for referenced tables (always shown — it's the key info)
                     if "path" in item:
                         lines.append(f"    ↳ path: {item['path']}")
                     # Show lineage if present
@@ -193,6 +223,8 @@ class DisplayFormatter:
                     item = self._folio._items[name]
                     desc = item.get("description", "(no description)")
                     lines.append(f"  • {name}: {desc}")
+                    if show_paths:
+                        lines.append(f"    ↳ path: {self._folio.get_item_path(name)}")
                     # Show file size if available
                     filesize = self._get_item_filesize(item)
                     if filesize is not None:
@@ -217,6 +249,8 @@ class DisplayFormatter:
                     shape = item.get("shape", "unknown")
                     dtype = item.get("dtype", "unknown")
                     lines.append(f"  • {name}: {desc}")
+                    if show_paths:
+                        lines.append(f"    ↳ path: {self._folio.get_item_path(name)}")
                     lines.append(f"    ↳ shape: {shape}, dtype: {dtype}")
                     # Show file size if available
                     filesize = self._get_item_filesize(item)
@@ -239,6 +273,8 @@ class DisplayFormatter:
                     desc = item.get("description", "(no description)")
                     data_type = item.get("data_type", "unknown")
                     lines.append(f"  • {name}: {desc}")
+                    if show_paths:
+                        lines.append(f"    ↳ path: {self._folio.get_item_path(name)}")
                     lines.append(f"    ↳ type: {data_type}")
                     # Show file size if available
                     filesize = self._get_item_filesize(item)
@@ -260,6 +296,8 @@ class DisplayFormatter:
                     item = self._folio._items[name]
                     desc = item.get("description", "(no description)")
                     lines.append(f"  • {name}: {desc}")
+                    if show_paths:
+                        lines.append(f"    ↳ path: {self._folio.get_item_path(name)}")
                     # Show file size if available
                     filesize = self._get_item_filesize(item)
                     if filesize is not None:
@@ -289,6 +327,8 @@ class DisplayFormatter:
                     category = item.get("category", "")
                     category_str = f" ({category})" if category else ""
                     lines.append(f"  • {name}{category_str}: {desc}")
+                    if show_paths:
+                        lines.append(f"    ↳ path: {self._folio.get_item_path(name)}")
                     # Show file size if available
                     filesize = self._get_item_filesize(item)
                     if filesize is not None:
@@ -306,6 +346,8 @@ class DisplayFormatter:
                     item = self._folio._items[name]
                     desc = item.get("description", "(no description)")
                     lines.append(f"  • {name}: {desc}")
+                    if show_paths:
+                        lines.append(f"    ↳ path: {self._folio.get_item_path(name)}")
                     # Show formatted timestamp
                     iso_string = item.get("iso_string", "")
                     if iso_string:

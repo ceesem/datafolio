@@ -459,3 +459,102 @@ class TestDataIntegration:
         config = folio2.get_json("config")
         np.testing.assert_array_equal(embeddings, np.array([1, 2, 3]))
         assert config == {"lr": 0.01}
+
+
+class TestSubdirectoryNames:
+    """Tests for using path-like names (e.g. 'group/item') to organize data."""
+
+    def test_add_table_with_subdir_name(self, tmp_path):
+        """Test that a DataFrame can be added with a path-like name."""
+        import pandas as pd
+
+        folio = DataFolio(tmp_path / "test")
+        df = pd.DataFrame({"x": [1, 2, 3]})
+        folio.add_table("examples/data", df)
+
+        assert "examples/data" in folio._items
+        assert folio._items["examples/data"]["filename"] == "examples/data.parquet"
+        # Verify file exists on disk
+        expected_path = tmp_path / "test" / "tables" / "examples" / "data.parquet"
+        assert expected_path.exists()
+
+    def test_roundtrip_table_with_subdir_name(self, tmp_path):
+        """Test that a DataFrame added with a path-like name can be retrieved."""
+        import pandas as pd
+
+        folio = DataFolio(tmp_path / "test")
+        df = pd.DataFrame({"a": [1, 2, 3], "b": ["x", "y", "z"]})
+        folio.add_table("group/results", df)
+
+        result = folio.get_table("group/results")
+        pd.testing.assert_frame_equal(result, df)
+
+    def test_roundtrip_numpy_with_subdir_name(self, tmp_path):
+        """Test that a numpy array added with a path-like name can be retrieved."""
+        folio = DataFolio(tmp_path / "test")
+        arr = np.array([1.0, 2.0, 3.0])
+        folio.add_numpy("run1/embeddings", arr)
+
+        result = folio.get_numpy("run1/embeddings")
+        np.testing.assert_array_equal(result, arr)
+
+    def test_roundtrip_json_with_subdir_name(self, tmp_path):
+        """Test that JSON data added with a path-like name can be retrieved."""
+        folio = DataFolio(tmp_path / "test")
+        config = {"lr": 0.01, "epochs": 10}
+        folio.add_json("run1/config", config)
+
+        result = folio.get_json("run1/config")
+        assert result == config
+
+    def test_add_data_generic_with_subdir_name(self, tmp_path):
+        """Test add_data / get_data round-trip with path-like names."""
+        import pandas as pd
+
+        folio = DataFolio(tmp_path / "test")
+        df = pd.DataFrame({"v": [10, 20]})
+        folio.add_data("experiment/output", df)
+
+        result = folio.get_data("experiment/output")
+        pd.testing.assert_frame_equal(result, df)
+
+    def test_persist_and_reload_with_subdir_names(self, tmp_path):
+        """Test that bundles with path-like names survive save/reload."""
+        import pandas as pd
+
+        folio1 = DataFolio(tmp_path / "test")
+        folio1.add_table("phase1/results", pd.DataFrame({"n": [1, 2]}))
+        folio1.add_numpy("phase1/weights", np.array([0.5, 0.5]))
+
+        folio2 = DataFolio(tmp_path / "test")
+        assert "phase1/results" in folio2._items
+        assert "phase1/weights" in folio2._items
+
+        pd.testing.assert_frame_equal(
+            folio2.get_table("phase1/results"), pd.DataFrame({"n": [1, 2]})
+        )
+
+    def test_delete_with_subdir_name(self, tmp_path):
+        """Test that items with path-like names can be deleted."""
+        import pandas as pd
+
+        folio = DataFolio(tmp_path / "test")
+        folio.add_table("group/data", pd.DataFrame({"x": [1]}))
+
+        assert "group/data" in folio._items
+        folio.delete("group/data")
+        assert "group/data" not in folio._items
+
+    def test_multiple_subdir_groups(self, tmp_path):
+        """Test that multiple groups can coexist in the same bundle."""
+        import pandas as pd
+
+        folio = DataFolio(tmp_path / "test")
+        folio.add_table("train/data", pd.DataFrame({"x": [1, 2, 3]}))
+        folio.add_table("val/data", pd.DataFrame({"x": [4, 5]}))
+        folio.add_table("test/data", pd.DataFrame({"x": [6]}))
+
+        assert len(folio._items) == 3
+        assert folio.get_table("train/data").shape == (3, 1)
+        assert folio.get_table("val/data").shape == (2, 1)
+        assert folio.get_table("test/data").shape == (1, 1)

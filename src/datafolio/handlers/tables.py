@@ -142,9 +142,6 @@ class PandasHandler(BaseHandler):
             folio._bundle_dir, subdir, item["filename"]
         )
 
-        # Use cache if available
-        filepath = folio._get_file_path_with_cache(name, filepath)
-
         return folio._storage.read_parquet(filepath, **kwargs)
 
 
@@ -268,11 +265,8 @@ class ReferenceTableHandler(BaseHandler):
         item = folio._items[name]
         remote_path = item["path"]
 
-        # Use cache if available for referenced tables too
-        cached_path = folio._get_file_path_with_cache(name, remote_path)
-
         return folio._storage.read_table(
-            cached_path, item.get("table_format", "parquet"), **kwargs
+            remote_path, item.get("table_format", "parquet"), **kwargs
         )
 
     def delete(self, folio: "DataFolio", name: str) -> None:

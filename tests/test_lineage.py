@@ -239,7 +239,7 @@ class TestCopyMethod:
         folio1.metadata["experiment"] = "exp001"
 
         # Copy to new location
-        folio2 = folio1.copy(base_dir=tmp_path / "copy", name="copy")
+        folio2 = folio1.copy(path=tmp_path / "copy", name="copy")
 
         # Verify copy has the same data
         assert "data" in folio2._items
@@ -258,7 +258,7 @@ class TestCopyMethod:
         folio1.metadata["experiment"] = "exp001"
 
         folio2 = folio1.copy(
-            base_dir=tmp_path / "copy",
+            path=tmp_path / "copy",
             name="test",
             metadata_updates={"experiment": "exp002", "notes": "Modified version"},
         )
@@ -276,7 +276,7 @@ class TestCopyMethod:
         folio1.add_table("data2", df2)
 
         folio2 = folio1.copy(
-            base_dir=tmp_path / "copy", name="test", include_items=["data1"]
+            path=tmp_path / "copy", name="test", include_items=["data1"]
         )
 
         assert "data1" in folio2._items
@@ -292,7 +292,7 @@ class TestCopyMethod:
         folio1.add_table("data2", df2)
 
         folio2 = folio1.copy(
-            base_dir=tmp_path / "copy", name="test", exclude_items=["data2"]
+            path=tmp_path / "copy", name="test", exclude_items=["data2"]
         )
 
         assert "data1" in folio2._items
@@ -304,7 +304,7 @@ class TestCopyMethod:
 
         with pytest.raises(ValueError, match="Cannot specify both"):
             folio1.copy(
-                base_dir=tmp_path / "copy",
+                path=tmp_path / "copy",
                 name="test",
                 include_items=["data1"],
                 exclude_items=["data2"],
@@ -316,7 +316,7 @@ class TestCopyMethod:
         model = DummyModel(param=42)
         folio1.add_model("clf", model)
 
-        folio2 = folio1.copy(base_dir=tmp_path / "copy", name="test")
+        folio2 = folio1.copy(path=tmp_path / "copy", name="test")
 
         # Verify model was copied
         assert "clf" in folio2._items
@@ -332,7 +332,7 @@ class TestCopyMethod:
         folio1 = DataFolio(tmp_path / "original" / "test")
         folio1.add_artifact("plot", artifact_file)
 
-        folio2 = folio1.copy(base_dir=tmp_path / "copy", name="test")
+        folio2 = folio1.copy(path=tmp_path / "copy", name="test")
 
         # Verify artifact was copied
         assert "plot" in folio2._items

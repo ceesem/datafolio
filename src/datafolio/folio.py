@@ -1,6 +1,7 @@
 """Main DataFolio class for bundling analysis artifacts."""
 
 import contextlib
+import fnmatch
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
@@ -28,6 +29,7 @@ from datafolio.utils import (
     TableReference,
     TimestampItem,
     is_cloud_path,
+    is_http_path,
     make_bundle_name,
     resolve_path,
     validate_item_name,
@@ -329,6 +331,10 @@ class DataFolio:
         # Read-only mode flag
         self._read_only = read_only
 
+        # HTTP/HTTPS paths are always read-only (cannot create a new folio over HTTP)
+        if is_http_path(str(path)):
+            self._read_only = True
+
         # HTTPS mode flag (for read-only access to public cloud buckets)
         self._use_https = use_https
 
@@ -375,9 +381,20 @@ class DataFolio:
         metadata_path = self._storage.join_paths(path_str, METADATA_FILE)
         items_path = self._storage.join_paths(path_str, ITEMS_FILE)
 
-        is_existing_bundle = self._storage.exists(path_str) and (
-            self._storage.exists(metadata_path) or self._storage.exists(items_path)
-        )
+        if is_http_path(path_str):
+            # HTTP/HTTPS: skip directory listing (not supported); check manifest files directly
+            is_existing_bundle = self._storage.exists(
+                metadata_path
+            ) or self._storage.exists(items_path)
+            if not is_existing_bundle:
+                raise FileNotFoundError(
+                    f"No datafolio bundle found at '{path_str}'. "
+                    "HTTP/HTTPS paths must point to an existing bundle."
+                )
+        else:
+            is_existing_bundle = self._storage.exists(path_str) and (
+                self._storage.exists(metadata_path) or self._storage.exists(items_path)
+            )
 
         if is_existing_bundle:
             # Open existing bundle
@@ -483,70 +500,6 @@ class DataFolio:
                 msg += f" (loaded from snapshot '{self._loaded_snapshot}')"
             msg += ". Open without read_only=True to make changes."
             raise RuntimeError(msg)
-
-    def _get_file_path_with_cache(self, name: str, remote_path: str) -> str:
-        """Get file path, using cache if available and enabled.
-
-        Args:
-            name: Item name
-            remote_path: Path to remote file
-
-        Returns:
-            Path to file (either cached local path or remote path)
-        """
-        # If caching not enabled, return remote path
-        if not self._cache_enabled or self._cache_manager is None:
-            return remote_path
-
-        # Get item metadata
-        item = self._items[name]
-        item_type = item["item_type"]
-        filename = item.get("filename", name)
-        checksum = item.get("checksum")
-
-        # Define fetch function for cache manager
-        def fetch_from_remote():
-            """Fetch file bytes from remote storage."""
-            import os
-
-            bundle_dir = resolve_path(self._bundle_dir)
-            remote_full_path = resolve_path(remote_path)
-
-            # Check if path is within bundle or external
-            if remote_full_path.startswith(bundle_dir):
-                # Path is within bundle - use relative path with self._cf
-                relative_path = remote_full_path[len(bundle_dir) :].lstrip("/")
-                data_bytes = self._cf.get(relative_path)
-            else:
-                # External reference - create new CloudFiles instance
-                # Split into directory and filename
-                dir_path = os.path.dirname(remote_full_path)
-                file_name = os.path.basename(remote_full_path)
-                cf_external = cloudfiles.CloudFiles(dir_path)
-                data_bytes = cf_external.get(file_name)
-
-            return (data_bytes, item_type, filename)
-
-        # Try to get from cache (will fetch if needed)
-        try:
-            cached_path = self._cache_manager.get(
-                item_name=name,
-                remote_fetch_fn=fetch_from_remote,
-                remote_checksum=checksum,
-            )
-
-            if cached_path:
-                # Return local cached path as string
-                return str(cached_path)
-        except Exception as e:
-            # If caching fails, fall back to remote path
-            import logging
-
-            logger = logging.getLogger(__name__)
-            logger.warning(f"Cache error for {name}, falling back to remote: {e}")
-
-        # Fallback to remote path
-        return remote_path
 
     def _exists(self, path: str) -> bool:
         """Check if a path exists (local or cloud).
@@ -2431,11 +2384,12 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         from pathlib import Path
 
         file_path = Path(current_filename)
-        name_part = file_path.stem
-        ext_part = file_path.suffix
 
-        # Create new filename with @snapshot
-        snapshot_filename = f"{name_part}@{first_snapshot}{ext_part}"
+        # Create new filename with @snapshot, preserving any subdirectory structure
+        # e.g. "examples/data.parquet" → "examples/data@snap.parquet"
+        snapshot_filename = str(
+            file_path.parent / f"{file_path.stem}@{first_snapshot}{file_path.suffix}"
+        )
 
         # Get storage subdir based on item type
         from datafolio.storage import get_storage_directory
@@ -2721,8 +2675,12 @@ For more information, see the [datafolio documentation](https://github.com/ceese
 
     # ==================== Public API Methods ====================
 
-    def list_contents(self) -> Dict[str, list[str]]:
+    def list_contents(self, include_archived: bool = False) -> Dict[str, list[str]]:
         """List all contents in the DataFolio.
+
+        Args:
+            include_archived: If True, include archived (hidden) items in the results.
+                Defaults to False so archived items are hidden from normal views.
 
         Returns:
             Dictionary with keys 'referenced_tables', 'included_tables', 'numpy_arrays',
@@ -2740,41 +2698,44 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         # Auto-refresh if bundle was updated externally
         self._refresh_if_needed()
 
+        def _visible(item: Dict[str, Any]) -> bool:
+            return include_archived or not item.get("archived", False)
+
         # Filter items by type
         referenced_tables = [
             name
             for name, item in self._items.items()
-            if item.get("item_type") == "referenced_table"
+            if item.get("item_type") == "referenced_table" and _visible(item)
         ]
         included_tables = [
             name
             for name, item in self._items.items()
-            if item.get("item_type") == "included_table"
+            if item.get("item_type") == "included_table" and _visible(item)
         ]
         numpy_arrays = [
             name
             for name, item in self._items.items()
-            if item.get("item_type") == "numpy_array"
+            if item.get("item_type") == "numpy_array" and _visible(item)
         ]
         json_data = [
             name
             for name, item in self._items.items()
-            if item.get("item_type") == "json_data"
+            if item.get("item_type") == "json_data" and _visible(item)
         ]
         timestamps = [
             name
             for name, item in self._items.items()
-            if item.get("item_type") == "timestamp"
+            if item.get("item_type") == "timestamp" and _visible(item)
         ]
         models = [
             name
             for name, item in self._items.items()
-            if item.get("item_type") == "model"
+            if item.get("item_type") == "model" and _visible(item)
         ]
         artifacts = [
             name
             for name, item in self._items.items()
-            if item.get("item_type") == "artifact"
+            if item.get("item_type") == "artifact" and _visible(item)
         ]
 
         return {
@@ -2971,27 +2932,39 @@ For more information, see the [datafolio documentation](https://github.com/ceese
 
     def describe(
         self,
+        pattern: Optional[str] = None,
         return_string: bool = False,
         show_empty: bool = False,
         max_metadata_fields: int = 10,
         snapshot: Optional[str] = None,
+        include_archived: bool = False,
+        show_paths: bool = False,
     ) -> Optional[str]:
         """Generate a human-readable description of all items in the bundle.
 
         Includes lineage information showing inputs and dependencies.
 
         Args:
+            pattern: Optional glob pattern to filter items by name (e.g. 'examples/*',
+                '*/weights'). Uses fnmatch rules — '*' matches any characters including '/'.
             return_string: If True, return as string instead of printing
             show_empty: If True, show empty sections
             max_metadata_fields: Maximum metadata fields to show
             snapshot: Optional snapshot name to describe instead of the full bundle
+            include_archived: If True, show archived (hidden) items. Defaults to False.
+            show_paths: If True, show the file path for each item. Especially useful
+                for cloud-hosted folios where paths can be shared with collaborators
+                who don't use datafolio.
 
         Returns:
             None if return_string=False, otherwise the description string
 
         Examples:
             >>> folio.describe()  # Show full bundle
+            >>> folio.describe('examples/*')  # Show only items under 'examples/'
             >>> folio.describe(snapshot='v1.0')  # Show specific snapshot
+            >>> folio.describe(include_archived=True)  # Show archived items too
+            >>> folio.describe(show_paths=True)  # Show file paths for sharing
 
         See DisplayFormatter.describe() for full documentation.
         """
@@ -3023,6 +2996,9 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             show_empty=show_empty,
             max_metadata_fields=max_metadata_fields,
             snapshot=snapshot,
+            pattern=pattern,
+            include_archived=include_archived,
+            show_paths=show_paths,
         )
 
         # Combine header and main description
@@ -3789,6 +3765,66 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         handler = registry.get("artifact")
         return handler.get(self, name)
 
+    def get_item_path(self, name: str) -> str:
+        """Get the path to any item stored in the folio.
+
+        For items stored within the bundle (included tables, models, artifacts,
+        arrays, JSON data, timestamps), returns the full path to the data file.
+        For referenced tables, returns the external path recorded at reference time.
+
+        This is especially useful for cloud-hosted folios where collaborators can
+        directly access or download underlying files without using datafolio.
+
+        Args:
+            name: Name of the item
+
+        Returns:
+            Full path to the item's data file. For cloud folios this will be a
+            cloud URI (e.g. ``s3://bucket/.../results.parquet``). For local folios
+            this will be an absolute file-system path.
+
+        Raises:
+            KeyError: If item name doesn't exist
+            ValueError: If item has no associated file path
+
+        Examples:
+            >>> folio = DataFolio('s3://bucket/experiments/my-run')
+            >>> path = folio.get_item_path('results')
+            >>> print(path)
+            's3://bucket/experiments/my-run/tables/results.parquet'
+
+            >>> path = folio.get_item_path('classifier')
+            >>> print(path)
+            's3://bucket/experiments/my-run/models/classifier.joblib'
+
+            >>> # For referenced tables the external path is returned
+            >>> folio.reference_table('raw', path='s3://data-lake/raw.parquet')
+            >>> folio.get_item_path('raw')
+            's3://data-lake/raw.parquet'
+        """
+        self._refresh_if_needed()
+
+        if name not in self._items:
+            raise KeyError(f"Item '{name}' not found in DataFolio")
+
+        item = self._items[name]
+        item_type = item.get("item_type")
+
+        # Referenced tables point to external data — return that path directly
+        if item_type == "referenced_table":
+            return item["path"]
+
+        # All bundled items store their filename in metadata
+        if "filename" not in item:
+            raise ValueError(
+                f"Item '{name}' (type: {item_type}) has no associated file path"
+            )
+
+        registry = get_registry()
+        handler = registry.get(item_type)
+        subdir = handler.get_storage_subdir()
+        return self._storage.join_paths(self._bundle_dir, subdir, item["filename"])
+
     def add_numpy(
         self,
         name: str,
@@ -3872,7 +3908,7 @@ For more information, see the [datafolio documentation](https://github.com/ceese
     def get_numpy(self, name: str) -> Any:
         """Get a numpy array by name.
 
-        Arrays are NOT cached - always read fresh from disk.
+        If caching is enabled, cloud-based arrays are cached locally for faster repeated access.
 
         Args:
             name: Name of the array
@@ -3905,7 +3941,7 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         # Get handler and delegate to it
         registry = get_registry()
         handler = registry.get("numpy_array")
-        return handler.get(self, name)
+        return self._get_with_cache(name, lambda: handler.get(self, name))
 
     def add_json(
         self,
@@ -3983,7 +4019,7 @@ For more information, see the [datafolio documentation](https://github.com/ceese
     def get_json(self, name: str) -> Any:
         """Get JSON data by name.
 
-        Data is NOT cached - always read fresh from disk.
+        If caching is enabled, cloud-based JSON data is cached locally for faster repeated access.
 
         Args:
             name: Name of the JSON data
@@ -4013,10 +4049,9 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             )
 
         # Delegate to handler
-
         registry = get_registry()
         handler = registry.get("json_data")
-        return handler.get(self, name)
+        return self._get_with_cache(name, lambda: handler.get(self, name))
 
     def add_timestamp(
         self,
@@ -4108,7 +4143,7 @@ For more information, see the [datafolio documentation](https://github.com/ceese
     def get_timestamp(self, name: str, as_unix: bool = False) -> Union[datetime, float]:
         """Get a timestamp by name.
 
-        Timestamps are NOT cached - always read fresh from disk.
+        If caching is enabled, cloud-based timestamps are cached locally for faster repeated access.
 
         Args:
             name: Name of the timestamp
@@ -4147,10 +4182,10 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             )
 
         # Delegate to handler
-
         registry = get_registry()
         handler = registry.get("timestamp")
-        return handler.get(self, name, as_unix=as_unix)
+        dt = self._get_with_cache(name, lambda: handler.get(self, name, as_unix=False))
+        return dt.timestamp() if as_unix else dt
 
     def add_data(
         self,
@@ -4466,6 +4501,111 @@ For more information, see the [datafolio documentation](https://github.com/ceese
 
         return self
 
+    # ==================== Archive Methods ====================
+
+    def archive(self, name: Union[str, list[str]]) -> Self:
+        """Mark item(s) as archived (hidden from default views, not deleted).
+
+        Archived items remain on disk and are still accessible via get_data() /
+        get_table() etc., but are excluded from list_contents(), describe(), and
+        copy() by default.  Pass include_archived=True to those methods to reveal
+        them again, or call unarchive() to restore them permanently.
+
+        Accepts a single name, a list of names, or a glob pattern (fnmatch rules,
+        e.g. ``'intermediate/*'``).
+
+        Args:
+            name: Item name, list of names, or glob pattern to archive.
+
+        Returns:
+            Self for method chaining
+
+        Raises:
+            KeyError: If a specific name (non-glob) is not found
+
+        Examples:
+            Archive a single item:
+            >>> folio.archive('debug_output')
+
+            Archive multiple items:
+            >>> folio.archive(['debug_output', 'temp_features'])
+
+            Archive by glob pattern:
+            >>> folio.archive('intermediate/*')
+        """
+        self._check_read_only()
+
+        names_to_archive: list[str]
+        if isinstance(name, str):
+            # Check if it looks like a glob pattern
+            if any(c in name for c in ("*", "?", "[")):
+                names_to_archive = fnmatch.filter(list(self._items.keys()), name)
+            else:
+                if name not in self._items:
+                    raise KeyError(f"Item '{name}' not found in DataFolio")
+                names_to_archive = [name]
+        else:
+            # List of explicit names — validate all exist first
+            for n in name:
+                if n not in self._items:
+                    raise KeyError(f"Item '{n}' not found in DataFolio")
+            names_to_archive = list(name)
+
+        for n in names_to_archive:
+            self._items[n]["archived"] = True
+
+        self._save_items()
+        return self
+
+    def unarchive(self, name: Union[str, list[str]]) -> Self:
+        """Restore archived item(s) to active status.
+
+        Removes the ``archived`` flag so the items appear again in
+        list_contents(), describe(), and copy() by default.
+
+        Accepts a single name, a list of names, or a glob pattern (fnmatch rules).
+
+        Args:
+            name: Item name, list of names, or glob pattern to unarchive.
+
+        Returns:
+            Self for method chaining
+
+        Raises:
+            KeyError: If a specific name (non-glob) is not found
+
+        Examples:
+            Unarchive a single item:
+            >>> folio.unarchive('debug_output')
+
+            Unarchive multiple items:
+            >>> folio.unarchive(['debug_output', 'temp_features'])
+
+            Unarchive by glob pattern:
+            >>> folio.unarchive('intermediate/*')
+        """
+        self._check_read_only()
+
+        names_to_unarchive: list[str]
+        if isinstance(name, str):
+            if any(c in name for c in ("*", "?", "[")):
+                names_to_unarchive = fnmatch.filter(list(self._items.keys()), name)
+            else:
+                if name not in self._items:
+                    raise KeyError(f"Item '{name}' not found in DataFolio")
+                names_to_unarchive = [name]
+        else:
+            for n in name:
+                if n not in self._items:
+                    raise KeyError(f"Item '{n}' not found in DataFolio")
+            names_to_unarchive = list(name)
+
+        for n in names_to_unarchive:
+            self._items[n].pop("archived", None)
+
+        self._save_items()
+        return self
+
     # ==================== Lineage Methods ====================
 
     def get_inputs(self, item_name: str) -> list[str]:
@@ -4558,26 +4698,67 @@ For more information, see the [datafolio documentation](https://github.com/ceese
 
     # ==================== Copy Method ====================
 
+    def _resolve_lineage_closure(self, seeds: list[str]) -> set[str]:
+        """Return the full set of items transitively required by the seed items.
+
+        Uses ``get_lineage_graph()`` to walk upstream dependencies (BFS) from
+        each seed.  Items referenced in ``inputs`` metadata that are not present
+        in this folio are silently skipped.
+
+        Args:
+            seeds: Names of the root items to start from.
+
+        Returns:
+            Set of item names (seeds + all transitive upstream deps that exist
+            in this folio).
+        """
+        graph = self.get_lineage_graph()  # {item: [inputs]}
+        closure: set[str] = set()
+        queue: list[str] = list(seeds)
+        while queue:
+            current = queue.pop()
+            if current in closure:
+                continue
+            if current not in self._items:
+                # External reference — skip (don't add to closure)
+                continue
+            closure.add(current)
+            for dep in graph.get(current, []):
+                if dep not in closure:
+                    queue.append(dep)
+        return closure
+
     def copy(
         self,
-        base_dir: Union[str, Path],
+        path: Union[str, Path],
         name: Optional[str] = None,
         metadata_updates: Optional[Dict[str, Any]] = None,
         include_items: Optional[list[str]] = None,
         exclude_items: Optional[list[str]] = None,
         random_suffix: bool = False,
+        follow_lineage: bool = False,
+        include_archived: bool = False,
     ) -> "DataFolio":
         """Create a copy of this bundle at a new location.
 
         Useful for creating derived experiments or checkpoints.
 
         Args:
-            base_dir: Base directory for the new bundle (e.g., 'experiments' or 'gs://bucket/path')
-            name: Name for the new bundle. If None, uses the current bundle's name
+            path: Destination path for the new bundle. Used as the exact bundle
+                location (e.g., 'gs://bucket/experiments/my-copy').
+            name: If provided, appended to path as a subdirectory
+                (e.g., path='experiments', name='exp-v2' → 'experiments/exp-v2').
+                If None, path is used as-is.
             metadata_updates: Metadata fields to update/add in the copy
             include_items: If specified, only copy these items (by name)
             exclude_items: Items to exclude from copy (by name)
             random_suffix: If True, append random suffix to new bundle name (default: False)
+            follow_lineage: If True and include_items is provided, automatically
+                include all transitive upstream dependencies of the named items.
+                Items referenced in lineage that are not present in this folio
+                (e.g. external tables) are silently skipped.
+            include_archived: If True, archived items are included in the copy.
+                Defaults to False so archived items are excluded.
 
         Returns:
             New DataFolio instance
@@ -4586,19 +4767,18 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             ValueError: If include_items and exclude_items are both specified
 
         Examples:
-            >>> # Copy to cloud storage with same name
-            >>> folio2 = folio.copy('gs://bucket/experiments')
+            >>> # Copy to exact destination path
+            >>> folio2 = folio.copy('gs://bucket/experiments/my-copy')
 
-            >>> # Copy to local directory with new name
+            >>> # Copy to base directory with explicit name subdirectory
             >>> folio2 = folio.copy('experiments', name='exp-v2')
 
             >>> # Copy with random suffix
-            >>> folio2 = folio.copy('experiments', name='exp-v2', random_suffix=True)
+            >>> folio2 = folio.copy('experiments/exp-v2', random_suffix=True)
 
             >>> # Copy with metadata updates to track parent
             >>> folio2 = folio.copy(
-            ...     'experiments',
-            ...     name='exp-v2',
+            ...     'experiments/exp-v2',
             ...     metadata_updates={
             ...         'parent_bundle': folio._bundle_dir,
             ...         'changes': 'Increased max_depth to 15'
@@ -4607,24 +4787,31 @@ For more information, see the [datafolio documentation](https://github.com/ceese
 
             >>> # Copy only specific items (e.g., for derived experiment)
             >>> folio2 = folio.copy(
-            ...     'experiments',
-            ...     name='exp-v2-tuned',
+            ...     'experiments/exp-v2-tuned',
             ...     include_items=['training_data', 'validation_data'],
             ...     metadata_updates={'status': 'in_progress'}
             ... )
+
+            >>> # Copy only final outputs, auto-resolving all upstream deps
+            >>> folio2 = folio.copy(
+            ...     'results',
+            ...     include_items=['final_model', 'test_results'],
+            ...     follow_lineage=True,
+            ... )
+
+            >>> # Include archived items in the copy
+            >>> folio2 = folio.copy('archive_backup', include_archived=True)
         """
         import shutil
 
         if include_items is not None and exclude_items is not None:
             raise ValueError("Cannot specify both include_items and exclude_items")
 
-        # Extract current bundle name if not provided
-        if name is None:
-            # Get the last component of the bundle directory path
-            name = Path(self._bundle_dir).name
-
         # Construct full path for new bundle
-        new_path = self._storage.join_paths(str(base_dir), name)
+        if name is not None:
+            new_path = self._storage.join_paths(str(path), name)
+        else:
+            new_path = str(path)
 
         # Create new bundle
         new_metadata = dict(self.metadata)
@@ -4638,9 +4825,25 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         # Wrap copy operation in try/except to cleanup on failure
         try:
             # Determine which items to copy
-            items_to_copy = set(self._items.keys())
+            # Start from only non-archived items unless include_archived is True
+            if include_archived:
+                items_to_copy = set(self._items.keys())
+            else:
+                items_to_copy = {
+                    n
+                    for n, item in self._items.items()
+                    if not item.get("archived", False)
+                }
+
             if include_items is not None:
-                items_to_copy = items_to_copy.intersection(include_items)
+                if follow_lineage:
+                    # Expand seeds to the full transitive closure, then intersect
+                    # with the visible set so we don't pull in archived deps
+                    # unless the caller opted in via include_archived.
+                    closure = self._resolve_lineage_closure(list(include_items))
+                    items_to_copy = items_to_copy.intersection(closure)
+                else:
+                    items_to_copy = items_to_copy.intersection(include_items)
             if exclude_items is not None:
                 items_to_copy = items_to_copy.difference(exclude_items)
 

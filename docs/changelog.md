@@ -1,6 +1,29 @@
 # Changelog
 
-## 0.2.0 (Unreleased)
+## 1.1.0
+
+### Item Curation
+
+#### Archive / Unarchive
+- **New `archive()` method**: Mark one or more items as hidden without deleting them.
+  - Accepts a single name, a list of names, or a glob pattern (e.g. `folio.archive("intermediate/*")`)
+  - Archived items are excluded from `list_contents()`, `describe()`, and `copy()` by default
+  - Data remains fully accessible via `get_data()` / `get_table()` / etc.
+  - `create_snapshot()` still captures archived items (snapshots record complete state)
+- **New `unarchive()` method**: Restore archived items to active status.
+  - Same flexible name/list/glob interface as `archive()`
+- **`include_archived=True` parameter** added to `list_contents()`, `describe()`, and `copy()`
+  — pass this flag to reveal or include archived items in any of those views.
+
+#### Lineage-Aware Copy
+- **New `follow_lineage=True` parameter on `copy()`**: When combined with `include_items`,
+  automatically resolves all transitive upstream dependencies of the named items.
+  - `folio.copy("pub", include_items=["final_model"], follow_lineage=True)` copies `final_model`
+    plus every item it depends on, recursively.
+  - Items referenced in lineage metadata that are not in this folio (external tables, etc.) are
+    silently skipped — the lineage metadata is still preserved.
+  - Works together with `include_archived=True` to control whether archived upstream items
+    are included or excluded.
 
 ### Major Features
 
@@ -41,21 +64,6 @@
   - Full support for `folio.data.timestamp_name` accessor pattern
   - Round-trip preservation of microsecond precision
 
-#### PyTorch Model Support
-- **New `add_pytorch()` method**: Full support for PyTorch models
-  - Saves state dict using `torch.save()`
-  - Optional class serialization with dill for full reconstruction
-  - Stores model metadata (class name, module, init_args)
-  - Supports hyperparameters, lineage, and code tracking
-- **New `get_pytorch()` method**: Three ways to load PyTorch models
-  - State dict only: `get_pytorch(name, reconstruct=False)`
-  - With provided class: `get_pytorch(name, model_class=MyModel)`
-  - Auto-reconstruction: Uses metadata or serialized class
-- **Enhanced `add_model()` method**: Now automatically detects PyTorch vs sklearn models
-  - Routes to appropriate handler (`add_pytorch` or `add_sklearn`)
-  - Unified interface for all model types
-- **Enhanced `get_model()` method**: Automatically detects stored model type and uses correct loader
-
 ### Enhanced Features
 
 #### Improved `describe()` Method
@@ -64,6 +72,8 @@
   - `return_string=True`: Returns description as string instead of printing
   - `show_empty=True`: Shows empty sections in output
   - `max_metadata_fields=10`: Limit number of metadata fields displayed (default: 10)
+  - `show_paths=True`: Show the file path for every item — especially useful for
+    cloud-hosted folios where paths can be copied and sent to collaborators directly
 - **Unified data sections**: Tables section now combines referenced and included tables
 - **Better metadata display**: Shows shape, dtype, init_args, and other relevant info inline
 - **Improved lineage display**: Clearer visualization of data dependencies
@@ -72,6 +82,15 @@
   - Truncates long strings with ellipsis (shows first 50 chars)
   - Shows type and item count for collections (lists, dicts)
   - Limits display to configurable number of fields with "... and N more fields" indicator
+
+#### Path Sharing for Collaborators
+
+- **New `get_item_path()` method**: Returns the full path to any item's data file by name,
+  regardless of item type (table, model, artifact, array, JSON, or timestamp).
+  - For items stored in the bundle returns the full local or cloud URI
+    (e.g. `s3://bucket/my-run/tables/results.parquet`)
+  - For referenced tables returns the external path recorded at reference time
+  - Makes it easy to hand off individual files to colleagues who don't use datafolio
 
 #### New `delete()` Method
 - **Delete items from DataFolio**: Remove items and their associated files
@@ -105,20 +124,18 @@
   - `numpy_arrays`: List of numpy array items
   - `json_data`: List of JSON data items
   - `timestamps`: List of timestamp items
-  - `pytorch_models`: List of PyTorch model items
 
 ### Internal Improvements
 - **Refactored to handler-based architecture**: Separated data type logic into modular handlers for improved maintainability and extensibility
   - Core `folio.py` reduced from 3,659 → 764 lines (79% smaller)
-  - 8 specialized handlers for different data types
+  - 7 specialized handlers for different data types
   - Zero breaking changes - all existing APIs preserved
-- **Improved test coverage**: 69% → 79% coverage with 423 passing tests (up from 265)
+- **Improved test coverage**: 69% → 80% coverage with 694 passing tests (up from 265)
 - **Enhanced code quality**: Complete type hints, no circular dependencies, clean linting
 
 ### Documentation
 - Comprehensive documentation update with examples for all new features
 - Added Quick Start guide with generic interface examples
-- Added PyTorch deep learning workflow example
 - Added complete ML workflow example using the new generic interface
 - Updated directory structure documentation
 

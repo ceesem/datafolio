@@ -247,9 +247,6 @@ class SklearnHandler(BaseHandler):
             folio._bundle_dir, subdir, item["filename"]
         )
 
-        # Use cache if available
-        filepath = folio._get_file_path_with_cache(name, filepath)
-
         # Load with appropriate backend
         if format == "skops":
             return folio._storage.read_skops(filepath)

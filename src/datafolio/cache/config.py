@@ -29,7 +29,7 @@ class CacheConfig:
 
     enabled: bool = False
     cache_dir: Path = Path.home() / ".datafolio_cache"
-    default_ttl: int = 1800  # 30 minutes
+    default_ttl: int = 3600  # 1 hour
     max_cache_size: Optional[int] = None  # bytes (total cache size)
     max_item_size: int = 250 * 1024 * 1024  # 250 MB per item
     checksum_algorithm: str = "md5"

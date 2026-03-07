@@ -167,6 +167,19 @@ class StorageBackend:
         else:
             Path(path).mkdir(parents=parents, exist_ok=exist_ok)
 
+    def _ensure_parent_dir(self, path: str) -> None:
+        """Create parent directory for a file path (local only; cloud is a no-op).
+
+        Args:
+            path: File path whose parent directory should be created
+
+        Examples:
+            >>> storage._ensure_parent_dir('/path/to/subdir/file.parquet')
+            # Creates /path/to/subdir/ if it doesn't exist
+        """
+        if not is_cloud_path(path):
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+
     def join_paths(self, *parts: str) -> str:
         """Join path components (local or cloud).
 
@@ -224,6 +237,7 @@ class StorageBackend:
         else:
             import shutil
 
+            self._ensure_parent_dir(dst)
             shutil.copy2(src, dst)
 
     def calculate_checksum(self, path: str) -> Optional[str]:
@@ -282,6 +296,7 @@ class StorageBackend:
             # Disable caching for manifest files to ensure fresh reads
             cf.put(filename, content, cache_control="no-cache")
         else:
+            self._ensure_parent_dir(path)
             with open(path, "wb") as f:
                 f.write(content)
 
@@ -337,6 +352,7 @@ class StorageBackend:
             >>> storage = StorageBackend()
             >>> storage.write_parquet('/path/to/data.parquet', df)
         """
+        self._ensure_parent_dir(path)
         # pandas.to_parquet handles cloud paths if fsspec/cloud libs installed
         df.to_parquet(path, index=False)
 
@@ -383,6 +399,7 @@ class StorageBackend:
 
             self._cloud_write_bytes(path, data)
         else:
+            self._ensure_parent_dir(path)
             joblib.dump(obj, path)
 
     def read_joblib(self, path: str) -> Any:
@@ -428,6 +445,7 @@ class StorageBackend:
         if is_cloud_path(path):
             self._cloud_write_bytes(path, data)
         else:
+            self._ensure_parent_dir(path)
             Path(path).write_bytes(data)
 
     def read_skops(self, path: str) -> Any:
@@ -491,6 +509,7 @@ class StorageBackend:
                 # Cleanup
                 Path(tmp.name).unlink()
         else:
+            self._ensure_parent_dir(path)
             np.save(path, array)
 
     def read_numpy(self, path: str, **kwargs) -> Any:

@@ -430,5 +430,93 @@ class TestErrorMessages:
         assert "read-only" in error_msg.lower()
 
 
+class TestHttpFolio:
+    """Test HTTP/HTTPS path auto-detection for read-only folios."""
+
+    def test_http_path_is_auto_read_only(self, tmp_path):
+        """HTTP/HTTPS paths are automatically opened as read-only."""
+        from unittest.mock import patch
+
+        # Simulate manifest files existing at the HTTP URL
+        def mock_exists(path):
+            return "metadata.json" in path or "items.json" in path
+
+        with (
+            patch(
+                "datafolio.storage.backend.StorageBackend.exists",
+                side_effect=mock_exists,
+            ),
+            patch(
+                "datafolio.storage.backend.StorageBackend.read_json", return_value={}
+            ),
+        ):
+            folio = DataFolio("https://example.com/my-folio")
+
+        assert folio.read_only is True
+
+    def test_http_path_raises_on_missing_bundle(self):
+        """FileNotFoundError is raised when no manifest exists at HTTP URL."""
+        from unittest.mock import patch
+
+        with patch(
+            "datafolio.storage.backend.StorageBackend.exists", return_value=False
+        ):
+            with pytest.raises(FileNotFoundError, match="No datafolio bundle found"):
+                DataFolio("https://example.com/nonexistent-folio")
+
+    def test_https_path_raises_on_missing_bundle(self):
+        """FileNotFoundError is raised for https:// paths with no bundle."""
+        from unittest.mock import patch
+
+        with patch(
+            "datafolio.storage.backend.StorageBackend.exists", return_value=False
+        ):
+            with pytest.raises(FileNotFoundError, match="HTTP/HTTPS paths must point"):
+                DataFolio("https://raw.githubusercontent.com/user/repo/main/folio")
+
+    def test_http_path_cannot_add_data(self, tmp_path):
+        """add_data() raises RuntimeError on HTTP-backed folio."""
+        from unittest.mock import patch
+
+        def mock_exists(path):
+            return "metadata.json" in path or "items.json" in path
+
+        with (
+            patch(
+                "datafolio.storage.backend.StorageBackend.exists",
+                side_effect=mock_exists,
+            ),
+            patch(
+                "datafolio.storage.backend.StorageBackend.read_json", return_value={}
+            ),
+        ):
+            folio = DataFolio("https://example.com/my-folio")
+
+        df = pd.DataFrame({"a": [1, 2, 3]})
+        with pytest.raises(RuntimeError, match="read-only"):
+            folio.add_data("new", df)
+
+    def test_http_path_cannot_delete(self, tmp_path):
+        """delete() raises RuntimeError on HTTP-backed folio."""
+        from unittest.mock import patch
+
+        def mock_exists(path):
+            return "metadata.json" in path or "items.json" in path
+
+        with (
+            patch(
+                "datafolio.storage.backend.StorageBackend.exists",
+                side_effect=mock_exists,
+            ),
+            patch(
+                "datafolio.storage.backend.StorageBackend.read_json", return_value={}
+            ),
+        ):
+            folio = DataFolio("https://example.com/my-folio")
+
+        with pytest.raises(RuntimeError, match="read-only"):
+            folio.delete("item")
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

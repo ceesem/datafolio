@@ -134,6 +134,11 @@ Methods for loading data from a DataFolio.
         show_source: false
         heading_level: 3
 
+::: datafolio.DataFolio.get_item_path
+    options:
+        show_source: false
+        heading_level: 3
+
 ---
 
 ## Retrieving Models
@@ -199,6 +204,18 @@ Methods for getting information about items.
 ### Deleting Items
 
 ::: datafolio.DataFolio.delete
+    options:
+        show_source: false
+        heading_level: 3
+
+### Archiving Items
+
+::: datafolio.DataFolio.archive
+    options:
+        show_source: false
+        heading_level: 3
+
+::: datafolio.DataFolio.unarchive
     options:
         show_source: false
         heading_level: 3
@@ -430,7 +447,7 @@ print(folio.loaded_snapshot)  # e.g., 'v1.0' or None
 | **Adding Data** | `add_table()`, `add_numpy()`, `add_json()`, `add_timestamp()`, `add_data()`, `reference_table()` |
 | **Adding Models** | `add_sklearn()`, `add_model()` |
 | **Adding Artifacts** | `add_artifact()` |
-| **Retrieving Data** | `get_table()`, `get_numpy()`, `get_json()`, `get_timestamp()`, `get_data()`, `get_data_path()` |
+| **Retrieving Data** | `get_table()`, `get_numpy()`, `get_json()`, `get_timestamp()`, `get_data()`, `get_data_path()`, `get_item_path()` |
 | **Retrieving Models** | `get_sklearn()`, `get_model()` |
 | **Retrieving Artifacts** | `get_artifact_path()` |
 | **Inspecting Items** | `list_contents()`, `get_table_info()`, `get_model_info()`, `get_artifact_info()`, `describe()` |
@@ -516,4 +533,28 @@ dependents = folio.get_dependents('raw_data')  # ['processed_data']
 # Get full lineage graph
 graph = folio.get_lineage_graph()
 print(graph)  # Shows dependency relationships
+```
+
+### Sharing Paths with Collaborators
+```python
+# For a cloud-hosted folio, get the direct path to any item
+folio = datafolio.DataFolio('s3://my-bucket/experiments/run-42')
+
+# Get the path to a specific item
+path = folio.get_item_path('results')
+# → 's3://my-bucket/experiments/run-42/tables/results.parquet'
+
+# Share with a colleague who doesn't use datafolio:
+# import pandas as pd; pd.read_parquet('s3://my-bucket/.../results.parquet')
+
+# Or browse all paths at once with describe()
+folio.describe(show_paths=True)
+# Tables (2):
+#   • raw_data (reference): Input dataset
+#     ↳ path: s3://data-lake/raw.parquet
+#   • results: Model results
+#     ↳ path: s3://my-bucket/experiments/run-42/tables/results.parquet
+# Models (1):
+#   • classifier: Trained model
+#     ↳ path: s3://my-bucket/experiments/run-42/models/classifier.joblib
 ```
