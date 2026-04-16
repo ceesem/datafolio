@@ -390,10 +390,8 @@ import pyarrow.parquet as pq
 # Get the file path
 folio = DataFolio('experiments/data')
 
-# For included tables, get the bundle path
-bundle_path = folio.path
-table_info = folio.get_table_info('my_table')
-file_path = f"{bundle_path}/tables/{table_info['filename']}"
+# get_table_path() works for both included and referenced tables
+file_path = folio.get_table_path('my_table')
 
 # Read as PyArrow table (zero-copy, very fast)
 table = pq.read_table(file_path,
@@ -406,10 +404,6 @@ print(f"Schema: {table.schema}")
 
 # Convert to pandas only when needed
 df = table.to_pandas()
-
-# Or: Reference tables work directly
-ref_path = folio.get_data_path('referenced_table')
-table = pq.read_table(ref_path, columns=['a', 'b'])
 ```
 
 ## Integration with DuckDB
@@ -421,8 +415,8 @@ import duckdb
 
 folio = DataFolio('s3://my-bucket/analysis')
 
-# Get path to table
-table_path = folio.get_data_path('large_table')
+# Get path to table (works for included and referenced tables)
+table_path = folio.get_table_path('large_table')
 
 # Query with DuckDB (very fast, minimal memory)
 result = duckdb.query(f"""

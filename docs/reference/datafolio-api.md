@@ -101,9 +101,19 @@ Methods for loading data from a DataFolio.
         show_source: false
         heading_level: 3
 
+::: datafolio.DataFolio.get_table_path
+    options:
+        show_source: false
+        heading_level: 3
+
 ### Arrays
 
 ::: datafolio.DataFolio.get_numpy
+    options:
+        show_source: false
+        heading_level: 3
+
+::: datafolio.DataFolio.get_numpy_path
     options:
         show_source: false
         heading_level: 3
@@ -115,9 +125,19 @@ Methods for loading data from a DataFolio.
         show_source: false
         heading_level: 3
 
+::: datafolio.DataFolio.get_json_path
+    options:
+        show_source: false
+        heading_level: 3
+
 ### Timestamps
 
 ::: datafolio.DataFolio.get_timestamp
+    options:
+        show_source: false
+        heading_level: 3
+
+::: datafolio.DataFolio.get_timestamp_path
     options:
         show_source: false
         heading_level: 3
@@ -153,6 +173,11 @@ Methods for loading machine learning models.
         heading_level: 3
 
 ::: datafolio.DataFolio.get_model
+    options:
+        show_source: false
+        heading_level: 3
+
+::: datafolio.DataFolio.get_model_path
     options:
         show_source: false
         heading_level: 3
@@ -447,8 +472,8 @@ print(folio.loaded_snapshot)  # e.g., 'v1.0' or None
 | **Adding Data** | `add_table()`, `add_numpy()`, `add_json()`, `add_timestamp()`, `add_data()`, `reference_table()` |
 | **Adding Models** | `add_sklearn()`, `add_model()` |
 | **Adding Artifacts** | `add_artifact()` |
-| **Retrieving Data** | `get_table()`, `get_numpy()`, `get_json()`, `get_timestamp()`, `get_data()`, `get_data_path()`, `get_item_path()` |
-| **Retrieving Models** | `get_sklearn()`, `get_model()` |
+| **Retrieving Data** | `get_table()`, `get_table_path()`, `get_numpy()`, `get_numpy_path()`, `get_json()`, `get_json_path()`, `get_timestamp()`, `get_timestamp_path()`, `get_data()`, `get_data_path()`, `get_item_path()` |
+| **Retrieving Models** | `get_sklearn()`, `get_model()`, `get_model_path()` |
 | **Retrieving Artifacts** | `get_artifact_path()` |
 | **Inspecting Items** | `list_contents()`, `get_table_info()`, `get_model_info()`, `get_artifact_info()`, `describe()` |
 | **Managing Items** | `delete()`, `copy()`, `validate()`, `is_valid()` |
@@ -540,9 +565,16 @@ print(graph)  # Shows dependency relationships
 # For a cloud-hosted folio, get the direct path to any item
 folio = datafolio.DataFolio('s3://my-bucket/experiments/run-42')
 
-# Get the path to a specific item
-path = folio.get_item_path('results')
+# Type-specific path methods (recommended):
+path = folio.get_table_path('results')
 # → 's3://my-bucket/experiments/run-42/tables/results.parquet'
+
+path = folio.get_model_path('classifier')
+# → 's3://my-bucket/experiments/run-42/models/classifier.joblib'
+
+# Generic path getter (dispatches to the appropriate method automatically):
+path = folio.get_data_path('results')   # same as get_table_path for tables
+path = folio.get_item_path('results')   # lower-level, skips type-specific logic
 
 # Share with a colleague who doesn't use datafolio:
 # import pandas as pd; pd.read_parquet('s3://my-bucket/.../results.parquet')
