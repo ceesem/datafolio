@@ -3256,37 +3256,93 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         return self._get_with_cache(name, lambda: handler.get(self, name, **kwargs))
 
     def get_data_path(self, name: str) -> str:
-        """Get the path to a referenced table.
+        """Get the path to any stored item, delegating to the appropriate type-specific method.
+
+        Automatically detects the item type and calls the appropriate path getter:
+        - Tables (included or referenced): delegates to get_table_path()
+        - Artifacts: delegates to get_artifact_path()
+        - All other bundled items (numpy arrays, JSON, timestamps): returns the bundle file path
 
         Args:
-            name: Name of the referenced table
+            name: Name of the item
 
         Returns:
-            Path to the table
+            Path to the item file
 
         Raises:
-            KeyError: If table name doesn't exist
-            ValueError: If table is included (not a reference)
+            KeyError: If item name doesn't exist
 
         Examples:
             >>> folio = DataFolio('experiments', prefix='test')
+            >>> folio.add_table('results', df)
+            >>> folio.get_data_path('results')  # returns path to parquet file
             >>> folio.reference_table('data', path='s3://bucket/file.parquet')
-            >>> path = folio.get_data_path('data')
-            >>> assert 's3://bucket/file.parquet' in path
+            >>> folio.get_data_path('data')  # returns 's3://bucket/file.parquet'
         """
+        if name not in self._items:
+            raise KeyError(f"Item '{name}' not found in DataFolio")
+
+        item_type = self._items[name].get("item_type")
+
+        dispatch = {
+            "included_table": self.get_table_path,
+            "referenced_table": self.get_table_path,
+            "artifact": self.get_artifact_path,
+            "model": self.get_model_path,
+            "numpy_array": self.get_numpy_path,
+            "json_data": self.get_json_path,
+            "timestamp": self.get_timestamp_path,
+        }
+
+        if item_type not in dispatch:
+            raise ValueError(
+                f"Item '{name}' has unknown type '{item_type}' with no path method."
+            )
+
+        return dispatch[item_type](name)
+
+    def get_table_path(self, name: str) -> str:
+        """Get the path to a table file, whether included in the bundle or referenced externally.
+
+        For included tables, returns the full path to the parquet file inside the bundle.
+        For referenced tables, returns the external path recorded at reference time.
+
+        Args:
+            name: Name of the table
+
+        Returns:
+            Path to the table file
+
+        Raises:
+            KeyError: If table name doesn't exist
+            ValueError: If named item is not a table
+
+        Examples:
+            >>> folio = DataFolio('experiments/my-run')
+            >>> folio.add_table('results', df)
+            >>> path = folio.get_table_path('results')
+            >>> print(path)
+            'experiments/my-run/tables/results.parquet'
+
+            >>> folio.reference_table('raw', path='s3://data-lake/raw.parquet')
+            >>> folio.get_table_path('raw')
+            's3://data-lake/raw.parquet'
+        """
+        self._refresh_if_needed()
+
         if name not in self._items:
             raise KeyError(f"Table '{name}' not found in DataFolio")
 
         item = self._items[name]
         item_type = item.get("item_type")
 
-        if item_type == "included_table":
-            raise ValueError(
-                f"Table '{name}' is included in bundle, not a reference. "
-                "Use get_table() instead."
-            )
-        elif item_type == "referenced_table":
+        if item_type == "referenced_table":
             return item["path"]
+        elif item_type == "included_table":
+            registry = get_registry()
+            handler = registry.get(item_type)
+            subdir = handler.get_storage_subdir()
+            return self._storage.join_paths(self._bundle_dir, subdir, item["filename"])
         else:
             raise ValueError(f"Item '{name}' is not a table (type: {item_type})")
 
@@ -3606,6 +3662,41 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             return self.get_sklearn(name)
         else:
             raise ValueError(f"Item '{name}' is not a model (type: {item_type})")
+
+    def get_model_path(self, name: str) -> str:
+        """Get the path to a model file stored in the bundle.
+
+        Args:
+            name: Name of the model
+
+        Returns:
+            Path to the model file
+
+        Raises:
+            KeyError: If model name doesn't exist
+            ValueError: If named item is not a model
+
+        Examples:
+            >>> folio = DataFolio('experiments/my-run')
+            >>> folio.add_sklearn('classifier', model)
+            >>> path = folio.get_model_path('classifier')
+            >>> print(path)
+            'experiments/my-run/models/classifier.joblib'
+        """
+        self._refresh_if_needed()
+
+        if name not in self._items:
+            raise KeyError(f"Model '{name}' not found in DataFolio")
+
+        item = self._items[name]
+        if item.get("item_type") != "model":
+            raise ValueError(
+                f"Item '{name}' is not a model (type: {item.get('item_type')})"
+            )
+
+        handler = get_registry().get("model")
+        subdir = handler.get_storage_subdir()
+        return self._storage.join_paths(self._bundle_dir, subdir, item["filename"])
 
     def add_artifact(
         self,
@@ -3943,6 +4034,41 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         handler = registry.get("numpy_array")
         return self._get_with_cache(name, lambda: handler.get(self, name))
 
+    def get_numpy_path(self, name: str) -> str:
+        """Get the path to a numpy array file stored in the bundle.
+
+        Args:
+            name: Name of the array
+
+        Returns:
+            Path to the .npy file
+
+        Raises:
+            KeyError: If array name doesn't exist
+            ValueError: If named item is not a numpy array
+
+        Examples:
+            >>> folio = DataFolio('experiments/my-run')
+            >>> folio.add_numpy('embeddings', arr)
+            >>> path = folio.get_numpy_path('embeddings')
+            >>> print(path)
+            'experiments/my-run/artifacts/embeddings.npy'
+        """
+        self._refresh_if_needed()
+
+        if name not in self._items:
+            raise KeyError(f"Array '{name}' not found in DataFolio")
+
+        item = self._items[name]
+        if item.get("item_type") != "numpy_array":
+            raise ValueError(
+                f"Item '{name}' is not a numpy array (type: {item.get('item_type')})"
+            )
+
+        handler = get_registry().get("numpy_array")
+        subdir = handler.get_storage_subdir()
+        return self._storage.join_paths(self._bundle_dir, subdir, item["filename"])
+
     def add_json(
         self,
         name: str,
@@ -4052,6 +4178,41 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         registry = get_registry()
         handler = registry.get("json_data")
         return self._get_with_cache(name, lambda: handler.get(self, name))
+
+    def get_json_path(self, name: str) -> str:
+        """Get the path to a JSON data file stored in the bundle.
+
+        Args:
+            name: Name of the JSON data
+
+        Returns:
+            Path to the .json file
+
+        Raises:
+            KeyError: If data name doesn't exist
+            ValueError: If named item is not JSON data
+
+        Examples:
+            >>> folio = DataFolio('experiments/my-run')
+            >>> folio.add_json('config', {'lr': 0.01})
+            >>> path = folio.get_json_path('config')
+            >>> print(path)
+            'experiments/my-run/artifacts/config.json'
+        """
+        self._refresh_if_needed()
+
+        if name not in self._items:
+            raise KeyError(f"JSON data '{name}' not found in DataFolio")
+
+        item = self._items[name]
+        if item.get("item_type") != "json_data":
+            raise ValueError(
+                f"Item '{name}' is not JSON data (type: {item.get('item_type')})"
+            )
+
+        handler = get_registry().get("json_data")
+        subdir = handler.get_storage_subdir()
+        return self._storage.join_paths(self._bundle_dir, subdir, item["filename"])
 
     def add_timestamp(
         self,
@@ -4186,6 +4347,41 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         handler = registry.get("timestamp")
         dt = self._get_with_cache(name, lambda: handler.get(self, name, as_unix=False))
         return dt.timestamp() if as_unix else dt
+
+    def get_timestamp_path(self, name: str) -> str:
+        """Get the path to a timestamp file stored in the bundle.
+
+        Args:
+            name: Name of the timestamp
+
+        Returns:
+            Path to the timestamp file
+
+        Raises:
+            KeyError: If timestamp name doesn't exist
+            ValueError: If named item is not a timestamp
+
+        Examples:
+            >>> folio = DataFolio('experiments/my-run')
+            >>> folio.add_timestamp('event_time', dt)
+            >>> path = folio.get_timestamp_path('event_time')
+            >>> print(path)
+            'experiments/my-run/artifacts/event_time.json'
+        """
+        self._refresh_if_needed()
+
+        if name not in self._items:
+            raise KeyError(f"Timestamp '{name}' not found in DataFolio")
+
+        item = self._items[name]
+        if item.get("item_type") != "timestamp":
+            raise ValueError(
+                f"Item '{name}' is not a timestamp (type: {item.get('item_type')})"
+            )
+
+        handler = get_registry().get("timestamp")
+        subdir = handler.get_storage_subdir()
+        return self._storage.join_paths(self._bundle_dir, subdir, item["filename"])
 
     def add_data(
         self,

@@ -1,0 +1,10 @@
+**datafolio** (v1.1.0)
+- **What**: Filesystem-based data bundling and experiment tracking. A single `DataFolio` object manages DataFrames, numpy arrays, scikit-learn models, dicts, and scalars in a transparent directory structure (Parquet, JSON, pickle). Supports metadata, data lineage, snapshots, and multi-process access.
+- **Where**: `pip install datafolio` / `from datafolio import DataFolio`
+- **Repo**: `github.com/ceesem/datafolio`
+- **When to use**: You need to save, version, and retrieve heterogeneous experiment artifacts (tables, models, configs, results) in a bundle that's inspectable on disk, git-friendly, and doesn't require a database or server. Works transparently with both local and cloud storage (S3, GCS, etc.) — same API regardless of where the data lives. Good for analysis notebooks where you want structured persistence without MLflow/DVC overhead.
+- **When NOT to use**: Large-scale production ML pipelines with complex DAGs (use DVC, MLflow, or W&B). Pure tabular storage (just use Parquet directly). Distributed team model registries.
+- **Why it exists**: Needed a zero-infrastructure way to keep experiment outputs organized and reproducible without adopting a full experiment tracking platform. Most alternatives either require a server, impose rigid directory conventions, or don't handle the mix of tables + models + metadata that a typical analysis produces.
+- **Key design decisions**: Handler-based architecture makes it easy to add new data types. Storage is plain files (no proprietary formats) with a backend abstraction that makes local and cloud paths interchangeable. Auto-detection of data types via `add_data()`/`get_data()` keeps the API surface small. Snapshots provide immutable checkpoints with copy-on-write.
+- **Maturity**: Active development, 423 tests at 79% coverage. Used in internal workflows. API is stabilizing but not yet frozen.
+$$

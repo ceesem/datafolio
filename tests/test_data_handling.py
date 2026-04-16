@@ -202,13 +202,13 @@ class TestGetDataPath:
         assert path == cloud_path
 
     def test_get_data_path_included_table(self, tmp_path):
-        """Test error when trying to get path of included table."""
+        """Test get_data_path returns bundle path for included tables."""
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
         folio.add_table("test", df)
 
-        with pytest.raises(ValueError, match="included in bundle"):
-            folio.get_data_path("test")
+        path = folio.get_data_path("test")
+        assert "test.parquet" in path
 
     def test_get_data_path_not_found(self, tmp_path):
         """Test error when referenced table doesn't exist."""
