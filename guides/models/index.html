@@ -1,0 +1,1326 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://ceesem.github.io/datafolio/guides/models/">
+      
+      
+        <link rel="prev" href="../">
+      
+      
+        <link rel="next" href="../snapshots/">
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.6.21">
+    
+    
+      
+        <title>Working with Models - DataFolio Documentation</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.2a3383ac.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Bitter:300,300i,400,400i,700,700i%7CInconsolata:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Bitter";--md-code-font:"Inconsolata"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="blue-grey" data-md-color-accent="deep-orange">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#working-with-models" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="DataFolio Documentation" class="md-header__button md-logo" aria-label="DataFolio Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            DataFolio Documentation
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Working with Models
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/ceesem/datafolio" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.0.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    ceesem/datafolio
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  About
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../getting-started/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Getting Started
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Guides
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../reference/datafolio-api/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  API Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../changelog/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Changelog
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+  
+
+<nav class="md-nav md-nav--primary md-nav--lifted md-nav--integrated" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="DataFolio Documentation" class="md-nav__button md-logo" aria-label="DataFolio Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    DataFolio Documentation
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/ceesem/datafolio" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.0.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    ceesem/datafolio
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    About
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Getting Started
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+    
+    
+      
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    Guides
+    
+  </span>
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_3" id="__nav_3_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            Guides
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    Working with Models
+    
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    Working with Models
+    
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#quick-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      Quick Start
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#scikit-learn-models" class="md-nav__link">
+    <span class="md-ellipsis">
+      Scikit-learn Models
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Scikit-learn Models">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#standard-models" class="md-nav__link">
+    <span class="md-ellipsis">
+      Standard Models
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#custom-transformers-with-skops" class="md-nav__link">
+    <span class="md-ellipsis">
+      Custom Transformers with Skops
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Custom Transformers with Skops">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-use-skops" class="md-nav__link">
+    <span class="md-ellipsis">
+      Why Use Skops?
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#creating-custom-transformers" class="md-nav__link">
+    <span class="md-ellipsis">
+      Creating Custom Transformers
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#why-inherit-from-baseestimator-and-transformermixin" class="md-nav__link">
+    <span class="md-ellipsis">
+      Why Inherit from BaseEstimator and TransformerMixin?
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#using-custom-transformers-in-pipelines" class="md-nav__link">
+    <span class="md-ellipsis">
+      Using Custom Transformers in Pipelines
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#best-practices-for-custom-transformers" class="md-nav__link">
+    <span class="md-ellipsis">
+      Best Practices for Custom Transformers
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#serialization-format-comparison" class="md-nav__link">
+    <span class="md-ellipsis">
+      Serialization Format Comparison
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#complete-example-custom-transformer-pipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      Complete Example: Custom Transformer Pipeline
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#model-metadata" class="md-nav__link">
+    <span class="md-ellipsis">
+      Model Metadata
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#loading-models" class="md-nav__link">
+    <span class="md-ellipsis">
+      Loading Models
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#common-patterns" class="md-nav__link">
+    <span class="md-ellipsis">
+      Common Patterns
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Common Patterns">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ab-testing-models" class="md-nav__link">
+    <span class="md-ellipsis">
+      A/B Testing Models
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pipeline-versioning" class="md-nav__link">
+    <span class="md-ellipsis">
+      Pipeline Versioning
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#hyperparameter-tuning-archive" class="md-nav__link">
+    <span class="md-ellipsis">
+      Hyperparameter Tuning Archive
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#faq" class="md-nav__link">
+    <span class="md-ellipsis">
+      FAQ
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#next-steps" class="md-nav__link">
+    <span class="md-ellipsis">
+      Next Steps
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../snapshots/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Snapshots
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../caching/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Caching
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../parquet-optimization/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Parquet Optimization
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+    
+    
+      
+        
+        
+      
+    
+    <li class="md-nav__item md-nav__item--pruned md-nav__item--nested">
+      
+        
+  
+  
+  
+    <a href="../../reference/datafolio-api/" class="md-nav__link">
+      
+  
+  
+  <span class="md-ellipsis">
+    API Reference
+    
+  </span>
+  
+
+      
+        <span class="md-nav__icon md-icon"></span>
+      
+    </a>
+  
+
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Changelog
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="working-with-models">Working with Models</h1>
+<p>This guide covers everything you need to know about storing and loading machine learning models in DataFolio, including scikit-learn models and custom transformers.</p>
+<h2 id="quick-start">Quick Start</h2>
+<pre><code class="language-python">from datafolio import DataFolio
+from sklearn.ensemble import RandomForestClassifier
+
+# Train a model
+clf = RandomForestClassifier(n_estimators=100)
+clf.fit(X_train, y_train)
+
+# Save it
+folio = DataFolio('experiments/my_experiment')
+folio.add_sklearn('classifier', clf,
+    description='Random forest baseline',
+    inputs=['training_data'])
+
+# Load it later
+loaded_clf = folio.get_sklearn('classifier')
+predictions = loaded_clf.predict(X_test)
+</code></pre>
+<h2 id="scikit-learn-models">Scikit-learn Models</h2>
+<h3 id="standard-models">Standard Models</h3>
+<p>DataFolio automatically handles all standard scikit-learn models and many popular ML libraries:</p>
+<pre><code class="language-python">from sklearn.ensemble import RandomForestClassifier, GradientBoostingRegressor
+from sklearn.linear_model import LogisticRegression
+from sklearn.svm import SVC
+import xgboost as xgb
+import lightgbm as lgb
+
+# All of these work automatically
+folio.add_sklearn('rf', RandomForestClassifier())
+folio.add_sklearn('gbr', GradientBoostingRegressor())
+folio.add_sklearn('lr', LogisticRegression())
+folio.add_sklearn('svm', SVC())
+folio.add_sklearn('xgb', xgb.XGBClassifier())
+folio.add_sklearn('lgb', lgb.LGBMRegressor())
+</code></pre>
+<h3 id="custom-transformers-with-skops">Custom Transformers with Skops</h3>
+<p>When you create <strong>custom transformers</strong> for sklearn pipelines, you need to use the <code>custom=True</code> flag to enable <a href="https://skops.readthedocs.io/">skops</a> serialization. This makes your pipelines portable across different environments.</p>
+<h4 id="why-use-skops">Why Use Skops?</h4>
+<p><strong>Use skops (<code>custom=True</code>) when:</strong>
+- Your pipeline contains custom transformers (not from sklearn/standard libraries)
+- You need to deploy models to environments without access to your class definitions
+- You want more secure model serialization for production
+- You're sharing models with collaborators who may not have your codebase</p>
+<p><strong>Use joblib (default) when:</strong>
+- All components are from standard libraries (sklearn, XGBoost, LightGBM, etc.)
+- You're working within a single environment/codebase
+- You prioritize speed over portability</p>
+<h4 id="creating-custom-transformers">Creating Custom Transformers</h4>
+<p><strong>The key requirement:</strong> Custom transformers MUST inherit from sklearn's base classes.</p>
+<pre><code class="language-python">from sklearn.base import BaseEstimator, TransformerMixin
+import numpy as np
+
+# ✅ CORRECT - Inherits from sklearn base classes
+class PercentileClipper(BaseEstimator, TransformerMixin):
+    &quot;&quot;&quot;Custom transformer that clips values to percentile bounds.&quot;&quot;&quot;
+
+    def __init__(self, lower=1, upper=99):
+        &quot;&quot;&quot;Initialize with percentile bounds.
+
+        Args:
+            lower: Lower percentile bound (default: 1)
+            upper: Upper percentile bound (default: 99)
+        &quot;&quot;&quot;
+        self.lower = lower
+        self.upper = upper
+
+    def fit(self, X, y=None):
+        &quot;&quot;&quot;Fit by computing percentile bounds.
+
+        Args:
+            X: Training data
+            y: Target values (ignored)
+
+        Returns:
+            self
+        &quot;&quot;&quot;
+        self.lower_bound_ = np.percentile(X, self.lower, axis=0)
+        self.upper_bound_ = np.percentile(X, self.upper, axis=0)
+        return self
+
+    def transform(self, X):
+        &quot;&quot;&quot;Transform by clipping to percentile bounds.
+
+        Args:
+            X: Data to transform
+
+        Returns:
+            Clipped data
+        &quot;&quot;&quot;
+        return np.clip(X, self.lower_bound_, self.upper_bound_)
+
+
+# ❌ WRONG - Plain class without sklearn mixins
+class BadTransformer:
+    &quot;&quot;&quot;This won't work with skops!&quot;&quot;&quot;
+
+    def fit(self, X, y=None):
+        return self
+
+    def transform(self, X):
+        return X
+</code></pre>
+<h4 id="why-inherit-from-baseestimator-and-transformermixin">Why Inherit from BaseEstimator and TransformerMixin?</h4>
+<p>These mixins provide essential sklearn functionality:</p>
+<p><strong><code>BaseEstimator</code> provides:</strong>
+- <code>get_params()</code> - Required by sklearn for introspection
+- <code>set_params()</code> - Required by sklearn for hyperparameter tuning
+- Ensures your transformer works with GridSearchCV, RandomizedSearchCV, etc.</p>
+<p><strong><code>TransformerMixin</code> provides:</strong>
+- <code>fit_transform()</code> - Convenience method that calls fit() then transform()
+- Ensures your transformer works seamlessly in pipelines</p>
+<p><strong>Required for skops:</strong>
+- Skops needs these methods to properly serialize and deserialize your custom classes
+- Without them, skops cannot reconstruct your transformer when loading</p>
+<h4 id="using-custom-transformers-in-pipelines">Using Custom Transformers in Pipelines</h4>
+<pre><code class="language-python">from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LogisticRegression
+
+# Create pipeline with custom transformer
+pipeline = Pipeline([
+    ('clipper', PercentileClipper(lower=5, upper=95)),
+    ('scaler', StandardScaler()),
+    ('clf', LogisticRegression())
+])
+
+# Fit pipeline
+X_train = np.random.randn(100, 5)
+y_train = np.random.randint(0, 2, 100)
+pipeline.fit(X_train, y_train)
+
+# Save with skops format
+folio.add_sklearn('custom_pipeline', pipeline,
+    custom=True,  # ← Important! Enables skops
+    description='Pipeline with custom percentile clipper',
+    inputs=['training_data'])
+
+# Load in a different environment
+# No need for PercentileClipper class definition!
+folio2 = DataFolio('experiments/my_experiment')
+loaded_pipeline = folio2.get_sklearn('custom_pipeline')
+predictions = loaded_pipeline.predict(X_test)
+</code></pre>
+<h4 id="best-practices-for-custom-transformers">Best Practices for Custom Transformers</h4>
+<p><strong>1. Always inherit from sklearn base classes</strong></p>
+<pre><code class="language-python">from sklearn.base import BaseEstimator, TransformerMixin
+
+class MyTransformer(BaseEstimator, TransformerMixin):
+    # Your implementation
+    pass
+</code></pre>
+<p><strong>2. Store all parameters in <code>__init__</code></strong></p>
+<pre><code class="language-python">def __init__(self, threshold=0.5, method='mean'):
+    # Store ALL parameters - required for get_params()
+    self.threshold = threshold
+    self.method = method
+</code></pre>
+<p><strong>3. Store fitted parameters with trailing underscore</strong></p>
+<pre><code class="language-python">def fit(self, X, y=None):
+    # Fitted parameters end with underscore (sklearn convention)
+    self.mean_ = np.mean(X)
+    self.std_ = np.std(X)
+    return self
+</code></pre>
+<p><strong>4. Always return <code>self</code> from <code>fit()</code></strong></p>
+<pre><code class="language-python">def fit(self, X, y=None):
+    # Do fitting...
+    return self  # ← Required for sklearn API
+</code></pre>
+<p><strong>5. Make <code>transform()</code> stateless</strong></p>
+<pre><code class="language-python">def transform(self, X):
+    # Only use fitted parameters (those ending with _)
+    # Don't modify instance state here
+    return (X - self.mean_) / self.std_
+</code></pre>
+<h4 id="serialization-format-comparison">Serialization Format Comparison</h4>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Joblib (default)</th>
+<th>Skops (<code>custom=True</code>)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Speed</strong></td>
+<td>Faster</td>
+<td>Slightly slower</td>
+</tr>
+<tr>
+<td><strong>Portability</strong></td>
+<td>Requires class definitions</td>
+<td>Self-contained</td>
+</tr>
+<tr>
+<td><strong>Use case</strong></td>
+<td>Standard libraries only</td>
+<td>Custom transformers</td>
+</tr>
+<tr>
+<td><strong>Security</strong></td>
+<td>Less secure</td>
+<td>More secure</td>
+</tr>
+<tr>
+<td><strong>Deployment</strong></td>
+<td>Need codebase</td>
+<td>Standalone</td>
+</tr>
+</tbody>
+</table>
+<pre><code class="language-python"># Joblib format (default)
+folio.add_sklearn('model', pipeline)
+# → Saves as .joblib
+# → Fast but requires class definitions
+
+# Skops format (portable)
+folio.add_sklearn('model', pipeline, custom=True)
+# → Saves as .skops
+# → Self-contained, works without class definitions
+</code></pre>
+<h3 id="complete-example-custom-transformer-pipeline">Complete Example: Custom Transformer Pipeline</h3>
+<pre><code class="language-python">from datafolio import DataFolio
+from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LogisticRegression
+import numpy as np
+
+# Define custom transformer
+class OutlierClipper(BaseEstimator, TransformerMixin):
+    &quot;&quot;&quot;Clips outliers based on IQR method.&quot;&quot;&quot;
+
+    def __init__(self, iqr_multiplier=1.5):
+        self.iqr_multiplier = iqr_multiplier
+
+    def fit(self, X, y=None):
+        q1 = np.percentile(X, 25, axis=0)
+        q3 = np.percentile(X, 75, axis=0)
+        iqr = q3 - q1
+
+        self.lower_bound_ = q1 - self.iqr_multiplier * iqr
+        self.upper_bound_ = q3 + self.iqr_multiplier * iqr
+        return self
+
+    def transform(self, X):
+        return np.clip(X, self.lower_bound_, self.upper_bound_)
+
+# Create and train pipeline
+pipeline = Pipeline([
+    ('outlier_clipper', OutlierClipper(iqr_multiplier=1.5)),
+    ('scaler', StandardScaler()),
+    ('classifier', LogisticRegression(random_state=42))
+])
+
+# Generate training data
+X_train = np.random.randn(200, 10)
+y_train = np.random.randint(0, 2, 200)
+
+# Fit pipeline
+pipeline.fit(X_train, y_train)
+
+# Save with skops
+folio = DataFolio('experiments/outlier_detection')
+folio.add_sklearn('pipeline', pipeline,
+    custom=True,  # Enable skops for custom transformer
+    description='Logistic regression with IQR-based outlier clipping',
+    inputs=['training_data'],
+    hyperparameters={
+        'iqr_multiplier': 1.5,
+        'random_state': 42
+    })
+
+# Later: Load and use (even without OutlierClipper class!)
+folio2 = DataFolio('experiments/outlier_detection')
+loaded_pipeline = folio2.get_sklearn('pipeline')
+
+# Make predictions
+X_test = np.random.randn(50, 10)
+predictions = loaded_pipeline.predict(X_test)
+probabilities = loaded_pipeline.predict_proba(X_test)
+
+print(f&quot;Predictions: {predictions[:5]}&quot;)
+print(f&quot;Probabilities: {probabilities[:5]}&quot;)
+</code></pre>
+<h2 id="model-metadata">Model Metadata</h2>
+<p>Add rich metadata to track model provenance:</p>
+<pre><code class="language-python">folio.add_sklearn('classifier', model,
+    description='Random forest with balanced class weights',
+    inputs=['processed_features', 'labels'],
+    hyperparameters={
+        'n_estimators': 100,
+        'max_depth': 10,
+        'class_weight': 'balanced',
+        'random_state': 42
+    },
+    code='''
+    clf = RandomForestClassifier(
+        n_estimators=100,
+        max_depth=10,
+        class_weight='balanced',
+        random_state=42
+    )
+    clf.fit(X_train, y_train)
+    ''')
+</code></pre>
+<h2 id="loading-models">Loading Models</h2>
+<p>All models can be loaded with type-specific or generic methods:</p>
+<pre><code class="language-python"># Type-specific method
+clf = folio.get_sklearn('classifier')
+
+# Generic method (delegates to get_sklearn)
+clf = folio.get_model('classifier')
+
+# Data accessor (autocomplete-friendly)
+clf = folio.data.classifier.content
+</code></pre>
+<h2 id="common-patterns">Common Patterns</h2>
+<h3 id="ab-testing-models">A/B Testing Models</h3>
+<pre><code class="language-python"># Train baseline
+baseline = RandomForestClassifier(n_estimators=50)
+baseline.fit(X_train, y_train)
+
+# Train variant
+variant = RandomForestClassifier(n_estimators=200)
+variant.fit(X_train, y_train)
+
+# Save both
+folio.add_sklearn('baseline', baseline)
+folio.add_sklearn('variant', variant)
+
+# Compare
+baseline_score = folio.data.baseline.content.score(X_test, y_test)
+variant_score = folio.data.variant.content.score(X_test, y_test)
+
+# Deploy winner
+if variant_score &gt; baseline_score:
+    production_model = folio.get_sklearn('variant')
+else:
+    production_model = folio.get_sklearn('baseline')
+</code></pre>
+<h3 id="pipeline-versioning">Pipeline Versioning</h3>
+<pre><code class="language-python"># Version 1: Simple pipeline
+v1_pipeline = Pipeline([
+    ('scaler', StandardScaler()),
+    ('clf', LogisticRegression())
+])
+v1_pipeline.fit(X_train, y_train)
+folio.add_sklearn('pipeline_v1', v1_pipeline)
+
+# Version 2: Added custom preprocessing
+v2_pipeline = Pipeline([
+    ('clipper', PercentileClipper()),  # Custom transformer
+    ('scaler', StandardScaler()),
+    ('clf', LogisticRegression())
+])
+v2_pipeline.fit(X_train, y_train)
+folio.add_sklearn('pipeline_v2', v2_pipeline, custom=True)  # Need skops!
+
+# Compare versions
+v1_score = folio.data.pipeline_v1.content.score(X_test, y_test)
+v2_score = folio.data.pipeline_v2.content.score(X_test, y_test)
+</code></pre>
+<h3 id="hyperparameter-tuning-archive">Hyperparameter Tuning Archive</h3>
+<pre><code class="language-python">from sklearn.model_selection import ParameterGrid
+
+# Define grid
+param_grid = {
+    'n_estimators': [50, 100, 200],
+    'max_depth': [5, 10, 20]
+}
+
+# Try all combinations
+for params in ParameterGrid(param_grid):
+    model = RandomForestClassifier(**params)
+    model.fit(X_train, y_train)
+    score = model.score(X_test, y_test)
+
+    # Save each model
+    name = f&quot;rf_n{params['n_estimators']}_d{params['max_depth']}&quot;
+    folio.add_sklearn(name, model,
+        hyperparameters=params,
+        description=f&quot;RF with {params['n_estimators']} trees, depth {params['max_depth']}&quot;)
+
+    # Track score in metadata
+    folio._items[name]['test_score'] = score
+
+# Find best model
+best_name = max(folio.models,
+    key=lambda name: folio._items[name].get('test_score', 0))
+best_model = folio.get_sklearn(best_name)
+print(f&quot;Best model: {best_name}&quot;)
+print(f&quot;Score: {folio._items[best_name]['test_score']}&quot;)
+</code></pre>
+<h2 id="faq">FAQ</h2>
+<p><strong>Q: When should I use <code>custom=True</code>?</strong></p>
+<p>A: Use it when your pipeline contains custom transformers (classes you wrote). Standard sklearn/XGBoost/LightGBM models don't need it.</p>
+<p><strong>Q: Can I mix joblib and skops models in the same bundle?</strong></p>
+<p>A: Yes! DataFolio automatically detects the format when loading. You can have some models saved with joblib and others with skops.</p>
+<p><strong>Q: Do I need to install skops?</strong></p>
+<p>A: Only if you use <code>custom=True</code>. For standard models (joblib format), skops is not required.</p>
+<p><strong>Q: Can I convert a joblib model to skops?</strong></p>
+<p>A: Yes, just load and re-save with <code>custom=True</code>:</p>
+<pre><code class="language-python">model = folio.get_sklearn('old_model')
+folio.add_sklearn('new_model', model, custom=True)
+</code></pre>
+<p><strong>Q: What if I don't inherit from BaseEstimator/TransformerMixin?</strong></p>
+<p>A: Skops serialization will fail. Always inherit from these classes for custom transformers.</p>
+<p><strong>Q: How do I know which format a model uses?</strong></p>
+<p>A: Check the metadata:</p>
+<pre><code class="language-python">print(folio._items['model_name']['serialization_format'])  # 'joblib' or 'skops'
+print(folio._items['model_name']['filename'])  # ends in .joblib or .skops
+</code></pre>
+<h2 id="next-steps">Next Steps</h2>
+<ul>
+<li><a href="../getting-started/">Getting Started Guide</a> - Complete tutorial</li>
+<li><a href="../../reference/datafolio-api/">API Reference</a> - Method documentation</li>
+<li><a href="../snapshots/">Snapshots</a> - Version control for models</li>
+<li><a href="https://github.com/ceesem/datafolio/tree/main/examples">GitHub Examples</a> - More examples</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      <script id="__config" type="application/json">{"base": "../..", "features": ["navigation.indexes", "navigation.instant", "navigation.prune", "navigation.tabs", "navigation.tabs.sticky", "toc.follow", "toc.integrate", "navigation.top", "search.suggest", "search.highlight", "search.share", "content.code.copy", "header.autohide"], "search": "../../assets/javascripts/workers/search.973d3a69.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.f55a23d4.min.js"></script>
+      
+    
+  </body>
+</html>
