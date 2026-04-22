@@ -98,7 +98,7 @@ DataFolio supports multiple data types, each optimized for its use case:
 
 | Type | Examples | Storage Format |
 |------|----------|---------------|
-| **Tables** | DataFrames | Parquet |
+| **Tables** | pandas / Polars DataFrames | Parquet |
 | **Numpy Arrays** | Embeddings, tensors | `.npy` |
 | **JSON** | Configs, metrics, lists | `.json` |
 | **Models** | sklearn | `.joblib`, `.skops` |
@@ -135,7 +135,7 @@ folio.add_model('clf', model, description='Random forest')
 import pandas as pd
 import numpy as np
 
-# Tables (DataFrames)
+# Tables (pandas or Polars DataFrames)
 df = pd.DataFrame({'x': [1, 2, 3], 'y': [4, 5, 6]})
 folio.add_table('data', df,
     description='Experimental data',

@@ -3102,7 +3102,7 @@ For more information, see the [datafolio documentation](https://github.com/ceese
     def add_table(
         self,
         name: str,
-        data: Any,  # pandas.DataFrame
+        data: Any,  # pandas or Polars DataFrame
         description: Optional[str] = None,
         overwrite: bool = False,
         inputs: Optional[list[str]] = None,
@@ -3115,7 +3115,7 @@ For more information, see the [datafolio documentation](https://github.com/ceese
 
         Args:
             name: Unique name for this table
-            data: DataFrame to include
+            data: pandas or Polars DataFrame to include
             description: Optional description
             overwrite: If True, allow overwriting existing table (default: False)
             inputs: Optional list of table names used to create this table

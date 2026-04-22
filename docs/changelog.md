@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.3.0
+
+### Polars DataFrame Support
+
+- `add_table()` and `get_table()` now accept **Polars DataFrames** in addition to pandas DataFrames.
+- Serialization now routes through **PyArrow** for both libraries, preserving exact column types such as nullable `Int64` and struct fields that were previously degraded via `pandas.to_parquet`.
+- `PandasHandler` renamed to `DataframeHandler`; `PandasHandler` remains as a backward-compatible alias.
+
+## 1.2.0
+
+### Generic Path Methods
+
+- **`get_data_path(name)`** refactored into a universal dispatcher: works for all item types (tables, models, arrays, JSON, timestamps, artifacts) rather than only referenced tables.
+- **New type-specific path methods**: `get_table_path()`, `get_model_path()`, `get_numpy_path()`, `get_json_path()`, `get_timestamp_path()` — each returns the full path to the stored file for that item type.
+- **`get_table_path()`** now works for both included and referenced tables. Previously `get_data_path()` raised an error for included tables; now it returns the parquet file path inside the bundle.
+
 ## 1.1.0
 
 ### Item Curation
