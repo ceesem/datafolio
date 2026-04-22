@@ -145,7 +145,7 @@ class TestAddTable:
         """Test error with non-DataFrame input."""
         folio = DataFolio(tmp_path / "test")
 
-        with pytest.raises(TypeError, match="Expected pandas DataFrame"):
+        with pytest.raises(TypeError, match="Expected a pandas or Polars DataFrame"):
             folio.add_table("test", [1, 2, 3])
 
     def test_add_table_appears_in_list_contents(self, tmp_path):
