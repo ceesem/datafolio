@@ -308,6 +308,34 @@ class TestParquetIO:
         with pytest.raises(Exception):  # pandas raises various exceptions
             storage.read_parquet(str(temp_dir / "nonexistent.parquet"))
 
+    def test_write_read_parquet_nullable_integers(self, storage, temp_dir):
+        """Test that nullable integer columns survive a parquet round-trip."""
+        df = pd.DataFrame(
+            {"id": pd.array([1, None, 3], dtype="Int64"), "val": ["a", "b", "c"]}
+        )
+        parquet_file = temp_dir / "nullable.parquet"
+
+        storage.write_parquet(str(parquet_file), df)
+        result = storage.read_parquet(str(parquet_file))
+
+        assert not str(result["id"].dtype).startswith("float"), (
+            f"nullable int column was demoted to {result['id'].dtype}"
+        )
+        assert result["id"].isna().sum() == 1
+
+    def test_write_read_parquet_arrow_table(self, storage, temp_dir):
+        """Test that a pyarrow.Table can be written and read back correctly."""
+        import pyarrow as pa
+
+        table = pa.table({"x": [1, 2, 3], "y": ["a", "b", "c"]})
+        parquet_file = temp_dir / "arrow.parquet"
+
+        storage.write_parquet(str(parquet_file), table)
+        result = storage.read_parquet(str(parquet_file))
+
+        assert list(result.columns) == ["x", "y"]
+        assert list(result["x"]) == [1, 2, 3]
+
 
 # ============================================================================
 # Joblib I/O

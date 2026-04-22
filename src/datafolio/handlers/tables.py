@@ -1,4 +1,4 @@
-"""Table handlers for pandas DataFrames and external references."""
+"""Table handlers for DataFrames and external references."""
 
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Dict, Optional
@@ -10,22 +10,23 @@ if TYPE_CHECKING:
     from datafolio.folio import DataFolio
 
 
-class PandasHandler(BaseHandler):
-    """Handler for pandas DataFrames (included in bundle).
+class DataframeHandler(BaseHandler):
+    """Handler for tabular DataFrames (included in bundle).
 
-    This handler manages the full lifecycle of DataFrame storage:
-    - Serializes DataFrames to Parquet format
-    - Stores metadata (shape, columns, dtypes)
-    - Handles lineage tracking
-    - Deserializes back to DataFrame on read
+    Accepts pandas and Polars DataFrames. Each library has its own private
+    conversion path to PyArrow, which is then written directly to Parquet
+    without any intermediate type degradation.
+
+    Adding support for a new DataFrame library means implementing a
+    ``_<lib>_to_arrow`` classmethod and adding a branch in ``_to_arrow``.
 
     Examples:
         >>> from datafolio.base.registry import register_handler
-        >>> handler = PandasHandler()
+        >>> handler = DataframeHandler()
         >>> register_handler(handler)
         >>>
-        >>> # Handler is used automatically by DataFolio
-        >>> folio.add_table('data', df)  # Uses PandasHandler internally
+        >>> folio.add_table('data', polars_df)   # Polars DataFrame
+        >>> folio.add_table('data', pandas_df)   # pandas DataFrame
     """
 
     @property
@@ -33,21 +34,60 @@ class PandasHandler(BaseHandler):
         """Return item type identifier."""
         return "included_table"
 
-    def can_handle(self, data: Any) -> bool:
-        """Check if data is a pandas DataFrame.
+    # ── type detection ────────────────────────────────────────────────────────
 
-        Args:
-            data: Data to check
-
-        Returns:
-            True if data is a pandas DataFrame
-        """
+    @staticmethod
+    def _is_pandas(data: Any) -> bool:
         try:
             import pandas as pd
 
             return isinstance(data, pd.DataFrame)
         except ImportError:
             return False
+
+    @staticmethod
+    def _is_polars(data: Any) -> bool:
+        try:
+            import polars as pl
+
+            return isinstance(data, pl.DataFrame)
+        except ImportError:
+            return False
+
+    def can_handle(self, data: Any) -> bool:
+        """Return True for pandas or Polars DataFrames."""
+        return self._is_pandas(data) or self._is_polars(data)
+
+    # ── Arrow conversion ──────────────────────────────────────────────────────
+
+    @staticmethod
+    def _pandas_to_arrow(data: Any) -> Any:
+        import pyarrow as pa
+
+        return pa.Table.from_pandas(data, preserve_index=False)
+
+    @staticmethod
+    def _polars_to_arrow(data: Any) -> Any:
+        return data.to_arrow()
+
+    @classmethod
+    def _to_arrow(cls, data: Any) -> Any:
+        """Convert a supported DataFrame to a PyArrow Table.
+
+        Each library has its own conversion path to preserve exact column types.
+
+        Raises:
+            TypeError: If data is not a supported DataFrame type.
+        """
+        if cls._is_polars(data):
+            return cls._polars_to_arrow(data)
+        if cls._is_pandas(data):
+            return cls._pandas_to_arrow(data)
+        raise TypeError(
+            f"Expected a pandas or Polars DataFrame, got {type(data).__name__}"
+        )
+
+    # ── storage ───────────────────────────────────────────────────────────────
 
     def add(
         self,
@@ -59,47 +99,36 @@ class PandasHandler(BaseHandler):
         table_format: str = "parquet",
         **kwargs,
     ) -> Dict[str, Any]:
-        """Add DataFrame to folio.
+        """Add a DataFrame to the folio.
 
-        Writes the DataFrame to storage and builds complete metadata including:
-        - Basic info: filename, row/column counts
-        - Schema: column names and dtypes
-        - Lineage: inputs and description
-        - Timestamps: creation time
+        Converts the DataFrame to a PyArrow Table and writes it to Parquet,
+        preserving exact column types (Int64, struct fields, etc.).
 
         Args:
-            folio: DataFolio instance
-            name: Item name
-            data: pandas DataFrame to store
-            description: Optional description
-            inputs: Optional lineage inputs
-            table_format: Format for storage (default: 'parquet')
-            **kwargs: Additional arguments (currently unused)
+            folio: DataFolio instance.
+            name: Item name.
+            data: pandas or Polars DataFrame to store.
+            description: Optional description.
+            inputs: Optional lineage inputs.
+            table_format: Storage format (default: ``'parquet'``).
 
         Returns:
-            Complete metadata dict for this table
+            Metadata dict for this table.
 
         Raises:
-            TypeError: If data is not a pandas DataFrame
+            TypeError: If data is not a supported DataFrame type.
         """
-        import pandas as pd
+        arrow_table = self._to_arrow(data)
 
-        if not isinstance(data, pd.DataFrame):
-            raise TypeError(f"Expected pandas DataFrame, got {type(data).__name__}")
-
-        # Build filename
         extension = get_file_extension(table_format)
         filename = f"{name}{extension}"
         subdir = self.get_storage_subdir()
         filepath = folio._storage.join_paths(folio._bundle_dir, subdir, filename)
 
-        # Write data to storage
-        folio._storage.write_parquet(filepath, data)
+        folio._storage.write_parquet(filepath, arrow_table)
 
-        # Calculate checksum
         checksum = folio._storage.calculate_checksum(filepath)
 
-        # Build comprehensive metadata
         metadata = {
             "name": name,
             "item_type": self.item_type,
@@ -107,14 +136,13 @@ class PandasHandler(BaseHandler):
             "table_format": table_format,
             "is_directory": False,
             "checksum": checksum,
-            "num_rows": len(data),
-            "num_cols": len(data.columns),
-            "columns": list(data.columns),
-            "dtypes": {col: str(dtype) for col, dtype in data.dtypes.items()},
+            "num_rows": arrow_table.num_rows,
+            "num_cols": arrow_table.num_columns,
+            "columns": arrow_table.schema.names,
+            "dtypes": {field.name: str(field.type) for field in arrow_table.schema},
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
 
-        # Add optional fields
         if description:
             metadata["description"] = description
         if inputs:
@@ -277,3 +305,7 @@ class ReferenceTableHandler(BaseHandler):
         """
         # References have no local files to delete
         pass
+
+
+# Backward-compatible alias
+PandasHandler = DataframeHandler

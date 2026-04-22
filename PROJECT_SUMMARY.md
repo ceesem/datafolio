@@ -7,4 +7,3 @@
 - **Why it exists**: Needed a zero-infrastructure way to keep experiment outputs organized and reproducible without adopting a full experiment tracking platform. Most alternatives either require a server, impose rigid directory conventions, or don't handle the mix of tables + models + metadata that a typical analysis produces.
 - **Key design decisions**: Handler-based architecture makes it easy to add new data types. Storage is plain files (no proprietary formats) with a backend abstraction that makes local and cloud paths interchangeable. Auto-detection of data types via `add_data()`/`get_data()` keeps the API surface small. Snapshots provide immutable checkpoints with copy-on-write.
 - **Maturity**: Active development, 423 tests at 79% coverage. Used in internal workflows. API is stabilizing but not yet frozen.
-$$

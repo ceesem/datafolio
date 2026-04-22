@@ -342,19 +342,34 @@ class StorageBackend:
     # =========================================================================
 
     def write_parquet(self, path: str, df: Any) -> None:
-        """Write DataFrame to parquet (local or cloud).
+        """Write DataFrame or PyArrow Table to parquet (local or cloud).
+
+        Uses PyArrow directly to preserve nullable integer types (e.g. Int64)
+        that pandas would otherwise demote to float64 via NaN encoding.
 
         Args:
             path: File path
-            df: pandas DataFrame
+            df: pandas DataFrame or pyarrow.Table
 
         Examples:
             >>> storage = StorageBackend()
             >>> storage.write_parquet('/path/to/data.parquet', df)
         """
-        self._ensure_parent_dir(path)
-        # pandas.to_parquet handles cloud paths if fsspec/cloud libs installed
-        df.to_parquet(path, index=False)
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        if isinstance(df, pa.Table):
+            table = df
+        else:
+            table = pa.Table.from_pandas(df, preserve_index=False)
+
+        if is_cloud_path(path):
+            buffer = io.BytesIO()
+            pq.write_table(table, buffer)
+            self._cloud_write_bytes(path, buffer.getvalue())
+        else:
+            self._ensure_parent_dir(path)
+            pq.write_table(table, path)
 
     def read_parquet(self, path: str, **kwargs) -> Any:
         """Read parquet file to DataFrame (local or cloud).
