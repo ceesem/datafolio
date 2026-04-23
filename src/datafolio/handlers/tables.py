@@ -125,7 +125,10 @@ class DataframeHandler(BaseHandler):
         subdir = self.get_storage_subdir()
         filepath = folio._storage.join_paths(folio._bundle_dir, subdir, filename)
 
-        folio._storage.write_parquet(filepath, arrow_table)
+        # Pass the original data so StorageBackend can use the native writer
+        # (e.g. Polars' own writer for Polars DataFrames, which produces parquet
+        # statistics that Polars' predicate-pushdown engine can parse correctly).
+        folio._storage.write_parquet(filepath, data)
 
         checksum = folio._storage.calculate_checksum(filepath)
 

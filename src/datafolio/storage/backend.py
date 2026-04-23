@@ -342,19 +342,35 @@ class StorageBackend:
     # =========================================================================
 
     def write_parquet(self, path: str, df: Any) -> None:
-        """Write DataFrame or PyArrow Table to parquet (local or cloud).
+        """Write a DataFrame or PyArrow Table to parquet (local or cloud).
 
-        Uses PyArrow directly to preserve nullable integer types (e.g. Int64)
-        that pandas would otherwise demote to float64 via NaN encoding.
+        Polars DataFrames are written with Polars' own writer so that the
+        resulting parquet statistics are readable by Polars' predicate-pushdown
+        engine. Pandas DataFrames and PyArrow Tables are written via PyArrow.
 
         Args:
             path: File path
-            df: pandas DataFrame or pyarrow.Table
+            df: Polars DataFrame, pandas DataFrame, or pyarrow.Table
 
         Examples:
             >>> storage = StorageBackend()
             >>> storage.write_parquet('/path/to/data.parquet', df)
         """
+        try:
+            import polars as pl
+
+            if isinstance(df, pl.DataFrame):
+                if is_cloud_path(path):
+                    buffer = io.BytesIO()
+                    df.write_parquet(buffer)
+                    self._cloud_write_bytes(path, buffer.getvalue())
+                else:
+                    self._ensure_parent_dir(path)
+                    df.write_parquet(path)
+                return
+        except ImportError:
+            pass
+
         import pyarrow as pa
         import pyarrow.parquet as pq
 
