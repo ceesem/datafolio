@@ -3,7 +3,7 @@ _commit: 1.0.9
 _src_path: gh:ceesem/cave-copier
 directory_name: datafolio
 github_user: ceesem
-initial_version: 0.0.1
+initial_version: 1.3.0
 project_description: Lightweight wrapping of dataframes, models, and metadata to track analyses.
 project_name: DataFolio
 project_slug: datafolio

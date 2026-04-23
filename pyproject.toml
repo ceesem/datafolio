@@ -7,7 +7,7 @@ name = "datafolio"
 version = "1.3.0"
 description = "Lightweight wrapping of dataframes, models, and metadata to track analyses."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "pandas>=2.0.0",
     "pyarrow>=14.0.0",
