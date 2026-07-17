@@ -1,6 +1,7 @@
 """Utility functions for datafolio."""
 
 import random
+import re
 from pathlib import Path
 from typing import Any, Optional, Union
 
@@ -556,48 +557,67 @@ def make_bundle_name(prefix: Optional[str] = None) -> str:
     return random_suffix
 
 
-def validate_item_name(name: str) -> None:
-    """Validate that an item name is safe for use with snapshots.
+# One item-name segment: starts with an alphanumeric, then alphanumerics,
+# dots, underscores, or hyphens. Segments are joined by '/' for namespacing
+# (e.g. 'examples/weights'), which glob patterns in describe()/archive() rely
+# on. The grammar deliberately excludes anything that could escape the bundle
+# when the name becomes part of a payload filename ('..', absolute paths,
+# separators inside a segment) and leading underscores (reserved so item names
+# can never shadow internals on the ``folio.data`` accessor).
+_ITEM_NAME_SEGMENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
-    The '@' symbol is reserved as a delimiter for snapshot versioning
-    (e.g., 'model@v1.0.joblib'), so it cannot appear in item names.
+
+def validate_item_name(name: str) -> None:
+    """Validate that an item name is safe as a manifest key and filename part.
+
+    Item names may be namespaced with '/' (e.g. ``'examples/weights'``); each
+    '/'-separated segment must start with a letter or digit and contain only
+    letters, digits, ``.``, ``_``, and ``-``. Names must not contain ``..``
+    segments, start with ``/`` or ``_``, or contain ``@`` (reserved as the
+    snapshot version delimiter).
 
     Args:
         name: Item name to validate
 
     Raises:
-        ValueError: If name contains '@' symbol or is invalid
+        TypeError: If name is not a string
+        ValueError: If the name violates the grammar
 
     Examples:
-        >>> validate_item_name('my_model')  # OK
-        >>> validate_item_name('model-v1')  # OK
-        >>> validate_item_name('my@model')  # Raises ValueError
+        >>> validate_item_name('my_model')      # OK
+        >>> validate_item_name('model-v1.2')    # OK
+        >>> validate_item_name('examples/run1') # OK (namespaced)
+        >>> validate_item_name('../escape')     # Raises ValueError
         Traceback (most recent call last):
             ...
-        ValueError: Item name 'my@model' cannot contain '@' symbol (reserved for snapshots)
+        ValueError: Invalid item name '../escape': segment '..' must start with a letter or digit and contain only letters, digits, '.', '_', and '-'
     """
-    if not name:
-        raise ValueError("Item name cannot be empty")
-
     if not isinstance(name, str):
         raise TypeError(f"Item name must be a string, got {type(name).__name__}")
 
-    # Strip whitespace for validation
-    name_stripped = name.strip()
-    if name != name_stripped:
-        raise ValueError(
-            f"Item name '{name}' cannot have leading or trailing whitespace"
-        )
+    if not name:
+        raise ValueError("Item name cannot be empty")
 
-    # Check for @ symbol (reserved for snapshot delimiter)
     if "@" in name:
         raise ValueError(
             f"Item name '{name}' cannot contain '@' symbol (reserved for snapshots)"
         )
 
-    # Check reasonable length
     if len(name) > 255:
         raise ValueError(f"Item name '{name}' is too long (max 255 characters)")
+
+    for segment in name.split("/"):
+        if segment in ("", ".", ".."):
+            raise ValueError(
+                f"Invalid item name '{name}': empty, '.', or '..' path "
+                f"segments are not allowed"
+            )
+        if not _ITEM_NAME_SEGMENT.match(segment):
+            raise ValueError(
+                f"Invalid item name '{name}': segment '{segment}' must start "
+                f"with a letter or digit and contain only letters, digits, "
+                f"'.', '_', and '-'"
+            )
 
 
 def validate_snapshot_name(name: str) -> None:

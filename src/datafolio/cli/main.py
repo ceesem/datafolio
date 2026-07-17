@@ -604,8 +604,8 @@ def snapshot_status(ctx):
             console.print("  datafolio snapshot create v1.0 -d 'Initial snapshot'")
             return
 
-        # Get last snapshot
-        last_snapshot = snapshots[-1]
+        # Get last snapshot (list_snapshots() sorts newest-first)
+        last_snapshot = snapshots[0]
 
         # Format timestamp
         timestamp = last_snapshot.get("timestamp", "")
@@ -879,14 +879,22 @@ def init(ctx, path, description, name):
     try:
         from pathlib import Path
 
-        # Use provided path or current directory
-        if path:
+        from datafolio.utils import is_cloud_path
+
+        # Use provided path or current directory. Cloud URIs must stay
+        # strings: Path.resolve() would mangle 'gs://bucket/x' into a local
+        # './gs:/bucket/x' path.
+        is_cloud = bool(path) and is_cloud_path(str(path))
+        if is_cloud:
+            bundle_path = str(path).rstrip("/")
+        elif path:
             bundle_path = Path(path).resolve()
         else:
             bundle_path = Path.cwd()
 
-        # Check if bundle already exists
-        if (bundle_path / "items.json").exists():
+        # Check if bundle already exists (local only; for cloud paths
+        # DataFolio detects and opens an existing bundle itself)
+        if not is_cloud and (bundle_path / "items.json").exists():
             console.print(
                 f"[yellow]⚠ Warning:[/yellow] Bundle already exists at {bundle_path}"
             )
@@ -899,7 +907,7 @@ def init(ctx, path, description, name):
 
         # Determine bundle name
         if name is None:
-            name = bundle_path.name
+            name = str(bundle_path).rstrip("/").rsplit("/", 1)[-1]
 
         # Create the bundle (DataFolio will create the directory)
         folio = DataFolio(

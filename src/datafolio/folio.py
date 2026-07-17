@@ -1454,6 +1454,9 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         """
         while True:
             version_id = self._next_version_id(name)
+            # Namespaced names ('a/b') intentionally map to subdirectories of
+            # the category dir; validate_item_name guarantees no segment can
+            # escape it ('..', absolute paths, and empty segments are rejected).
             filename = f"{version_id}{extension}"
             full = self._storage.join_paths(self._bundle_dir, subdir, filename)
             if not self._storage.exists(full):
@@ -1688,6 +1691,10 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             - remote: Repository URL (sanitized, credentials removed)
             Or None if not a git repository
 
+        The state captured is that of the repository containing the *current
+        working directory* — i.e. the code that is running — not the bundle
+        directory (which is often outside the code repo, or in the cloud).
+
         Security:
             - Git remote URLs like "https://token@github.com/repo.git" are
               automatically cleaned to "https://github.com/repo.git"
@@ -1701,7 +1708,7 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             # Check if we're in a git repo
             result = subprocess.run(
                 ["git", "rev-parse", "--git-dir"],
-                cwd=self._bundle_dir,
+                cwd=Path.cwd(),
                 capture_output=True,
                 text=True,
                 timeout=5,
@@ -1712,7 +1719,7 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             # Get commit hash
             commit_result = subprocess.run(
                 ["git", "rev-parse", "HEAD"],
-                cwd=self._bundle_dir,
+                cwd=Path.cwd(),
                 capture_output=True,
                 text=True,
                 timeout=5,
@@ -1725,7 +1732,7 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             # Get branch name
             branch_result = subprocess.run(
                 ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-                cwd=self._bundle_dir,
+                cwd=Path.cwd(),
                 capture_output=True,
                 text=True,
                 timeout=5,
@@ -1737,7 +1744,7 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             # Get remote URL
             remote_result = subprocess.run(
                 ["git", "config", "--get", "remote.origin.url"],
-                cwd=self._bundle_dir,
+                cwd=Path.cwd(),
                 capture_output=True,
                 text=True,
                 timeout=5,
@@ -1749,7 +1756,7 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             # Check for uncommitted changes (dirty flag only, no file list for security)
             status_result = subprocess.run(
                 ["git", "status", "--porcelain"],
-                cwd=self._bundle_dir,
+                cwd=Path.cwd(),
                 capture_output=True,
                 text=True,
                 timeout=5,
@@ -1775,7 +1782,7 @@ For more information, see the [datafolio documentation](https://github.com/ceese
 
             return git_info
 
-        except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
+        except Exception:
             # Git not available or error occurred
             return None
 
@@ -2178,13 +2185,13 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         """
         # Get snapshot to compare to
         if snapshot is None:
-            # Use most recent snapshot
+            # Use most recent snapshot (list_snapshots() sorts newest-first)
             if not self._snapshots:
                 raise ValueError("No snapshots exist. Create a snapshot first.")
             snapshots_list = self.list_snapshots()
             if not snapshots_list:
                 raise ValueError("No snapshots exist. Create a snapshot first.")
-            snapshot = snapshots_list[-1]["name"]
+            snapshot = snapshots_list[0]["name"]
 
         if snapshot not in self._snapshots:
             raise KeyError(f"Snapshot '{snapshot}' not found")

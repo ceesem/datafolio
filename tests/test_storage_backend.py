@@ -155,9 +155,10 @@ class TestFileSystemCloud:
         assert result is True
 
     def test_exists_cloud_path_false(self, storage):
-        """Test exists() with cloud path that doesn't exist."""
+        """Test exists() with cloud path that doesn't exist (no object, empty prefix)."""
         mock_cf = Mock()
-        mock_cf.list.side_effect = Exception("Not found")
+        mock_cf.exists.return_value = False
+        mock_cf.list.return_value = iter([])
 
         with patch("cloudfiles.CloudFiles", return_value=mock_cf):
             result = storage.exists("s3://bucket/path")
@@ -167,12 +168,28 @@ class TestFileSystemCloud:
     def test_exists_cloud_path_empty(self, storage):
         """Test exists() with cloud path that has no files (empty prefix)."""
         mock_cf = Mock()
-        mock_cf.list.return_value = []
+        mock_cf.exists.return_value = False
+        mock_cf.list.return_value = iter([])
 
         with patch("cloudfiles.CloudFiles", return_value=mock_cf):
             result = storage.exists("s3://bucket/path")
 
         assert result is False
+
+    def test_exists_cloud_error_propagates(self, storage):
+        """A transient cloud error must NOT read as 'does not exist'.
+
+        DataFolio.__init__ uses exists() to decide whether to create a fresh
+        bundle; swallowing an auth/network error here could overwrite a real
+        bundle with an empty one.
+        """
+        mock_cf = Mock()
+        mock_cf.exists.side_effect = Exception("auth failure")
+        mock_cf.list.side_effect = Exception("auth failure")
+
+        with patch("cloudfiles.CloudFiles", return_value=mock_cf):
+            with pytest.raises(Exception, match="auth failure"):
+                storage.exists("s3://bucket/path")
 
     def test_mkdir_cloud_path(self, storage):
         """Test mkdir() with cloud path (should be no-op)."""

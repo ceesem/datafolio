@@ -123,28 +123,25 @@ class StorageBackend:
             return Path(path[7:]).exists()
 
         if is_cloud_path(path):
-            try:
-                from cloudfiles import CloudFiles
+            # Errors are deliberately NOT swallowed here: a transient auth or
+            # network failure must never masquerade as "does not exist" —
+            # DataFolio.__init__ uses this check to decide whether to create a
+            # fresh bundle, and a false negative would overwrite a real one.
+            from cloudfiles import CloudFiles
 
-                # Check if it looks like a file (has extension) or directory
-                if "." in path.split("/")[-1]:
-                    # Looks like a file - use a metadata-only existence check
-                    # (HEAD/stat), never a full object download.
-                    dir_path, filename = self._split_cloud_path(path)
-                    cf = (
-                        CloudFiles(dir_path, use_https=self._use_https)
-                        if dir_path
-                        else CloudFiles(path, use_https=self._use_https)
-                    )
-                    return bool(cf.exists(filename if dir_path else path))
-                else:
-                    # Looks like a directory - check if prefix exists
-                    cf = CloudFiles(path, use_https=self._use_https)
-                    # Try to list - if any items exist, directory exists
-                    items = list(cf.list())
-                    return len(items) > 0
-            except:
-                return False
+            # Exact-object check first (metadata-only HEAD/stat, never a
+            # download). Works for any key, extension or not.
+            dir_path, filename = self._split_cloud_path(path)
+            if dir_path:
+                cf = CloudFiles(dir_path, use_https=self._use_https)
+                if bool(cf.exists(filename)):
+                    return True
+            # Fall back to a prefix check so directories (bundles, sharded
+            # datasets — including ones with dots in the name) are found.
+            # Stop at the first listed object instead of materializing the
+            # full listing.
+            cf = CloudFiles(path, use_https=self._use_https)
+            return next(iter(cf.list()), None) is not None
         else:
             return Path(path).exists()
 
@@ -611,6 +608,31 @@ class StorageBackend:
         """
         import pandas as pd
 
+        if is_cloud_path(path) and not path.startswith("file://"):
+            # Download via cloudfiles (the same credential chain and
+            # use_https setting that wrote the file), then read locally.
+            # Handing the cloud URI to pandas directly would route through
+            # fsspec/s3fs/gcsfs — a different auth stack that may not be
+            # installed or configured even though the bundle is reachable.
+            import tempfile
+
+            content = self._cloud_read_bytes(path)
+            if content is None:
+                raise FileNotFoundError(f"File not found in cloud storage: {path}")
+            tmp_path: Optional[Path] = None
+            try:
+                with tempfile.NamedTemporaryFile(
+                    delete=False, suffix=".parquet"
+                ) as tmp:
+                    tmp.write(content)
+                    tmp_path = Path(tmp.name)
+                return pd.read_parquet(tmp_path, **kwargs)
+            finally:
+                if tmp_path is not None:
+                    tmp_path.unlink(missing_ok=True)
+
+        if path.startswith("file://"):
+            path = path[7:]
         return pd.read_parquet(path, **kwargs)
 
     # =========================================================================
@@ -658,6 +680,8 @@ class StorageBackend:
 
         if is_cloud_path(path):
             data = self._cloud_read_bytes(path)
+            if data is None:
+                raise FileNotFoundError(f"File not found in cloud storage: {path}")
 
             # Deserialize from BytesIO
             buffer = io.BytesIO(data)
@@ -704,6 +728,8 @@ class StorageBackend:
 
         if is_cloud_path(path):
             data = self._cloud_read_bytes(path)
+            if data is None:
+                raise FileNotFoundError(f"File not found in cloud storage: {path}")
         else:
             data = Path(path).read_bytes()
 
@@ -740,13 +766,13 @@ class StorageBackend:
             import tempfile
 
             with tempfile.NamedTemporaryFile(delete=False, suffix=".npy") as tmp:
-                np.save(tmp.name, array)
-                with open(tmp.name, "rb") as f:
-                    content = f.read()
-                # Upload
+                tmp_path = Path(tmp.name)
+            try:
+                np.save(tmp_path, array)
+                content = tmp_path.read_bytes()
                 self._cloud_write_bytes(path, content)
-                # Cleanup
-                Path(tmp.name).unlink()
+            finally:
+                tmp_path.unlink(missing_ok=True)
         else:
             self._ensure_parent_dir(path)
             np.save(path, array)
@@ -778,12 +804,15 @@ class StorageBackend:
             import tempfile
 
             content = self._cloud_read_bytes(path)
+            if content is None:
+                raise FileNotFoundError(f"File not found in cloud storage: {path}")
             with tempfile.NamedTemporaryFile(delete=False, suffix=".npy") as tmp:
-                tmp.write(content)
-                tmp.flush()
-                array = np.load(tmp.name, **kwargs)
-                Path(tmp.name).unlink()
-                return array
+                tmp_path = Path(tmp.name)
+            try:
+                tmp_path.write_bytes(content)
+                return np.load(tmp_path, **kwargs)
+            finally:
+                tmp_path.unlink(missing_ok=True)
         else:
             return np.load(path, **kwargs)
 

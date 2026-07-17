@@ -175,7 +175,7 @@ class TestSanitizeGitRemoteUrl:
 class TestGitUrlSanitizationIntegration:
     """Integration tests for git URL sanitization in snapshot creation."""
 
-    def test_snapshot_sanitizes_git_remote(self, tmp_path):
+    def test_snapshot_sanitizes_git_remote(self, tmp_path, monkeypatch):
         """Test that snapshot creation sanitizes git remote URL."""
         import subprocess
 
@@ -226,7 +226,9 @@ class TestGitUrlSanitizationIntegration:
             check=True,
         )
 
-        # Create snapshot with git capture
+        # Git state is captured from the current working directory (the
+        # code repo), not the bundle dir - run from inside the fixture repo.
+        monkeypatch.chdir(bundle_dir)
         folio.create_snapshot("v1.0", capture_git=True)
 
         # Verify remote is sanitized
@@ -237,7 +239,7 @@ class TestGitUrlSanitizationIntegration:
         assert "token" not in snapshot["git"]["remote"]
         assert "ghp_" not in snapshot["git"]["remote"]
 
-    def test_snapshot_with_clean_remote(self, tmp_path):
+    def test_snapshot_with_clean_remote(self, tmp_path, monkeypatch):
         """Test that clean remote URLs are preserved unchanged."""
         import subprocess
 
@@ -288,14 +290,16 @@ class TestGitUrlSanitizationIntegration:
             check=True,
         )
 
-        # Create snapshot
+        # Git state is captured from the current working directory (the
+        # code repo), not the bundle dir - run from inside the fixture repo.
+        monkeypatch.chdir(bundle_dir)
         folio.create_snapshot("v1.0", capture_git=True)
 
         # Verify remote is preserved
         snapshot = folio.get_snapshot_info("v1.0")
         assert snapshot["git"]["remote"] == "https://github.com/user/repo.git"
 
-    def test_snapshot_with_ssh_remote(self, tmp_path):
+    def test_snapshot_with_ssh_remote(self, tmp_path, monkeypatch):
         """Test that SSH remotes are preserved (they don't have credentials)."""
         import subprocess
 
@@ -340,14 +344,16 @@ class TestGitUrlSanitizationIntegration:
             check=True,
         )
 
-        # Create snapshot
+        # Git state is captured from the current working directory (the
+        # code repo), not the bundle dir - run from inside the fixture repo.
+        monkeypatch.chdir(bundle_dir)
         folio.create_snapshot("v1.0", capture_git=True)
 
         # Verify SSH remote is preserved
         snapshot = folio.get_snapshot_info("v1.0")
         assert snapshot["git"]["remote"] == "git@github.com:user/repo.git"
 
-    def test_reproduce_instructions_dont_leak_credentials(self, tmp_path):
+    def test_reproduce_instructions_dont_leak_credentials(self, tmp_path, monkeypatch):
         """Test that reproduce instructions don't contain credentials."""
         import subprocess
 
@@ -398,7 +404,9 @@ class TestGitUrlSanitizationIntegration:
             check=True,
         )
 
-        # Create snapshot
+        # Git state is captured from the current working directory (the
+        # code repo), not the bundle dir - run from inside the fixture repo.
+        monkeypatch.chdir(bundle_dir)
         folio.create_snapshot("v1.0", capture_git=True)
 
         # Get reproduction instructions

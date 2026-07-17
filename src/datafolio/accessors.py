@@ -247,9 +247,21 @@ class DataAccessor:
                     delattr(cls, attr)
                 cls._dynamic_attrs.discard(attr)
 
-        # Add new attributes as properties on the class
+        # Add new attributes as properties on the class. Only names that are
+        # safe as class attributes get one: a valid Python identifier, not
+        # underscore-prefixed, and not shadowing a real attribute/method of the
+        # class (an item named '_folio' or '_sync_items' must never replace the
+        # actual attribute — that breaks every accessor instance). Skipped
+        # names remain fully accessible via folio.data['name'].
         for item_name in current_items:
             if item_name not in cls._dynamic_attrs:
+                if (
+                    not item_name.isidentifier()
+                    or item_name.startswith("_")
+                    or hasattr(cls, item_name)
+                ):
+                    continue
+
                 # Create a property that returns an ItemProxy
                 # Use a default argument to capture the item_name in the closure
                 def make_property(name: str):
