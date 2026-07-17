@@ -143,6 +143,7 @@ class DataframeHandler(BaseHandler):
         filepath = folio._storage.join_paths(folio._bundle_dir, subdir, filename)
 
         index_columns = []
+        index_names: list = []
         if self._is_polars_lazy(data):
             # Streaming, bounded-memory materialization. The footer is read from
             # the local staging file, so a cloud write never re-downloads the
@@ -164,9 +165,20 @@ class DataframeHandler(BaseHandler):
                 if preserve_index and not default_index:
                     # Store the index as ordinary columns (any tool can read
                     # them) and record which they were so the pandas read
-                    # path can set_index() them back.
+                    # path can set_index() them back. Original level names
+                    # are recorded too, so unnamed levels restore as None
+                    # rather than reset_index()'s 'level_0' placeholders.
                     original = set(data.columns)
-                    data = data.reset_index()
+                    index_names = list(data.index.names)
+                    try:
+                        data = data.reset_index()
+                    except ValueError as exc:
+                        raise ValueError(
+                            f"Cannot preserve the index of table '{name}': "
+                            f"an index level collides with an existing "
+                            f"column ({exc}). Rename the index level or the "
+                            f"column, or reset_index() yourself first."
+                        ) from exc
                     index_columns = [c for c in data.columns if c not in original]
                 elif not default_index:
                     # A non-default index is silently dropped by the parquet
@@ -206,6 +218,7 @@ class DataframeHandler(BaseHandler):
             metadata["size_bytes"] = size_bytes
         if index_columns:
             metadata["index_columns"] = index_columns
+            metadata["index_names"] = index_names
 
         if description:
             metadata["description"] = description
@@ -243,9 +256,13 @@ class DataframeHandler(BaseHandler):
             df = df.set_index(
                 index_columns if len(index_columns) > 1 else index_columns[0]
             )
-            # An unnamed single index round-trips through reset_index() as a
-            # column literally named 'index'; restore it to unnamed.
-            if index_columns == ["index"]:
+            # Restore the original level names (unnamed levels come back as
+            # None instead of reset_index()'s 'index'/'level_N' placeholders).
+            index_names = item.get("index_names")
+            if index_names and len(index_names) == df.index.nlevels:
+                df.index.names = index_names
+            elif index_columns == ["index"]:
+                # Legacy manifests without index_names
                 df.index.name = None
         return df
 

@@ -146,7 +146,9 @@ preserve or guarantee the contents of referenced data.**
 - Readers never take the lock; every read entry point calls
   `_refresh_if_needed()` (cheap metadata timestamp comparison).
 - Local writers serialize on `items.json.lock` (a `filelock` reentrant lock)
-  and check the manifest revision before any change. Two notebooks writing
+  and check the manifest revision before any change. The lock file lives in
+  the bundle; sync tools that delete remote-absent files should exclude it,
+  since unlinking a held lock breaks mutual exclusion. Two notebooks writing
   concurrently: the second fails with `ConcurrentWriteError`, refreshes, and
   retries — nothing is clobbered and nothing half-applies.
 - Cloud folios: the revision check still runs (best effort), but without

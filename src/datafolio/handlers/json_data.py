@@ -25,7 +25,7 @@ class JsonHandler(BaseHandler):
         >>>
         >>> # Handler is used automatically by DataFolio
         >>> config = {'learning_rate': 0.01, 'batch_size': 32}
-        >>> folio.add_json('config', config)
+        >>> folio.add('config', config)
     """
 
     @property

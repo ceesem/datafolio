@@ -571,7 +571,9 @@ folio = DataFolio('~/analysis/my-exp')   # a complete, normal local folio
 
 You get parallel, resumable, incremental transfer, and the copy is complete:
 all items, all snapshot versions, `snapshots.json` — everything. Re-running
-the sync later picks up only what changed.
+the sync later picks up only what changed. (One caution for two-way sync
+tools: exclude `items.json.lock` — it is the local write lock, and deleting
+it out from under a live writer breaks write serialization.)
 
 The one thing that stays where it is: external references
 (`reference_table`) keep pointing at their original locations — datafolio

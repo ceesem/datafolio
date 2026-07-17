@@ -673,7 +673,7 @@ locations, which the recipient may or may not be able to reach.
 
 **Q: Do snapshots work with cloud storage?**
 
-A: Yes! DataFolio works with any storage backend (local, S3, GCS, etc.). Snapshots work the same everywhere.
+A: Yes — snapshots work on any storage backend (local, S3, GCS, etc.). One caveat: cloud object stores have no cross-machine write lock, so concurrent-writer protection there is best-effort. Treat a cloud folio as single-writer (see the concurrency notes in the Getting Started guide).
 
 **Q: Can I snapshot only part of my bundle?**
 

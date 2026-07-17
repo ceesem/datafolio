@@ -795,10 +795,12 @@ For more information, see the [datafolio documentation](https://github.com/casey
         the staged metadata along with everything else.
         """
         with self._mutation_guard():
-            yield
             try:
+                yield
                 self._save_items()
             except BaseException:
+                # Discard partial in-memory metadata (e.g. update() fed an
+                # iterator that raised halfway) as well as a failed publish.
                 if not self._batch_mode:
                     self._reload_committed()
                 raise
@@ -1882,6 +1884,13 @@ For more information, see the [datafolio documentation](https://github.com/casey
         """
         if name is None:
             name = Path(path).stem
+            try:
+                validate_item_name(name)
+            except ValueError as exc:
+                raise ValueError(
+                    f"{exc}. The name was derived from the filename — pass "
+                    f"name='...' explicitly to choose a valid one."
+                ) from None
         return self._add_item(
             name,
             str(path),
@@ -1980,7 +1989,7 @@ For more information, see the [datafolio documentation](https://github.com/casey
         Examples:
             >>> folio = DataFolio('experiments', prefix='test')
             >>> folio.reference_table('data1', path='s3://bucket/data.parquet')
-            >>> folio.add_numpy('embeddings', np.array([1, 2, 3]))
+            >>> folio.add('embeddings', np.array([1, 2, 3]))
             >>> folio.list_contents()
             {'referenced_tables': ['data1'], 'included_tables': [], 'numpy_arrays': ['embeddings'],
              'json_data': [], 'timestamps': [], 'models': [], 'artifacts': []}
@@ -2048,7 +2057,7 @@ For more information, see the [datafolio documentation](https://github.com/casey
         Examples:
             >>> folio = DataFolio('experiments', prefix='test')
             >>> folio.reference_table('training', path='s3://bucket/data.parquet')
-            >>> folio.add_table('results', df)
+            >>> folio.add('results', df)
             >>> folio.tables
             ['training', 'results']
         """
@@ -2128,7 +2137,7 @@ For more information, see the [datafolio documentation](https://github.com/casey
             >>> folio.data.<TAB>  # Shows: results, classifier, embeddings, ...
 
             Autocomplete updates automatically:
-            >>> folio.add_table('new_data', df)
+            >>> folio.add('new_data', df)
             >>> folio.data.new_data.content  # Autocompletes immediately
         """
         # Sync items in case they changed since initialization
@@ -2854,6 +2863,9 @@ For more information, see the [datafolio documentation](https://github.com/casey
                     raise KeyError(f"Item '{n}' not found in DataFolio")
             names_to_archive = list(name)
 
+        if not names_to_archive:
+            return self  # zero-match glob: nothing to do, no pointless commit
+
         with self._mutation_guard():
             for n in names_to_archive:
                 self._items[n]["archived"] = True
@@ -2908,6 +2920,9 @@ For more information, see the [datafolio documentation](https://github.com/casey
                     raise KeyError(f"Item '{n}' not found in DataFolio")
             names_to_unarchive = list(name)
 
+        if not names_to_unarchive:
+            return self  # zero-match glob: nothing to do, no pointless commit
+
         with self._mutation_guard():
             for n in names_to_unarchive:
                 self._items[n].pop("archived", None)
@@ -2954,7 +2969,7 @@ For more information, see the [datafolio documentation](https://github.com/casey
         if item.get("item_type") == "included_table" and "models" in item:
             inputs = inputs + item.get("models", [])
 
-        return inputs
+        return list(dict.fromkeys(inputs))
 
     def get_dependents(self, item_name: str) -> list[str]:
         """Get list of items that depend on this item.
@@ -2990,7 +3005,7 @@ For more information, see the [datafolio documentation](https://github.com/casey
                 if item_name in item.get("models", []):
                     dependents.append(name)
 
-        return dependents
+        return list(dict.fromkeys(dependents))
 
     def get_lineage_graph(self) -> Dict[str, list[str]]:
         """Get full dependency graph for all items in bundle.

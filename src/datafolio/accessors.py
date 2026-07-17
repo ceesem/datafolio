@@ -27,6 +27,15 @@ class ItemProxy:
         self._folio = folio
         self._name = name
 
+    def _item(self) -> Dict[str, Any]:
+        """The live manifest entry, with a consistent not-found error."""
+        try:
+            return self._folio._items[self._name]
+        except KeyError:
+            raise KeyError(
+                f"Item '{self._name}' not found in DataFolio (was it deleted?)"
+            ) from None
+
     @property
     def content(self) -> Any:
         """Get the content of this item.
@@ -83,8 +92,7 @@ class ItemProxy:
         # Auto-refresh before accessing
         self._folio._refresh_if_needed()
 
-        item = self._folio._items[self._name]
-        return item.get("description")
+        return self._item().get("description")
 
     @property
     def type(self) -> str:
@@ -97,8 +105,7 @@ class ItemProxy:
         # Auto-refresh before accessing
         self._folio._refresh_if_needed()
 
-        item = self._folio._items[self._name]
-        return item.get("item_type", "unknown")
+        return self._item().get("item_type", "unknown")
 
     @property
     def path(self) -> Optional[str]:
@@ -145,16 +152,17 @@ class ItemProxy:
         # Auto-refresh before accessing
         self._folio._refresh_if_needed()
 
-        return dict(self._folio._items[self._name])
+        return dict(self._item())
 
     def __repr__(self) -> str:
-        """Return string representation."""
-        # Auto-refresh before accessing
-        self._folio._refresh_if_needed()
-
-        item = self._folio._items[self._name]
+        """Return string representation (never raises — Jupyter renders it)."""
+        try:
+            self._folio._refresh_if_needed()
+            item = self._folio._items[self._name]
+        except Exception:
+            return f"ItemProxy('{self._name}', missing)"
         item_type = item.get("item_type", "unknown")
-        desc = item.get("description", "")
+        desc = item.get("description") or ""
         desc_str = f": {desc}" if desc else ""
         return f"ItemProxy('{self._name}', type='{item_type}'{desc_str})"
 

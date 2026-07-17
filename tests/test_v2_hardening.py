@@ -270,3 +270,72 @@ class TestInitExistingDirectory:
         result = CliRunner().invoke(cli, ["init", str(target)], input="y\n")
         assert result.exit_code == 0, result.output
         assert (target / "items.json").exists()
+
+
+class TestWaveCLowSeverity:
+    def test_item_proxy_errors_consistent_after_delete(self, tmp_path):
+        folio = DataFolio(tmp_path / "b")
+        folio.add("x", 1)
+        proxy = folio.data.x
+        folio.delete("x")
+        for attr in ("description", "type", "metadata"):
+            with pytest.raises(KeyError, match="not found in DataFolio"):
+                getattr(proxy, attr)
+        # repr must not raise (Jupyter renders it)
+        assert "x" in repr(proxy)
+
+    def test_preserve_index_name_collision_clear_error(self, tmp_path):
+        folio = DataFolio(tmp_path / "b")
+        df = pd.DataFrame({"a": [1, 2]}, index=pd.Index([9, 8], name="a"))
+        with pytest.raises(ValueError, match="index.*column|column.*index"):
+            folio.add("t", df, preserve_index=True)
+        assert "t" not in folio._items  # nothing half-added
+
+    def test_unnamed_multiindex_names_restore_as_none(self, tmp_path):
+        folio = DataFolio(tmp_path / "b")
+        idx = pd.MultiIndex.from_tuples([("a", 1), ("b", 2)])  # unnamed levels
+        df = pd.DataFrame({"v": [1, 2]}, index=idx)
+        folio.add("t", df, preserve_index=True)
+        back = folio.get("t")
+        assert list(back.index.names) == [None, None]
+        assert back["v"].tolist() == [1, 2]
+
+    def test_lineage_deduped_with_legacy_models_field(self, tmp_path):
+        folio = DataFolio(tmp_path / "b")
+        folio.add("m", 1)
+        folio.add("t", pd.DataFrame({"v": [1]}), inputs=["m"])
+        folio._items["t"]["models"] = ["m"]  # legacy manifest shape
+        assert folio.get_inputs("t") == ["m"]
+        assert folio.get_dependents("m") == ["t"]
+
+    def test_archive_zero_match_glob_is_noop(self, tmp_path):
+        folio = DataFolio(tmp_path / "b")
+        folio.add("x", 1)
+        rev = folio._manifest_revision
+        folio.archive("no-such-prefix/*")
+        assert folio._manifest_revision == rev  # no pointless commit
+
+    def test_add_file_derived_name_hint(self, tmp_path):
+        src = tmp_path / "my plot.png"
+        src.write_bytes(b"x")
+        folio = DataFolio(tmp_path / "b")
+        with pytest.raises(ValueError, match="name="):
+            folio.add_file(src)
+        folio.add_file(src, name="my_plot")  # explicit name works
+        assert "my_plot" in folio._items
+
+    def test_metadata_update_midway_exception_rolls_back(self, tmp_path):
+        path = tmp_path / "b"
+        folio = DataFolio(path)
+        folio.metadata["keep"] = 1
+
+        def poison():
+            yield ("ok", 2)
+            raise RuntimeError("iterator exploded")
+
+        with pytest.raises(RuntimeError):
+            folio.metadata.update(poison())
+        # Partial in-memory update discarded; later commit doesn't leak it
+        assert "ok" not in folio.metadata
+        folio.add("y", 1)
+        assert "ok" not in DataFolio(path).metadata
