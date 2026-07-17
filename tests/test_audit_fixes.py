@@ -499,3 +499,78 @@ class TestReferenceIdentity:
         info = folio.get_snapshot_info("snap")
         assert "ext" in info.get("mutable_references", [])
         assert "mutable_reference_warning" in info
+
+
+# =============================================================================
+# Finding 8: manifest schema_version + monotonic revision, atomic local writes,
+# and stale-writer detection (many readers, one writer).
+# =============================================================================
+
+
+class TestManifestContract:
+    def _read_items(self, bundle):
+        import orjson
+
+        return orjson.loads((bundle / "items.json").read_bytes())
+
+    def test_manifest_has_schema_version_and_revision(self, tmp_path):
+        from datafolio.folio import MANIFEST_SCHEMA_VERSION
+
+        bundle = tmp_path / "b"
+        folio = DataFolio(bundle)
+        folio.add_table("x", pd.DataFrame({"a": [1]}))
+        data = self._read_items(bundle)
+        assert data["schema_version"] == MANIFEST_SCHEMA_VERSION
+        assert isinstance(data["revision"], int)
+
+    def test_revision_increments_monotonically(self, tmp_path):
+        bundle = tmp_path / "b"
+        folio = DataFolio(bundle)
+        folio.add_table("x", pd.DataFrame({"a": [1]}))
+        r1 = self._read_items(bundle)["revision"]
+        folio.add_table("y", pd.DataFrame({"a": [2]}))
+        r2 = self._read_items(bundle)["revision"]
+        assert r2 == r1 + 1
+
+    def test_backward_compatible_bare_list_manifest(self, tmp_path):
+        import orjson
+
+        bundle = tmp_path / "b"
+        folio = DataFolio(bundle)
+        folio.add_table("x", pd.DataFrame({"a": [1, 2, 3]}))
+
+        # Rewrite items.json in the oldest (bare list) format.
+        items_path = bundle / "items.json"
+        current = orjson.loads(items_path.read_bytes())
+        items_path.write_bytes(orjson.dumps(current["items"]))
+
+        # Opening still works, and the next write migrates to the new format.
+        folio2 = DataFolio(bundle)
+        assert folio2.get_table("x")["a"].to_list() == [1, 2, 3]
+        folio2.add_table("y", pd.DataFrame({"a": [9]}))
+        migrated = orjson.loads(items_path.read_bytes())
+        assert migrated["schema_version"] >= 1
+        assert migrated["revision"] >= 1
+
+    def test_stale_writer_detected(self, tmp_path):
+        from datafolio import ConcurrentWriteError
+
+        bundle = tmp_path / "b"
+        writer_a = DataFolio(bundle)
+        writer_a.add_table("x", pd.DataFrame({"a": [1]}))
+
+        # Second instance loads the current revision.
+        writer_b = DataFolio(bundle)
+
+        # A advances the manifest; B is now stale.
+        writer_a.add_table("y", pd.DataFrame({"a": [2]}))
+
+        with pytest.raises(ConcurrentWriteError):
+            writer_b.add_table("z", pd.DataFrame({"a": [3]}))
+
+    def test_no_leftover_tmp_files(self, tmp_path):
+        bundle = tmp_path / "b"
+        folio = DataFolio(bundle)
+        folio.add_table("x", pd.DataFrame({"a": [1]}))
+        leftovers = list(bundle.glob("*.tmp"))
+        assert leftovers == []

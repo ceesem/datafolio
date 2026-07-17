@@ -37,6 +37,20 @@ from datafolio.utils import (
     validate_table_format,
 )
 
+# Current on-disk layout version of items.json. Bump when the manifest's shape
+# changes in a way that needs migration on load.
+MANIFEST_SCHEMA_VERSION = 1
+
+
+class ConcurrentWriteError(RuntimeError):
+    """Raised when a write would clobber a newer manifest from another writer.
+
+    datafolio supports many readers but a single writer per bundle. If a second
+    writer has advanced the manifest revision since this instance last loaded
+    it, writing would silently lose their changes; this error surfaces that
+    instead. Call :meth:`DataFolio.refresh` and re-apply your change.
+    """
+
 
 def _polars_only_error(name: str) -> ValueError:
     """Build the standard error for pandas access to a polars-only table."""
@@ -400,6 +414,10 @@ class DataFolio:
 
         # Batch mode flag
         self._batch_mode = False
+
+        # Manifest revision last loaded/written (stale-writer detection).
+        # None until a manifest is loaded or first written.
+        self._manifest_revision: Optional[int] = None
 
         # Snapshot-related state (Phase 1)
         self._snapshots: Dict[str, Any] = {}  # Snapshot name → metadata
@@ -1019,11 +1037,15 @@ For more information, see the [datafolio documentation](https://github.com/ceese
 
             # Handle both old format (list) and new format (dict with items)
             if isinstance(items_data, list):
-                # Old format: just a list of items (backward compatibility)
+                # Oldest format: a bare list of items (backward compatibility).
                 items_list = items_data
+                self._manifest_revision = 0
             else:
-                # New format: dict with items list
+                # Dict format: {schema_version?, revision?, items}. Missing
+                # revision (pre-versioning manifests) is treated as 0 and
+                # migrated forward on the next write.
                 items_list = items_data.get("items", [])
+                self._manifest_revision = int(items_data.get("revision", 0) or 0)
 
             # Separate current versions from snapshot versions
             self._items = {}
@@ -1067,7 +1089,17 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         self._storage.write_json(path, data)
 
     def _save_items(self) -> None:
-        """Save unified items.json manifest in simplified snapshot format."""
+        """Save unified items.json manifest (versioned, atomic, stale-checked).
+
+        Writes ``{schema_version, revision, items}``. Local writes are atomic
+        (temp + os.replace) and serialized by a lockfile; before overwriting,
+        the on-disk revision is checked so a stale writer can't silently clobber
+        a newer manifest (raises :class:`ConcurrentWriteError`). This supports
+        the "many readers, one writer" model — see the class docstring. Cloud
+        object stores lack conditional writes, so cross-writer safety there is
+        best-effort (the revision advances but two simultaneous cloud writers
+        can still race).
+        """
         if self._batch_mode:
             return
 
@@ -1076,14 +1108,26 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         try:
             path = self._storage.join_paths(self._bundle_dir, ITEMS_FILE)
 
-            # Combine current versions and snapshot versions
-            all_items = list(self._items.values()) + self._snapshot_versions
+            # Serialize local writers with a lockfile so the read-check-write
+            # below is atomic on a single machine (no lock for cloud).
+            lock_ctx: Any = contextlib.nullcontext()
+            if not is_cloud_path(path):
+                from filelock import FileLock
 
-            # Save in simplified format: dict with items list only
-            items_data = {
-                "items": all_items,
-            }
-            self._storage.write_json(path, items_data)
+                lock_ctx = FileLock(path + ".lock", timeout=30)
+
+            with lock_ctx:
+                self._raise_if_manifest_stale(path)
+
+                all_items = list(self._items.values()) + self._snapshot_versions
+                next_revision = (self._manifest_revision or 0) + 1
+                items_data = {
+                    "schema_version": MANIFEST_SCHEMA_VERSION,
+                    "revision": next_revision,
+                    "items": all_items,
+                }
+                self._storage.write_json(path, items_data)
+                self._manifest_revision = next_revision
 
             # Update metadata timestamp when items change
             # This allows other instances to detect staleness
@@ -1101,6 +1145,38 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         finally:
             # Always clear the flag
             self._in_save_operation = False
+
+    def _raise_if_manifest_stale(self, path: str) -> None:
+        """Guard against overwriting a manifest advanced by another writer.
+
+        Compares the on-disk revision with the revision this instance last
+        loaded/wrote. If the on-disk one is newer, another writer changed the
+        bundle and proceeding would lose their work.
+
+        Args:
+            path: Path to items.json
+
+        Raises:
+            ConcurrentWriteError: If the on-disk manifest is newer than ours.
+        """
+        if self._manifest_revision is None:
+            return  # nothing loaded/written yet (fresh bundle)
+        if not self._storage.exists(path):
+            return
+        try:
+            on_disk = self._storage.read_json(path)
+        except Exception:
+            return  # unreadable -> let the write proceed/fail normally
+        disk_revision = (
+            int(on_disk.get("revision", 0) or 0) if isinstance(on_disk, dict) else 0
+        )
+        if disk_revision > self._manifest_revision:
+            raise ConcurrentWriteError(
+                f"items.json was modified by another writer (on-disk revision "
+                f"{disk_revision} > loaded {self._manifest_revision}). Call "
+                f"refresh() and re-apply your change (datafolio supports many "
+                f"readers but one writer per bundle)."
+            )
 
     def _save_snapshots(self) -> None:
         """Save snapshots.json manifest."""

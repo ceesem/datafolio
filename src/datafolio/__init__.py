@@ -2,6 +2,6 @@
 
 __version__ = "1.3.0"
 
-from datafolio.folio import DataFolio
+from datafolio.folio import ConcurrentWriteError, DataFolio
 
-__all__ = ["DataFolio", "__version__"]
+__all__ = ["DataFolio", "ConcurrentWriteError", "__version__"]

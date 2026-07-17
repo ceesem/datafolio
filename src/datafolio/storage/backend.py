@@ -308,6 +308,11 @@ class StorageBackend:
     def write_json(self, path: str, data: Any) -> None:
         """Write JSON data to file (local or cloud).
 
+        Local writes are atomic: the content is written to a temp file in the
+        same directory and then ``os.replace``-d over the target, so a reader
+        never observes a half-written manifest and a crash mid-write can't
+        corrupt it. (Cloud object puts are atomic per object already.)
+
         Args:
             path: File path
             data: Data to serialize
@@ -327,9 +332,21 @@ class StorageBackend:
             # Disable caching for manifest files to ensure fresh reads
             cf.put(filename, content, cache_control="no-cache")
         else:
+            import os
+            import tempfile
+
             self._ensure_parent_dir(path)
-            with open(path, "wb") as f:
-                f.write(content)
+            directory = os.path.dirname(path) or "."
+            fd, tmp = tempfile.mkstemp(dir=directory, suffix=".tmp")
+            try:
+                with os.fdopen(fd, "wb") as f:
+                    f.write(content)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp, path)  # atomic on POSIX/Windows same-fs
+            finally:
+                if os.path.exists(tmp):
+                    os.unlink(tmp)
 
     def read_json(self, path: str) -> Any:
         """Read JSON data from file (local or cloud).
