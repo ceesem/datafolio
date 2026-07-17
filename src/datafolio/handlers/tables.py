@@ -323,12 +323,17 @@ class ReferenceTableHandler(BaseHandler):
             is_directory = True
 
         # Build metadata (manifest-only; enrichment happens in inspect_table).
+        # References are inherently mutable: datafolio links to external data it
+        # does not own or copy, so the content at this path can change over time
+        # (snapshots preserve the link, not the bytes). inspect_table() records
+        # a point-in-time source_identity to make such drift detectable.
         metadata = {
             "name": name,
             "item_type": self.item_type,
             "path": stored_path,
             "table_format": table_format,
             "is_directory": is_directory,
+            "mutable": True,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
 
@@ -389,10 +394,15 @@ class ReferenceTableHandler(BaseHandler):
                 from datafolio.readers import scan_parquet
 
                 lf = scan_parquet(path, use_https=folio._storage._use_https)
-                schema = lf.collect_schema()
-                updated["columns"] = list(schema.names())
-                updated["dtypes"] = {n: str(t) for n, t in schema.items()}
-                updated["num_cols"] = len(schema)
+                # Normalize to an Arrow-derived logical schema (same convention
+                # as included tables): collect zero rows to get the Arrow schema
+                # with column order and types, without reading data.
+                arrow_schema = lf.limit(0).collect().to_arrow().schema
+                updated["columns"] = list(arrow_schema.names)
+                updated["dtypes"] = {
+                    field.name: str(field.type) for field in arrow_schema
+                }
+                updated["num_cols"] = len(arrow_schema)
             except Exception as exc:
                 raise RuntimeError(
                     f"Could not read schema for reference '{name}' at {path}: {exc}"
@@ -404,6 +414,12 @@ class ReferenceTableHandler(BaseHandler):
                 updated["num_rows"] = int(lf.select(pl.len()).collect().item())
             except Exception:
                 pass
+
+        # Point-in-time source identity so a mutable reference's drift is
+        # detectable (informational; datafolio does not freeze external data).
+        identity = folio._storage.source_identity(path)
+        if identity:
+            updated["source_identity"] = identity
 
         return updated
 

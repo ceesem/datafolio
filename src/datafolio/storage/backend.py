@@ -478,6 +478,48 @@ class StorageBackend:
             self._ensure_parent_dir(path)
             lazyframe.sink_parquet(path)
 
+    def source_identity(self, path: str) -> Dict[str, Any]:
+        """Best-effort point-in-time identity for an external object.
+
+        Captures whatever the backend can cheaply report — size, ETag,
+        last-modified time — so a caller can tell whether a mutable external
+        reference has changed since it was inspected. This is informational, not
+        a hard pin: datafolio does not own or freeze the external content.
+
+        Args:
+            path: File path (local or cloud); directories report size only.
+
+        Returns:
+            JSON-serializable dict, possibly empty (best-effort).
+        """
+        import os
+
+        ident: Dict[str, Any] = {}
+        size = self.file_size(path)
+        if size is not None:
+            ident["size"] = size
+
+        head_path = path
+        if not is_cloud_path(head_path) and not head_path.startswith("file://"):
+            head_path = "file://" + os.path.abspath(head_path)
+        try:
+            cf, filename = self._get_cloud_client(head_path, use_https=self._use_https)
+            head = cf.head(filename)
+            if head.get("ETag"):
+                ident["etag"] = head["ETag"]
+            last_modified = head.get("Last-Modified")
+            if last_modified is not None:
+                ident["last_modified"] = (
+                    last_modified.isoformat()
+                    if hasattr(last_modified, "isoformat")
+                    else str(last_modified)
+                )
+        except Exception:
+            # Directories and some backends won't support head(); size alone
+            # is still useful. Best-effort by design.
+            pass
+        return ident
+
     def parquet_footer(self, path: str) -> tuple[Any, int]:
         """Return ``(arrow_schema, num_rows)`` from a Parquet file's footer.
 

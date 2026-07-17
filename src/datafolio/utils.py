@@ -33,7 +33,9 @@ class TableReference(TypedDict, total=False):
     size_bytes: Optional[int]  # Size of the external file, if known
     allow_full_load: Optional[bool]  # Bypass the eager-load size guard
     polars_only: Optional[bool]  # Readable only lazily / via polars (no pandas)
-    version: Optional[int]  # For Delta tables
+    mutable: Optional[bool]  # External content is not owned; may change over time
+    source_identity: Optional[dict]  # Point-in-time identity from inspect_table
+    version: Optional[int]  # Optional source version recorded in the manifest
     description: Optional[str]
     # Lineage fields
     inputs: Optional[list[str]]  # Names of items this was derived from

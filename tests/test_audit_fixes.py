@@ -423,3 +423,79 @@ class TestBoundedCloudWrites:
 
         after = set(glob.glob(os.path.join(tempfile.gettempdir(), "*.parquet")))
         assert after == before  # no leaked temp files
+
+
+# =============================================================================
+# Finding 9: one canonical (Arrow-derived) schema representation for both
+# included and inspected referenced tables.
+# =============================================================================
+
+
+class TestArrowSchemaNormalization:
+    def test_included_uses_arrow_dtypes(self, tmp_path):
+        folio = DataFolio(tmp_path / "b")
+        folio.add_table("t", pd.DataFrame({"a": [1, 2, 3]}))
+        # Arrow logical type string, not a pandas/polars display string.
+        assert folio.get_table_info("t")["dtypes"]["a"] == "int64"
+
+    def test_inspected_reference_matches_included_convention(self, tmp_path):
+        df = pd.DataFrame({"a": [1, 2, 3], "b": [1.5, 2.5, 3.5]})
+        folio = DataFolio(tmp_path / "b")
+        folio.add_table("inc", df)
+        ext = tmp_path / "e.parquet"
+        df.to_parquet(ext, index=False)
+        folio.reference_table("ref", ext)
+        folio.inspect_table("ref")
+        # same Arrow-derived dtype strings and column order for both kinds
+        assert (
+            folio.get_table_info("ref")["dtypes"]
+            == folio.get_table_info("inc")["dtypes"]
+        )
+        assert (
+            folio.get_table_info("ref")["columns"]
+            == folio.get_table_info("inc")["columns"]
+        )
+
+    def test_lazyframe_add_uses_arrow_dtypes(self, tmp_path):
+        folio = DataFolio(tmp_path / "b")
+        folio.add_table("t", pl.LazyFrame({"a": [1, 2, 3]}))
+        assert folio.get_table_info("t")["dtypes"]["a"] == "int64"
+
+
+# =============================================================================
+# Finding 7: external references are mutable; inspect captures point-in-time
+# source identity; snapshots surface mutable-reference warnings.
+# =============================================================================
+
+
+class TestReferenceIdentity:
+    def test_reference_marked_mutable(self, tmp_path):
+        folio = DataFolio(tmp_path / "b")
+        folio.reference_table("ref", path="s3://bucket/data.parquet")
+        assert folio.get_table_info("ref")["mutable"] is True
+
+    def test_inspect_captures_source_identity(self, tmp_path):
+        df = pd.DataFrame({"a": [1, 2, 3]})
+        ext = tmp_path / "e.parquet"
+        df.to_parquet(ext, index=False)
+        folio = DataFolio(tmp_path / "b")
+        folio.reference_table("ref", ext)
+        folio.inspect_table("ref")
+        ident = folio.get_table_info("ref")["source_identity"]
+        assert ident["size"] == ext.stat().st_size
+        assert "last_modified" in ident  # from head()
+
+    def test_mutable_references_listing(self, tmp_path):
+        folio = DataFolio(tmp_path / "b")
+        folio.add_table("owned", pd.DataFrame({"a": [1]}))
+        folio.reference_table("ext", path="s3://bucket/x.parquet")
+        assert folio.mutable_references() == ["ext"]
+
+    def test_snapshot_info_flags_mutable_references(self, tmp_path):
+        folio = DataFolio(tmp_path / "b")
+        folio.add_table("owned", pd.DataFrame({"a": [1]}))
+        folio.reference_table("ext", path="s3://bucket/x.parquet")
+        folio.create_snapshot("snap")
+        info = folio.get_snapshot_info("snap")
+        assert "ext" in info.get("mutable_references", [])
+        assert "mutable_reference_warning" in info

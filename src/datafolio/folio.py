@@ -1380,6 +1380,14 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         in that snapshot. Future overwrites will trigger copy-on-write
         to preserve the snapshot state.
 
+        IMMUTABILITY: Snapshots freeze *owned* items — included tables, models,
+        and artifacts stored in the bundle — via copy-on-write. Referenced
+        (external) tables are NOT owned: a snapshot preserves the reference link,
+        not the bytes, so the external content can still change. See
+        :meth:`mutable_references` and :meth:`inspect_table` (which records a
+        point-in-time ``source_identity``). ``get_snapshot_info`` flags any
+        mutable references a snapshot contains.
+
         SECURITY NOTE: Environment variables (API keys, tokens, etc.) are NEVER
         captured. The capture_environment flag only captures Python version,
         platform, and package versions from uv.lock or requirements.txt.
@@ -2236,8 +2244,46 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         if snapshot not in self._snapshots:
             raise KeyError(f"Snapshot '{snapshot}' not found")
 
-        # Return a copy of the snapshot metadata
-        return dict(self._snapshots[snapshot])
+        # Return a copy of the snapshot metadata, surfacing any mutable external
+        # references it contains (their bytes are not owned/frozen — see
+        # mutable_references()).
+        info = dict(self._snapshots[snapshot])
+        versions = info.get("item_versions", {}) or {}
+        type_map = {
+            it.get("name"): it.get("item_type")
+            for it in list(self._items.values()) + self._snapshot_versions
+        }
+        mutable = [
+            name for name in versions if type_map.get(name) == "referenced_table"
+        ]
+        if mutable:
+            info["mutable_references"] = mutable
+            info["mutable_reference_warning"] = (
+                "This snapshot references external tables whose content is not "
+                "owned by the bundle and may have changed since the snapshot was "
+                "taken. Snapshots preserve the reference link, not the bytes."
+            )
+        return info
+
+    def mutable_references(self) -> list[str]:
+        """Names of referenced tables whose external content is not owned.
+
+        Referenced tables link to external data that datafolio never copies, so
+        the bytes at the referenced path can change over time. Snapshots
+        preserve the *link*, not the content — only owned items (included
+        tables, models, artifacts) are truly immutable in a snapshot. Use
+        :meth:`inspect_table` to record a point-in-time ``source_identity`` for
+        detecting drift.
+
+        Returns:
+            List of referenced-table names in the current working set.
+        """
+        self._refresh_if_needed()
+        return [
+            name
+            for name, item in self._items.items()
+            if item.get("item_type") == "referenced_table"
+        ]
 
     def reproduce_instructions(self, snapshot: Optional[str] = None) -> str:
         """Generate human-readable instructions to reproduce a snapshot.
