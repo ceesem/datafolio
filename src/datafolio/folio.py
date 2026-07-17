@@ -717,6 +717,27 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             if lock is not None:
                 lock.release()
 
+    @contextlib.contextmanager
+    def _metadata_mutation(self):
+        """Guarded commit scope for a metadata change.
+
+        Metadata participates in the same single-writer protocol as items:
+        the mutation guard is entered (stale-writer check BEFORE the caller
+        mutates the in-memory dict), and on success the change is committed
+        through :meth:`_save_items`, so every metadata write advances the
+        bundle revision that other notebooks check. Inside ``batch()`` the
+        commit is deferred to the batch publish; an aborted batch discards
+        the staged metadata along with everything else.
+        """
+        with self._mutation_guard():
+            yield
+            try:
+                self._save_items()
+            except BaseException:
+                if not self._batch_mode:
+                    self._reload_committed()
+                raise
+
     def _save_items(self) -> None:
         """Save unified items.json manifest (versioned, atomic, stale-checked).
 
@@ -1030,6 +1051,22 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             dst.parent.mkdir(parents=True, exist_ok=True)
             dst.write_bytes(content)
 
+    @staticmethod
+    def _fresh_descriptor(item: Dict[str, Any]) -> Dict[str, Any]:
+        """Deep-copy a descriptor for a NEW folio, stripped of source history.
+
+        The destination is a clean working folio: source snapshot membership
+        does not travel with it (the destination has no snapshot registry),
+        and the copied version is current. Descriptions, lineage, reference
+        paths, and type-specific metadata are preserved verbatim.
+        """
+        import copy
+
+        fresh = copy.deepcopy(dict(item))
+        fresh["in_snapshots"] = []
+        fresh["is_current"] = True
+        return fresh
+
     def _commit_owned_item(
         self,
         name: str,
@@ -1045,12 +1082,17 @@ For more information, see the [datafolio documentation](https://github.com/ceese
 
         1. acquire the mutation guard (lock + stale-writer check *before* any
            payload is written);
-        2. copy-on-write a snapshotted prior version out of the way;
-        3. reserve a collision-safe versioned filename + ``version_id`` and let
-           ``build_metadata`` write the payload there;
-        4. apply the description semantics (never discard one implicitly);
-        5. publish the manifest atomically;
-        6. delete the now-obsolete prior payload (only if unsnapshotted).
+        2. reserve a collision-safe versioned filename + ``version_id`` and let
+           ``build_metadata`` write the payload there — the prior descriptor is
+           NOT touched yet, so a payload failure leaves the folio exactly as it
+           was (plus, at worst, a harmless unreferenced payload file);
+        3. apply the description semantics (never discard one implicitly);
+        4. only after the payload succeeded, copy-on-write a snapshotted prior
+           version out of the way and install the new descriptor;
+        5. publish the manifest atomically — a failed publish reloads the
+           committed state so no partial change can leak via later mutations;
+        6. delete the now-obsolete prior payload (only if unsnapshotted and
+           unshared).
 
         Args:
             name: Logical item name.
@@ -1064,8 +1106,11 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         subdir = handler.get_storage_subdir()
         with self._mutation_guard():
             prior = self._items.get(name)
-            if self._is_in_snapshots(name):
-                self._handle_copy_on_write(name)
+
+            # Write the new payload FIRST, before any in-memory state changes.
+            # If this raises, nothing was mutated: the prior version stays
+            # current and the committed manifest is untouched (an unreferenced
+            # payload file may remain — a harmless orphan).
             version_id, filename = self._reserve_payload_filename(
                 name, extension, subdir
             )
@@ -1074,8 +1119,20 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             self._apply_description(name, metadata, description)
             metadata.setdefault("in_snapshots", [])
             metadata.setdefault("is_current", True)
+
+            # Payload and metadata are complete — now demote a snapshotted
+            # prior version and install the replacement.
+            if self._is_in_snapshots(name):
+                self._handle_copy_on_write(name)
             self._items[name] = metadata
-            self._save_items()
+            try:
+                self._save_items()
+            except BaseException:
+                # Publication failed: abandon the in-memory changes so a later
+                # unrelated mutation can't persist partial state.
+                if not self._batch_mode:
+                    self._reload_committed()
+                raise
             self._obsolete_payload_after_commit(prior)
 
     # ==================== Auto-Refresh Methods ====================
@@ -1149,20 +1206,29 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             >>> # folio2 auto-refreshes on next read operation
             >>> assert 'results' in folio2.list_contents()['included_tables']
         """
-        # Reload manifests from disk/cloud
+        self._reload_committed()
+        return self
+
+    def _reload_committed(self) -> None:
+        """Reset the in-memory state to the committed manifests on disk.
+
+        Used by :meth:`refresh` and by every mutation path that must abandon
+        partially applied in-memory changes after a failed or aborted
+        publication (aborted batch, failed manifest write, stale snapshot
+        mutation). Never writes anything.
+        """
         self._load_manifests()
 
-        # Sync the MetadataDict with new values
+        # Sync the MetadataDict with new values without triggering saves
         if hasattr(self, "metadata") and isinstance(self.metadata, MetadataDict):
-            # Update existing MetadataDict without triggering saves
-            # Use super() to bypass auto-save behavior
-            super(MetadataDict, self.metadata).clear()
-            super(MetadataDict, self.metadata).update(self._metadata_raw)
+            dict.clear(self.metadata)
+            dict.update(self.metadata, self._metadata_raw)
         else:
             # Initial creation (shouldn't happen in refresh, but defensive)
             self.metadata = MetadataDict(self, **self._metadata_raw)
 
-        return self
+        self._pending_obsolete_payloads = []
+        self._sync_data_accessor()
 
     @contextlib.contextmanager
     def batch(self):
@@ -1177,27 +1243,53 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         other writer can interleave. Obsolete payloads replaced during the batch
         are deleted only after the single final manifest publish.
 
+        If an exception escapes the block, NOTHING is committed: all staged
+        item, metadata, and copy-on-write changes are discarded and the folio
+        returns to the committed on-disk state. Payload files already written
+        remain as harmless unreferenced orphans. Nested batch() blocks raise.
+        Snapshot creation/deletion inside a batch raises (the batch's items
+        are not committed yet).
+
         Examples:
             >>> with folio.batch():
             ...     for i in range(100):
             ...         folio.add_numpy(f'array_{i}', arr)
             # items.json saved once at end of block
         """
+        if self._batch_mode:
+            raise RuntimeError(
+                "Nested batch() blocks are not supported: the outer batch "
+                "already defers the commit. Perform all mutations in one "
+                "batch block."
+            )
         with self._mutation_guard():
             self._batch_mode = True
             try:
                 yield
-            finally:
+            except BaseException:
+                # The batch aborts as a unit: discard every staged in-memory
+                # change and deferred deletion, restoring the committed state.
+                # Payload files already written stay behind as harmless
+                # unreferenced orphans; no committed payload was deleted.
                 self._batch_mode = False
+                self._reload_committed()
+                raise
+            self._batch_mode = False
+            try:
                 self._save_items()
-                # Flush payload deletions deferred during the batch (now that
-                # the manifest pointing at the new payloads is published).
-                pending, self._pending_obsolete_payloads = (
-                    self._pending_obsolete_payloads,
-                    [],
-                )
-                for old_item in pending:
-                    self._obsolete_payload_after_commit(old_item)
+            except BaseException:
+                # Final publication failed: return to the state actually on
+                # disk rather than keeping unpublishable staged state.
+                self._reload_committed()
+                raise
+            # Flush payload deletions deferred during the batch (now that
+            # the manifest pointing at the new payloads is published).
+            pending, self._pending_obsolete_payloads = (
+                self._pending_obsolete_payloads,
+                [],
+            )
+            for old_item in pending:
+                self._obsolete_payload_after_commit(old_item)
 
     def validate(self) -> Dict[str, bool]:
         """Validate existence and integrity of all items.
@@ -2149,8 +2241,10 @@ For more information, see the [datafolio documentation](https://github.com/ceese
 
         validate_table_format(table_format)
 
-        # Overwriting an existing, non-snapshotted item requires overwrite=True.
-        if name in self._items and not self._is_in_snapshots(name) and not overwrite:
+        # Uniform overwrite rule (same as add()): replacing ANY existing
+        # item requires overwrite=True; a snapshotted prior version is then
+        # preserved via copy-on-write.
+        if name in self._items and not overwrite:
             raise ValueError(
                 f"Item '{name}' already exists in this DataFolio. "
                 f"Use overwrite=True to replace it."
@@ -2164,9 +2258,9 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         handler = registry.get("referenced_table")
 
         with self._mutation_guard():
-            if self._is_in_snapshots(name):
-                self._handle_copy_on_write(name)
-
+            # Build and validate the full replacement descriptor BEFORE
+            # touching any in-memory state (same exception-safe ordering as
+            # owned items, even though references own no payload).
             metadata = handler.add(
                 self,
                 name,
@@ -2189,8 +2283,15 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             metadata.setdefault("in_snapshots", [])
             metadata.setdefault("is_current", True)
 
+            if self._is_in_snapshots(name):
+                self._handle_copy_on_write(name)
             self._items[name] = metadata
-            self._save_items()
+            try:
+                self._save_items()
+            except BaseException:
+                if not self._batch_mode:
+                    self._reload_committed()
+                raise
 
         return self
 
@@ -2353,11 +2454,31 @@ For more information, see the [datafolio documentation](https://github.com/ceese
 
         registry = get_registry()
         handler = registry.get(item_type)
+
+        # The potentially slow external I/O happens OUTSIDE the write lock.
+        expected_version = item.get("version_id")
         enrichment = handler.inspect(self, name)
 
         if enrichment:
-            self._items[name].update(enrichment)
-            self._save_items()
+            # Apply under the guard (whose stale-writer check catches another
+            # notebook's replacement), and only to the same version the
+            # inspection ran against — enriching a replacement version with
+            # stale results would corrupt it.
+            with self._mutation_guard():
+                current = self._items.get(name)
+                if current is None or current.get("version_id") != expected_version:
+                    raise ConcurrentWriteError(
+                        f"Table '{name}' was replaced while it was being "
+                        f"inspected; the stale inspection result was "
+                        f"discarded. Retry inspect_table()."
+                    )
+                current.update(enrichment)
+                try:
+                    self._save_items()
+                except BaseException:
+                    if not self._batch_mode:
+                        self._reload_committed()
+                    raise
 
         return self._items[name]
 
@@ -2493,6 +2614,7 @@ For more information, see the [datafolio documentation](https://github.com/ceese
                 raise KeyError(f"Item '{item_name}' not found in DataFolio")
 
         with self._mutation_guard():
+            newly_unreferenced: list = []
             for item_name in names_to_delete:
                 item = self._items[item_name]
 
@@ -2515,16 +2637,24 @@ For more information, see the [datafolio documentation](https://github.com/ceese
                     # it. The logical name disappears from the working set.
                     self._handle_copy_on_write(item_name)
                 else:
-                    # No snapshot references this version — remove the payload
-                    # (unless a snapshotted descriptor still shares the file
-                    # after a metadata-only copy-on-write).
-                    self._delete_payload_if_unshared(item)
+                    # No snapshot references this version — its payload is
+                    # deleted only AFTER the manifest publish succeeds, so a
+                    # failed write never leaves the committed manifest
+                    # pointing at deleted bytes.
+                    newly_unreferenced.append(item)
 
                 # Remove from items manifest
                 del self._items[item_name]
 
-            # Save updated manifest
-            self._save_items()
+            # Publish the manifest, then best-effort delete the payloads it
+            # no longer references.
+            try:
+                self._save_items()
+            except BaseException:
+                self._reload_committed()
+                raise
+            for item in newly_unreferenced:
+                self._delete_payload_if_unshared(item)
 
         return self
 
@@ -2578,10 +2708,15 @@ For more information, see the [datafolio documentation](https://github.com/ceese
                     raise KeyError(f"Item '{n}' not found in DataFolio")
             names_to_archive = list(name)
 
-        for n in names_to_archive:
-            self._items[n]["archived"] = True
-
-        self._save_items()
+        with self._mutation_guard():
+            for n in names_to_archive:
+                self._items[n]["archived"] = True
+            try:
+                self._save_items()
+            except BaseException:
+                if not self._batch_mode:
+                    self._reload_committed()
+                raise
         return self
 
     def unarchive(self, name: Union[str, list[str]]) -> Self:
@@ -2627,10 +2762,15 @@ For more information, see the [datafolio documentation](https://github.com/ceese
                     raise KeyError(f"Item '{n}' not found in DataFolio")
             names_to_unarchive = list(name)
 
-        for n in names_to_unarchive:
-            self._items[n].pop("archived", None)
-
-        self._save_items()
+        with self._mutation_guard():
+            for n in names_to_unarchive:
+                self._items[n].pop("archived", None)
+            try:
+                self._save_items()
+            except BaseException:
+                if not self._batch_mode:
+                    self._reload_committed()
+                raise
         return self
 
     # ==================== Lineage Methods ====================
@@ -2889,8 +3029,8 @@ For more information, see the [datafolio documentation](https://github.com/ceese
                 item_type = item.get("item_type")
 
                 if item_type == "referenced_table":
-                    # Just copy the reference (no data to copy)
-                    new_folio._items[item_name] = dict(item)
+                    # Just copy the reference descriptor (no data to copy)
+                    new_folio._items[item_name] = self._fresh_descriptor(item)
 
                 elif "filename" in item:
                     # Copy file-based items (tables, models, arrays, JSON, etc.)
@@ -2907,11 +3047,11 @@ For more information, see the [datafolio documentation](https://github.com/ceese
                     )
                     self._copy_payload_file(src_path, dst_path)
 
-                    new_folio._items[item_name] = dict(item)
+                    new_folio._items[item_name] = self._fresh_descriptor(item)
 
                 else:
                     # Handle items without files (shouldn't happen, but be defensive)
-                    new_folio._items[item_name] = dict(item)
+                    new_folio._items[item_name] = self._fresh_descriptor(item)
 
             # Save the new manifest
             new_folio._save_items()

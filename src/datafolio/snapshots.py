@@ -192,29 +192,36 @@ class SnapshotView:
                 self._folio._items.pop(name, None)
 
     def _find_snapshot_item(self, name: str) -> Dict[str, Any]:
-        """Find the item metadata for this snapshot.
+        """Resolve the EXACT item version this snapshot pinned.
+
+        Resolution goes through the recorded ``item_versions`` token (a
+        ``version_id``, or a checksum in legacy snapshots) — never through
+        ``in_snapshots`` membership alone, which could hand back a newer
+        current version wearing a stale marker.
 
         Args:
             name: Item name
 
         Returns:
-            Item metadata dict
+            Item metadata dict for the pinned version
 
         Raises:
-            KeyError: If item not found
+            KeyError: If the name isn't in the snapshot, or the pinned
+                version is no longer present in the manifest (fail closed
+                rather than serving different data under the snapshot name).
         """
-        # Check if it's the current version that's in this snapshot
-        if name in self._folio._items:
-            item = self._folio._items[name]
-            if self._name in item.get("in_snapshots", []):
-                return item
+        token = self._snapshot_meta.get("item_versions", {}).get(name)
+        if token is None:
+            raise KeyError(f"Item '{name}' not found in snapshot '{self._name}'")
 
-        # Otherwise search snapshot versions
-        for item in self._folio._snapshot_versions:
-            if item.get("name") == name and self._name in item.get("in_snapshots", []):
-                return item
-
-        raise KeyError(f"Item '{name}' not found in snapshot '{self._name}'")
+        item = self._folio._find_item_by_checksum(name, token)
+        if item is None:
+            raise KeyError(
+                f"Snapshot '{self._name}' pins version '{token}' of item "
+                f"'{name}', but that version is no longer in the manifest "
+                f"(was it removed by cleanup_orphaned_versions?)."
+            )
+        return item
 
 
 class SnapshotAccessor:
@@ -384,6 +391,8 @@ class SnapshotMixin:
         # snapshot pins the exact descriptor and reopening resolves it again.
         # Legacy items lacking a version_id get one assigned now (from their
         # checksum where available) and it is persisted with this snapshot.
+        # NOTE: this backfill mutates legacy descriptors in memory; on a failed
+        # publication below, _reload_committed() discards it.
         item_versions: Dict[str, str] = {}
         for item_name, item_meta in self._items.items():
             version_id = item_meta.get("version_id")
@@ -425,19 +434,29 @@ class SnapshotMixin:
         if capture_execution:
             snapshot_meta["execution"] = self._capture_execution_info()
 
-        # Update all current items to mark them as in this snapshot
-        for item_name in self._items:
-            item = self._items[item_name]
-            if "in_snapshots" not in item:
-                item["in_snapshots"] = []
-            item["in_snapshots"].append(name)
+        # Publish under the mutation guard: a stale notebook fails here,
+        # BEFORE any in-memory state or either manifest is touched.
+        with self._mutation_guard():
+            # Mark all current items as members of this snapshot
+            for item_name in self._items:
+                item = self._items[item_name]
+                if "in_snapshots" not in item:
+                    item["in_snapshots"] = []
+                item["in_snapshots"].append(name)
+            self._snapshots[name] = snapshot_meta
 
-        # Store snapshot
-        self._snapshots[name] = snapshot_meta
-
-        # Save snapshots.json and items.json
-        self._save_snapshots()
-        self._save_items()
+            # Cross-file ordering: commit the pinned item descriptors
+            # (items.json) BEFORE exposing the snapshot in snapshots.json —
+            # a visible snapshot must never point at uncommitted state. If
+            # either write fails, restore the committed in-memory state; at
+            # worst items.json retains harmless membership markers for a
+            # snapshot that never became visible.
+            try:
+                self._save_items()
+                self._save_snapshots()
+            except BaseException:
+                self._reload_committed()
+                raise
 
         return self
 
@@ -512,25 +531,40 @@ class SnapshotMixin:
         """
         self._check_read_only()
 
+        if self._batch_mode:
+            raise RuntimeError(
+                "delete_snapshot() cannot be called inside a batch() block: "
+                "the batch's items are not committed yet. Exit the batch "
+                "first."
+            )
+
         if name not in self._snapshots:
             raise KeyError(f"Snapshot '{name}' not found")
 
-        # Remove from snapshots registry
-        del self._snapshots[name]
+        # Mutate and publish under the guard: a stale notebook fails BEFORE
+        # any in-memory or on-disk change.
+        with self._mutation_guard():
+            del self._snapshots[name]
 
-        # Remove snapshot from all items' in_snapshots lists
-        for item in self._items.values():
-            if "in_snapshots" in item and name in item["in_snapshots"]:
-                item["in_snapshots"].remove(name)
+            for item in self._items.values():
+                if "in_snapshots" in item and name in item["in_snapshots"]:
+                    item["in_snapshots"].remove(name)
+            for item in self._snapshot_versions:
+                if "in_snapshots" in item and name in item["in_snapshots"]:
+                    item["in_snapshots"].remove(name)
 
-        # Also check snapshot versions
-        for item in self._snapshot_versions:
-            if "in_snapshots" in item and name in item["in_snapshots"]:
-                item["in_snapshots"].remove(name)
-
-        # Save manifests
-        self._save_snapshots()
-        self._save_items()
+            # Cross-file ordering for deletion: retract the snapshot from
+            # snapshots.json FIRST, then unmark items.json. If the second
+            # write fails, harmless retained markers point at a snapshot
+            # that no longer exists — preferable to a visible snapshot whose
+            # descriptors are gone. Either failure restores committed
+            # in-memory state.
+            try:
+                self._save_snapshots()
+                self._save_items()
+            except BaseException:
+                self._reload_committed()
+                raise
 
         # Optionally cleanup orphaned versions
         if cleanup_orphans:
@@ -753,26 +787,28 @@ class SnapshotMixin:
             if not in_snapshots:
                 orphaned_versions.append(item)
 
-        # Delete orphaned versions
         for item in orphaned_versions:
-            filename = item.get("filename")
+            if item.get("filename"):
+                deleted_files.append(item["filename"])
 
-            if not dry_run and filename:
-                # Delete the physical file (unless another descriptor still
-                # shares it — a metadata-only copy-on-write can leave the
-                # current item pointing at this same payload). Don't use
-                # handler.delete() as that would delete from _items.
-                self._delete_payload_if_unshared(item)
+        if dry_run or not deleted_files:
+            return deleted_files
 
-                # Remove from snapshot_versions list
+        # Publish the manifest without the orphans FIRST, then best-effort
+        # delete their payload files (never the reverse: a failed manifest
+        # write must not leave committed entries pointing at deleted bytes).
+        # The whole operation is guarded like any other mutation.
+        with self._mutation_guard():
+            removed = [i for i in orphaned_versions if i.get("filename")]
+            for item in removed:
                 self._snapshot_versions.remove(item)
-
-            if filename:
-                deleted_files.append(filename)
-
-        # Save updated manifest if we deleted anything
-        if not dry_run and deleted_files:
-            self._save_items()
+            try:
+                self._save_items()
+            except BaseException:
+                self._reload_committed()
+                raise
+            for item in removed:
+                self._delete_payload_if_unshared(item)
 
         return deleted_files
 
@@ -836,20 +872,25 @@ class SnapshotMixin:
                     )
                 pinned_by_name[item_name] = pinned
 
-            # Restore metadata
-            self.metadata.clear()
-            self.metadata.update(snap_metadata)
+            # Restore metadata (bulk internal update — the single manifest
+            # publish at the end of the restore commits it; per-key saves here
+            # would spray intermediate revisions)
+            dict.clear(self.metadata)
+            dict.update(self.metadata, snap_metadata)
 
             # Remove items not in the snapshot (added after it was taken). A
             # version pinned by some OTHER snapshot is preserved as a snapshot
             # version; an unpinned one is gone for good (this is the
-            # documented destructive part).
+            # documented destructive part). Payload deletion is DEFERRED
+            # until after the manifest publish succeeds — the committed
+            # manifest must never point at deleted bytes.
+            newly_unreferenced: list = []
             for item_name in set(self._items) - set(snap_items):
                 item = self._items[item_name]
                 if item.get("in_snapshots"):
                     self._handle_copy_on_write(item_name)
                 else:
-                    self._delete_payload_if_unshared(item)
+                    newly_unreferenced.append(item)
                 del self._items[item_name]
 
             # Repoint every snapshot item at its pinned descriptor.
@@ -859,12 +900,13 @@ class SnapshotMixin:
                     continue  # already the working version
 
                 # Displace the current version (if any): preserve it when a
-                # snapshot pins it, otherwise drop it and its payload.
+                # snapshot pins it, otherwise drop it (payload deleted only
+                # after the publish).
                 if current is not None:
                     if current.get("in_snapshots"):
                         self._handle_copy_on_write(item_name)
                     else:
-                        self._delete_payload_if_unshared(current)
+                        newly_unreferenced.append(current)
                     del self._items[item_name]
 
                 # Promote the pinned descriptor back to current. It stays
@@ -874,8 +916,15 @@ class SnapshotMixin:
                 pinned["is_current"] = True
                 self._items[item_name] = pinned
 
-            # Save updated state
-            self._save_items()
+            # Publish the manifest; only then best-effort delete the payloads
+            # it no longer references.
+            try:
+                self._save_items()
+            except BaseException:
+                self._reload_committed()
+                raise
+            for item in newly_unreferenced:
+                self._delete_payload_if_unshared(item)
 
         return self
 
@@ -920,12 +969,29 @@ class SnapshotMixin:
         if snapshot not in folio._snapshots:
             raise KeyError(f"Snapshot '{snapshot}' not found in bundle")
 
+        # Get snapshot metadata
+        snapshot_meta = folio._snapshots[snapshot]
+        snapshot_versions = snapshot_meta.get("item_versions", {})
+
+        # FAIL CLOSED: resolve every pinned version BEFORE changing any
+        # state. A pinned descriptor that can't be found must be an error —
+        # keeping the current item under the snapshot name would silently
+        # serve newer data as if it were the snapshot.
+        pinned: Dict[str, Dict[str, Any]] = {}
+        for item_name, version_token in snapshot_versions.items():
+            item = folio._find_item_by_checksum(item_name, version_token)
+            if item is None:
+                raise KeyError(
+                    f"Cannot load snapshot '{snapshot}': it pins version "
+                    f"'{version_token}' of item '{item_name}', but that "
+                    f"version is no longer in the manifest (was it removed "
+                    f"by cleanup_orphaned_versions?)."
+                )
+            pinned[item_name] = item
+
         # Set snapshot mode
         folio._in_snapshot_mode = True
         folio._loaded_snapshot = snapshot
-
-        # Get snapshot metadata
-        snapshot_meta = folio._snapshots[snapshot]
 
         # Replace current metadata with snapshot metadata
         # Use dict methods directly to bypass read-only checks during setup
@@ -933,21 +999,10 @@ class SnapshotMixin:
         dict.clear(folio.metadata)
         dict.update(folio.metadata, snapshot_metadata)
 
-        # Get snapshot item versions (using checksums as version identifiers)
-        snapshot_versions = snapshot_meta.get("item_versions", {})
-
-        # For each item in snapshot, point to that version
-        for item_name, checksum in snapshot_versions.items():
-            # Find the item with this name and checksum
-            item = folio._find_item_by_checksum(item_name, checksum)
-            if item:
-                folio._items[item_name] = item
-
-        # Remove items not in snapshot
-        current_items = list(folio._items.keys())
-        for item_name in current_items:
-            if item_name not in snapshot_versions:
-                del folio._items[item_name]
+        # Build the item mapping from scratch: exactly the pinned versions,
+        # nothing else. A current item is never retained merely because its
+        # logical name appears in the snapshot.
+        folio._items = pinned
 
         return folio
 

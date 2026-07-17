@@ -14,10 +14,29 @@ from datafolio.metadata import MetadataDict
 
 @pytest.fixture
 def mock_folio():
-    """Create a mock DataFolio instance."""
+    """Create a mock DataFolio instance.
+
+    Metadata mutations run inside folio._metadata_mutation() (the guarded
+    commit scope); the mock records each entry so tests can assert on
+    commit counts. _save_metadata is kept as an alias of that counter for
+    the older assertions.
+    """
+    import contextlib
+
     folio = Mock()
-    folio._save_metadata = Mock()
     folio._read_only = False  # Not in read-only mode
+
+    commits = Mock()
+
+    @contextlib.contextmanager
+    def _metadata_mutation():
+        yield
+        commits()
+
+    folio._metadata_mutation = _metadata_mutation
+    # Older tests assert on _save_metadata call counts; the commit counter
+    # plays that role under the guarded protocol.
+    folio._save_metadata = commits
     return folio
 
 
@@ -82,7 +101,7 @@ def test_setitem_updates_timestamp(mock_folio):
 
     # Set initial timestamp
     old_time = "2024-01-01T00:00:00+00:00"
-    md._parent._save_metadata = Mock()  # Reset mock
+    md._parent._save_metadata.reset_mock()  # Reset commit counter
     super(MetadataDict, md).__setitem__("updated_at", old_time)
 
     # Set a new item
