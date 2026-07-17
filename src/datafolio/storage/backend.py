@@ -128,15 +128,15 @@ class StorageBackend:
 
                 # Check if it looks like a file (has extension) or directory
                 if "." in path.split("/")[-1]:
-                    # Looks like a file - try to get it
+                    # Looks like a file - use a metadata-only existence check
+                    # (HEAD/stat), never a full object download.
                     dir_path, filename = self._split_cloud_path(path)
                     cf = (
                         CloudFiles(dir_path, use_https=self._use_https)
                         if dir_path
                         else CloudFiles(path, use_https=self._use_https)
                     )
-                    result = cf.get(filename if dir_path else path)
-                    return result is not None
+                    return bool(cf.exists(filename if dir_path else path))
                 else:
                     # Looks like a directory - check if prefix exists
                     cf = CloudFiles(path, use_https=self._use_https)
@@ -494,6 +494,40 @@ class StorageBackend:
         else:
             self._ensure_parent_dir(path)
             lazyframe.sink_parquet(path)
+
+    def sink_parquet_with_footer(self, path: str, lazyframe: Any) -> tuple[Any, int]:
+        """Stream a LazyFrame to Parquet and return ``(arrow_schema, num_rows)``.
+
+        Like :meth:`sink_parquet`, but reads the schema/row-count footer from the
+        **local staging file** (for cloud destinations) rather than re-reading
+        the just-uploaded object — avoiding a full cloud round-trip download just
+        to learn the schema.
+
+        Args:
+            path: Destination path (local or cloud).
+            lazyframe: A ``polars.LazyFrame`` to materialize.
+
+        Returns:
+            Tuple of (pyarrow.Schema, number of rows).
+        """
+        if is_cloud_path(path):
+            import os
+            import tempfile
+
+            fd, tmp_path = tempfile.mkstemp(suffix=".parquet")
+            os.close(fd)
+            try:
+                lazyframe.sink_parquet(tmp_path)
+                footer = self.parquet_footer(tmp_path)  # local read, no download
+                self._upload_file(path, tmp_path)
+                return footer
+            finally:
+                if os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+        else:
+            self._ensure_parent_dir(path)
+            lazyframe.sink_parquet(path)
+            return self.parquet_footer(path)
 
     def source_identity(self, path: str) -> Dict[str, Any]:
         """Best-effort point-in-time identity for an external object.

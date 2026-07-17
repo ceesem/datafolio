@@ -186,8 +186,9 @@ class SklearnHandler(BaseHandler):
             pass
 
         # Build filename based on custom flag
+        # (folio injects a collision-safe versioned name).
         extension = ".skops" if custom else ".joblib"
-        filename = f"{name}{extension}"
+        filename = kwargs.get("_filename") or f"{name}{extension}"
         subdir = self.get_storage_subdir()
         filepath = folio._storage.join_paths(folio._bundle_dir, subdir, filename)
 

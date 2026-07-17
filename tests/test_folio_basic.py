@@ -316,10 +316,11 @@ class TestDelete:
         assert "data2" not in folio._items
         assert "data3" in folio._items
 
-        # Verify files are deleted
-        assert not (tmp_path / "test" / "tables" / "data1.parquet").exists()
-        assert not (tmp_path / "test" / "tables" / "data2.parquet").exists()
-        assert (tmp_path / "test" / "tables" / "data3.parquet").exists()
+        # Verify files are deleted (payload filenames are versioned; only the
+        # surviving item's payload should remain in tables/).
+        tables_dir = tmp_path / "test" / "tables"
+        remaining = {p.name for p in tables_dir.glob("*.parquet")}
+        assert remaining == {folio._items["data3"]["filename"]}
 
     def test_delete_model(self, tmp_path):
         """Test deleting a model."""
@@ -673,8 +674,10 @@ class TestAddFile:
 
         # Name should be stem (without extension)
         assert "readme" in folio._items
-        # But filename should have extension
-        assert folio._items["readme"]["filename"] == "readme.md"
+        # Payload filenames are versioned (name--r<rev>.ext) but preserve the
+        # original extension and are derived from the logical name.
+        fn = folio._items["readme"]["filename"]
+        assert fn.startswith("readme--r") and fn.endswith(".md")
         assert folio._items["readme"]["description"] == "Project docs"
 
     def test_add_file_with_custom_name(self, tmp_path):
@@ -686,7 +689,8 @@ class TestAddFile:
         folio.add_file(code_file, name="training_script")
 
         assert "training_script" in folio._items
-        assert folio._items["training_script"]["filename"] == "training_script.py"
+        fn = folio._items["training_script"]["filename"]
+        assert fn.startswith("training_script--r") and fn.endswith(".py")
 
     def test_add_file_with_category(self, tmp_path):
         """Test adding file with category."""
@@ -708,9 +712,9 @@ class TestAddFile:
         folio = DataFolio(tmp_path / "test")
         folio.add_file(source)
 
-        # Verify file was copied to artifacts/
-        artifacts_dir = tmp_path / "test" / "artifacts"
-        copied_file = artifacts_dir / "source.txt"
+        # Verify file was copied to artifacts/ (versioned payload filename)
+        copied_file = Path(folio.get_artifact_path("source"))
+        assert copied_file.parent == tmp_path / "test" / "artifacts"
         assert copied_file.exists()
         assert copied_file.read_text() == content
 
@@ -732,7 +736,8 @@ class TestAddFile:
 
             stem = Path(filename).stem
             assert stem in folio._items
-            assert folio._items[stem]["filename"] == filename
+            # Versioned payload name preserves the original extension.
+            assert folio._items[stem]["filename"].endswith(Path(filename).suffix)
 
     def test_add_file_method_chaining(self, tmp_path):
         """Test that add_file returns self for chaining."""
@@ -764,9 +769,8 @@ class TestAddFile:
 
         assert folio._items["data"]["description"] == "Updated"
 
-        # Verify content was updated
-        artifacts_dir = tmp_path / "test" / "artifacts"
-        assert (artifacts_dir / "data.txt").read_text() == "updated content"
+        # Verify content was updated (read via the recorded versioned filename)
+        assert Path(folio.get_artifact_path("data")).read_text() == "updated content"
 
     def test_add_file_get_path(self, tmp_path):
         """Test retrieving file path with get_artifact_path."""

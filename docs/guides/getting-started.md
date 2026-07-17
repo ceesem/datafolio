@@ -904,7 +904,7 @@ A: Just share the directory! Everything is self-contained. You can:
 
 **Q: What about versioning?**
 
-A: Use [Snapshots](snapshots.md)! They let you create immutable checkpoints without duplicating data.
+A: Use [Snapshots](snapshots.md)! They checkpoint your owned data without duplicating it (external references preserve the recorded link, not the bytes behind it).
 
 **Q: Can I use this with Jupyter notebooks?**
 

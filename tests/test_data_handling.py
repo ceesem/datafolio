@@ -209,7 +209,8 @@ class TestGetDataPath:
         folio.add_table("test", df)
 
         path = folio.get_data_path("test")
-        assert "test.parquet" in path
+        assert path.endswith(folio._items["test"]["filename"])
+        assert path.endswith(".parquet")
 
     def test_get_data_path_not_found(self, tmp_path):
         """Test error when referenced table doesn't exist."""

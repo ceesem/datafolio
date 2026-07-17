@@ -88,8 +88,9 @@ class ArtifactHandler(BaseHandler):
             raise IsADirectoryError(f"Path is a directory, not a file: {filepath}")
 
         # Build filename - preserve extension from original file
+        # (folio injects a collision-safe versioned name).
         extension = source_path.suffix
-        filename = f"{name}{extension}"
+        filename = kwargs.get("_filename") or f"{name}{extension}"
         subdir = self.get_storage_subdir()
         dest_path = folio._storage.join_paths(folio._bundle_dir, subdir, filename)
 

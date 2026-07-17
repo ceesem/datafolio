@@ -91,8 +91,8 @@ class NumpyHandler(BaseHandler):
         if not isinstance(data, np.ndarray):
             raise TypeError(f"Expected numpy array, got {type(data).__name__}")
 
-        # Build filename
-        filename = f"{name}.npy"
+        # Build filename (folio injects a collision-safe versioned name)
+        filename = kwargs.get("_filename") or f"{name}.npy"
         subdir = self.get_storage_subdir()
         filepath = folio._storage.join_paths(folio._bundle_dir, subdir, filename)
 

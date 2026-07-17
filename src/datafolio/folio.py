@@ -41,6 +41,16 @@ from datafolio.utils import (
 # changes in a way that needs migration on load.
 MANIFEST_SCHEMA_VERSION = 1
 
+# Manifest schema versions this build can read. A bare-list manifest and a dict
+# manifest without an explicit ``schema_version`` are both treated as the
+# pre-versioning format (0) and migrated forward on the next write. A manifest
+# whose ``schema_version`` is newer than anything here is refused rather than
+# silently reinterpreted (see :meth:`DataFolio._load_manifests`).
+SUPPORTED_MANIFEST_VERSIONS = frozenset({0, 1})
+
+# Bounded wait (seconds) for the per-folio local write lock before giving up.
+DEFAULT_LOCK_TIMEOUT = 30.0
+
 
 class ConcurrentWriteError(RuntimeError):
     """Raised when a write would clobber a newer manifest from another writer.
@@ -49,6 +59,19 @@ class ConcurrentWriteError(RuntimeError):
     writer has advanced the manifest revision since this instance last loaded
     it, writing would silently lose their changes; this error surfaces that
     instead. Call :meth:`DataFolio.refresh` and re-apply your change.
+
+    This is also raised when the per-folio local write lock cannot be acquired
+    within the bounded timeout (another live writer is holding it).
+    """
+
+
+class UnsupportedManifestVersionError(RuntimeError):
+    """Raised when opening a folio written by a newer, unknown Datafolio.
+
+    ``items.json`` records a ``schema_version``. If it is newer than any version
+    this build knows how to read, the manifest is refused rather than silently
+    reinterpreted — reading it under the wrong assumptions could corrupt data on
+    the next write. Upgrade the ``datafolio`` package to open the folio.
     """
 
 
@@ -157,11 +180,56 @@ class SnapshotView:
             self._folio._items[name] = snapshot_item
             if frame == "polars":
                 return handler.get_lazy(self._folio, name).collect()
+            # Apply the same eager-read safeguards as the live get_table():
+            # a sharded/partitioned dataset can't be pandas-materialized, and a
+            # too-large table should be read lazily via scan_table().
             if snapshot_item.get("polars_only"):
                 raise _polars_only_error(name)
+            self._folio._check_eager_size(name, snapshot_item, allow_full_load=False)
             return handler.get(self._folio, name)
         finally:
             # Restore original item
+            if original_item is not None:
+                self._folio._items[name] = original_item
+            else:
+                self._folio._items.pop(name, None)
+
+    def scan_table(self, name: str, **kwargs) -> Any:  # Returns polars.LazyFrame
+        """Scan a snapshotted table as a genuinely lazy polars LazyFrame.
+
+        The snapshot counterpart to :meth:`DataFolio.scan_table`: predicate/
+        projection pushdown over the exact version recorded at snapshot time,
+        without materializing it. For a referenced table this reads from the
+        recorded external path (whose bytes are not owned/frozen — see
+        :meth:`DataFolio.mutable_references`). Not subject to the eager-size
+        guard (the whole point is to avoid a full read).
+
+        Args:
+            name: Table name.
+            **kwargs: Passed to the polars scanner (e.g. ``storage_options``).
+
+        Returns:
+            polars LazyFrame.
+
+        Raises:
+            KeyError: If the table is not in this snapshot.
+            ValueError: If the item is not a table.
+            NotImplementedError: If its format has no lazy scanner.
+        """
+        if name not in self.item_versions:
+            raise KeyError(f"Table '{name}' not found in snapshot '{self._name}'")
+
+        snapshot_item = self._find_snapshot_item(name)
+        item_type = snapshot_item.get("item_type")
+        if item_type not in ("included_table", "referenced_table"):
+            raise ValueError(f"Item '{name}' is not a table (type: {item_type})")
+
+        handler = get_registry().get(item_type)
+        original_item = self._folio._items.get(name)
+        try:
+            self._folio._items[name] = snapshot_item
+            return handler.get_lazy(self._folio, name, **kwargs)
+        finally:
             if original_item is not None:
                 self._folio._items[name] = original_item
             else:
@@ -414,6 +482,23 @@ class DataFolio:
 
         # Batch mode flag
         self._batch_mode = False
+
+        # Per-folio local write lock (created lazily; reused so nested
+        # acquisitions within one instance are reentrant rather than
+        # self-deadlocking). Guards the full mutation: payload write +
+        # manifest publish. Readers never touch it.
+        self._file_lock: Any = None
+        self._lock_timeout: float = DEFAULT_LOCK_TIMEOUT
+        # Depth of the active mutation guard (reentrancy counter).
+        self._mutation_depth: int = 0
+        # Version ids / payload filenames reserved during this instance's
+        # lifetime, so repeated replacements of the same logical item (e.g.
+        # within a single batch, before the revision advances) never collide.
+        self._reserved_version_ids: set[str] = set()
+        # Obsolete owned payloads queued for deletion after the manifest is
+        # actually published (used during a batch, where the publish is deferred
+        # to the end so nothing referenced by the committed manifest is removed).
+        self._pending_obsolete_payloads: list[Dict[str, Any]] = []
 
         # Manifest revision last loaded/written (stale-writer detection).
         # None until a manifest is loaded or first written.
@@ -896,38 +981,75 @@ class DataFolio:
     # ==================== Bundle Initialization ====================
 
     def _write_readme(self) -> None:
-        """Write a README.md file to document the bundle structure."""
+        """Write a README.md documenting the on-disk format as a public surface.
+
+        The on-disk layout is a compatibility surface: a folio must stay usable
+        without the datafolio package, degrading into ordinary files plus a
+        readable manifest. This README explains how to do exactly that.
+        """
         from datafolio import __version__
 
         readme_content = f"""# DataFolio Bundle
 
 This directory was created by [datafolio](https://github.com/ceesem/datafolio) version {__version__}.
 
+It is designed to remain useful **without** the datafolio package: it is an
+ordinary directory of standard files plus a readable JSON manifest.
+
 ## Structure
 
-- `metadata.json` - User metadata and timestamps
-- `items.json` - Manifest of all data items (tables, models, artifacts)
-- `tables/` - Parquet files for included tables
-- `models/` - Serialized ML models (sklearn)
-- `artifacts/` - Plots, configs, numpy arrays, JSON data, and other files
+- `items.json` - **The authoritative catalog** of every data item. Read this to
+  learn what the folio contains and where each item lives.
+- `metadata.json` - User metadata and timestamps.
+- `snapshots.json` - Named snapshots (if any), pinning item versions.
+- `CONTENTS.md` - A **derived**, human-readable inventory (regenerated from
+  `items.json`; never authoritative — do not parse it, read `items.json`).
+- `tables/` - Parquet files for included (owned) tables.
+- `models/` - Serialized ML models (joblib/skops).
+- `artifacts/` - Numpy arrays (`.npy`), JSON data (`.json`), images, text, and
+  other file artifacts.
 
-## Usage
+## Reading a folio without datafolio
 
-Load this bundle in Python:
+`items.json` is a JSON object: `{{"schema_version", "revision", "items": [...]}}`
+(very old folios may be a bare `[...]` list). Each entry in `items` describes
+one item version.
+
+1. **Find the current items.** Use only entries where `is_current` is `true`
+   (or absent, in old folios). Entries with `is_current: false` are prior
+   versions preserved for a snapshot.
+2. **Owned items** carry a `filename` relative to their type's subdirectory,
+   derived from `item_type`: `included_table` → `tables/`, `model` →
+   `models/`, everything else → `artifacts/`. Open the file at
+   `<subdir>/<filename>` with the standard library for its format:
+   - Parquet (`included_table`): `pandas.read_parquet` / `polars.read_parquet` /
+     `pyarrow.parquet`.
+   - JSON (`json_data`, `timestamp`): any JSON reader.
+   - NumPy (`numpy_array`): `numpy.load`.
+   - Text / images / other (`artifact`): open by extension.
+3. **External references** (`referenced_table`) carry an absolute `path`/URI
+   under `path` instead of a `filename`. datafolio does **not** copy or own that
+   data — it is not stored in the bundle, and its bytes are not guaranteed or
+   frozen (the reference records a link, which may have changed since). Read it
+   directly from that path.
+
+See the "Using a folio without Datafolio" page in the documentation for the full
+manifest field reference and path-resolution rules.
+
+## Usage with datafolio
 
 ```python
 from datafolio import DataFolio
 
-# Open the bundle
 folio = DataFolio('{self.path}')
+folio.describe()                       # view contents
 
-# View contents
-folio.describe()
-
-# Access data
-df = folio.get_table('table_name')
+df = folio.get_table('table_name')     # owned or referenced tables
 model = folio.get_model('model_name')
 array = folio.get_numpy('array_name')
+
+lf = folio.scan_table('big_reference') # lazy scan of a large external table
+folio.inspect_table('big_reference')   # record its schema/size on demand
 ```
 
 ## Documentation
@@ -936,24 +1058,77 @@ For more information, see the [datafolio documentation](https://github.com/ceese
 """
 
         readme_path = self._storage.join_paths(self._bundle_dir, "README.md")
+        self._write_text_file(readme_path, readme_content)
 
-        # Write README based on storage type
-        if is_cloud_path(self._bundle_dir):
-            # For cloud storage, use cloudfiles
+    def _write_text_file(self, path: str, content: str) -> None:
+        """Write a UTF-8 text file to local or cloud storage."""
+        if is_cloud_path(path):
             from cloudfiles import CloudFiles
 
-            parts = readme_path.rsplit("/", 1)
+            parts = path.rsplit("/", 1)
             if len(parts) == 2:
                 dir_path, filename = parts
             else:
                 dir_path = ""
                 filename = parts[0]
-            cf = CloudFiles(dir_path) if dir_path else CloudFiles(readme_path)
-            cf.put(filename, readme_content.encode("utf-8"))
+            cf = CloudFiles(dir_path) if dir_path else CloudFiles(path)
+            cf.put(filename, content.encode("utf-8"))
         else:
-            # For local storage, write directly
-            with open(readme_path, "w") as f:
-                f.write(readme_content)
+            with open(path, "w") as f:
+                f.write(content)
+
+    def _write_contents(self) -> None:
+        """Regenerate the derived, human-facing ``CONTENTS.md`` inventory.
+
+        This is a convenience view, **never** an authoritative catalog:
+        ``items.json`` remains the source of truth. The file is clearly labelled
+        as derived, records the manifest ``revision`` it represents, and lists
+        each current item's logical name, type, description, and path. It is
+        never required to read the folio. Best-effort: failures are swallowed so
+        a documentation write can't fail a data mutation.
+        """
+        try:
+            revision = self._manifest_revision or 0
+            lines = [
+                "# Contents",
+                "",
+                "> **Derived file — do not edit.** Regenerated from `items.json`, "
+                "which is the authoritative catalog. This reflects manifest "
+                f"revision **{revision}**.",
+                "",
+                "| Name | Type | Location | Description |",
+                "| --- | --- | --- | --- |",
+            ]
+            from datafolio.storage import get_storage_directory
+
+            def _cell(value: str) -> str:
+                return str(value).replace("|", "\\|").replace("\n", " ")
+
+            for name in sorted(self._items):
+                item = self._items[name]
+                item_type = item.get("item_type", "unknown")
+                description = item.get("description", "") or ""
+                if item.get("filename"):
+                    try:
+                        subdir = get_storage_directory(item_type)
+                        location = f"{subdir}/{item['filename']}"
+                    except Exception:
+                        location = item["filename"]
+                elif item.get("path"):
+                    location = f"{item['path']} (external reference)"
+                else:
+                    location = ""
+                lines.append(
+                    f"| {_cell(name)} | {_cell(item_type)} | {_cell(location)} "
+                    f"| {_cell(description)} |"
+                )
+
+            lines.append("")
+            contents_path = self._storage.join_paths(self._bundle_dir, "CONTENTS.md")
+            self._write_text_file(contents_path, "\n".join(lines))
+        except Exception:
+            # A derived convenience file must never break a real mutation.
+            pass
 
     def _initialize_bundle(self, max_retries: int = 10) -> None:
         """Initialize new bundle directory structure with collision retry.
@@ -1035,12 +1210,25 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         if self._storage.exists(items_path):
             items_data = self._storage.read_json(items_path)
 
-            # Handle both old format (list) and new format (dict with items)
+            # Handle both old format (list) and new format (dict with items).
+            # The manifest's ``schema_version`` gates compatibility: known
+            # versions (including the pre-versioning formats, treated as 0) are
+            # read and migrated forward on the next write; an unknown *newer*
+            # version is refused rather than silently reinterpreted.
             if isinstance(items_data, list):
                 # Oldest format: a bare list of items (backward compatibility).
                 items_list = items_data
                 self._manifest_revision = 0
             else:
+                schema_version = int(items_data.get("schema_version", 0) or 0)
+                if schema_version not in SUPPORTED_MANIFEST_VERSIONS:
+                    raise UnsupportedManifestVersionError(
+                        f"items.json at {items_path} declares schema_version "
+                        f"{schema_version}, which this build of datafolio does "
+                        f"not understand (it supports up to "
+                        f"{MANIFEST_SCHEMA_VERSION}). Upgrade the datafolio "
+                        f"package to open this folio."
+                    )
                 # Dict format: {schema_version?, revision?, items}. Missing
                 # revision (pre-versioning manifests) is treated as 0 and
                 # migrated forward on the next write.
@@ -1088,17 +1276,93 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         )
         self._storage.write_json(path, data)
 
+    def _local_lock(self) -> Any:
+        """Return this instance's reentrant local write lock (lazy).
+
+        A single :class:`filelock.FileLock` object is reused for the folio's
+        lifetime. filelock is reentrant *per object* (an internal counter), so
+        nested acquisitions inside one process/instance — e.g. a public method
+        entering the mutation guard and then calling ``_save_items`` — do not
+        self-deadlock. Constructing a fresh FileLock per call would instead
+        block on a second file descriptor.
+        """
+        if self._file_lock is None:
+            from filelock import FileLock
+
+            path = self._storage.join_paths(self._bundle_dir, ITEMS_FILE)
+            self._file_lock = FileLock(path + ".lock", timeout=self._lock_timeout)
+        return self._file_lock
+
+    @contextlib.contextmanager
+    def _mutation_guard(self):
+        """Serialize a complete local mutation and reject a stale writer early.
+
+        Wrapping an add/overwrite in this guard enforces the required ordering:
+
+            acquire local folio lock
+            → check the manifest revision (reject a stale writer)
+            → [caller writes the new payload]
+            → [caller atomically publishes the manifest via _save_items()]
+            → release the lock
+
+        Readers never enter this guard. The guard is reentrant (a public method
+        may delegate to another guarded method, or to ``_save_items`` which
+        re-acquires the same lock) and always releases on exception or normal
+        exit. Cloud object stores have no local lock; the stale check still runs
+        (best-effort — object stores lack conditional writes).
+        """
+        # Reentrant: an outer guard (or batch) already holds the lock and has
+        # done the stale check. Just nest.
+        if self._mutation_depth > 0:
+            self._mutation_depth += 1
+            try:
+                yield
+            finally:
+                self._mutation_depth -= 1
+            return
+
+        path = self._storage.join_paths(self._bundle_dir, ITEMS_FILE)
+        lock = None
+        if not is_cloud_path(path):
+            from filelock import Timeout
+
+            lock = self._local_lock()
+            try:
+                lock.acquire(timeout=self._lock_timeout)
+            except Timeout as exc:
+                raise ConcurrentWriteError(
+                    f"Could not acquire the folio write lock within "
+                    f"{self._lock_timeout:g}s — another writer is active on "
+                    f"{self._bundle_dir}. datafolio supports many readers but "
+                    f"one writer per bundle."
+                ) from exc
+        self._mutation_depth = 1
+        try:
+            # Reject a stale writer BEFORE any payload is written or replaced.
+            self._raise_if_manifest_stale(path)
+            yield
+        finally:
+            self._mutation_depth = 0
+            if lock is not None:
+                lock.release()
+
     def _save_items(self) -> None:
         """Save unified items.json manifest (versioned, atomic, stale-checked).
 
         Writes ``{schema_version, revision, items}``. Local writes are atomic
-        (temp + os.replace) and serialized by a lockfile; before overwriting,
-        the on-disk revision is checked so a stale writer can't silently clobber
-        a newer manifest (raises :class:`ConcurrentWriteError`). This supports
-        the "many readers, one writer" model — see the class docstring. Cloud
-        object stores lack conditional writes, so cross-writer safety there is
-        best-effort (the revision advances but two simultaneous cloud writers
-        can still race).
+        (temp + os.replace) and serialized by the per-folio reentrant lockfile;
+        before overwriting, the on-disk revision is checked so a stale writer
+        can't silently clobber a newer manifest (raises
+        :class:`ConcurrentWriteError`). This supports the "many readers, one
+        writer" model — see the class docstring. Cloud object stores lack
+        conditional writes, so cross-writer safety there is best-effort (the
+        revision advances but two simultaneous cloud writers can still race).
+
+        Normally this runs inside a :meth:`_mutation_guard` (which already holds
+        the lock and did the stale check); the reentrant lock makes the
+        re-acquisition here a no-op counter bump. When called on its own (e.g.
+        manifest-only operations like snapshotting or archiving) it still
+        acquires the lock and checks staleness itself.
         """
         if self._batch_mode:
             return
@@ -1108,13 +1372,12 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         try:
             path = self._storage.join_paths(self._bundle_dir, ITEMS_FILE)
 
-            # Serialize local writers with a lockfile so the read-check-write
-            # below is atomic on a single machine (no lock for cloud).
+            # Serialize local writers with the reentrant per-folio lock so the
+            # read-check-write below is atomic on a single machine (no lock for
+            # cloud). Reusing one FileLock object keeps nested acquisition safe.
             lock_ctx: Any = contextlib.nullcontext()
             if not is_cloud_path(path):
-                from filelock import FileLock
-
-                lock_ctx = FileLock(path + ".lock", timeout=30)
+                lock_ctx = self._local_lock()
 
             with lock_ctx:
                 self._raise_if_manifest_stale(path)
@@ -1139,6 +1402,10 @@ For more information, see the [datafolio documentation](https://github.com/ceese
                     "updated_at", datetime.now(timezone.utc).isoformat()
                 )
                 self._save_metadata()
+
+            # Refresh the derived, human-facing inventory (best-effort; never
+            # authoritative — items.json remains the catalog).
+            self._write_contents()
 
             # Sync data accessor to update autocomplete immediately
             self._sync_data_accessor()
@@ -1177,6 +1444,183 @@ For more information, see the [datafolio documentation](https://github.com/ceese
                 f"refresh() and re-apply your change (datafolio supports many "
                 f"readers but one writer per bundle)."
             )
+
+    # ==================== Item version / payload naming ====================
+
+    def _next_version_id(self, name: str) -> str:
+        """Allocate a stable, collision-safe version id for an item version.
+
+        Every persisted item version gets its own id (recognizable, not an
+        opaque UUID) so snapshots can pin the exact version and payload files
+        never clobber a version referenced by a committed manifest. The id
+        embeds the manifest revision the write is heading toward, e.g.
+        ``features--r17``. Repeated replacements of the same logical name before
+        the revision advances (inside one batch) are disambiguated with a
+        trailing counter so ids stay unique. Owned payload filenames are derived
+        from this id (``<version_id><ext>``).
+
+        Args:
+            name: Logical item name.
+
+        Returns:
+            A version id string unique within this instance's lifetime.
+        """
+        next_rev = (self._manifest_revision or 0) + 1
+        base = f"{name}--r{next_rev}"
+        candidate = base
+        counter = 1
+        while candidate in self._reserved_version_ids:
+            candidate = f"{base}-{counter}"
+            counter += 1
+        self._reserved_version_ids.add(candidate)
+        return candidate
+
+    def _reserve_payload_filename(
+        self, name: str, extension: str, subdir: str
+    ) -> tuple[str, str]:
+        """Reserve a versioned payload filename and its version id.
+
+        Guarantees the returned filename does not already exist on disk (so a
+        stale or interrupted writer never overwrites a payload the committed
+        manifest still references) and is unique among names reserved this
+        session (safe across repeated replacements within one batch).
+
+        Args:
+            name: Logical item name.
+            extension: File extension including the dot (e.g. ``.parquet``).
+            subdir: Storage subdirectory the payload lives in.
+
+        Returns:
+            ``(version_id, filename)``.
+        """
+        while True:
+            version_id = self._next_version_id(name)
+            filename = f"{version_id}{extension}"
+            full = self._storage.join_paths(self._bundle_dir, subdir, filename)
+            if not self._storage.exists(full):
+                return version_id, filename
+            # Name taken on disk (unlikely) — reserve the next and retry.
+
+    def _apply_description(
+        self, name: str, metadata: Dict[str, Any], description: Optional[str]
+    ) -> None:
+        """Apply the shared description semantics when (over)writing an item.
+
+        - ``description=None`` on **create**: omit the description.
+        - ``description=None`` on **overwrite**: preserve the existing one.
+        - ``description=""``: explicitly remove any description.
+        - non-empty ``description``: set/replace it.
+
+        ``metadata`` is the freshly built entry (handlers only set
+        ``description`` when it is non-empty); the prior entry, if any, is still
+        in ``self._items`` at call time. A description is never discarded
+        implicitly.
+
+        Args:
+            name: Logical item name.
+            metadata: Freshly built metadata dict for the new version (mutated).
+            description: The description argument as passed by the caller.
+        """
+        if description is None:
+            prior = self._items.get(name)
+            if prior is not None and prior.get("description") is not None:
+                metadata["description"] = prior["description"]
+            else:
+                metadata.pop("description", None)
+        elif description == "":
+            metadata.pop("description", None)
+        else:
+            metadata["description"] = description
+
+    def _obsolete_payload_after_commit(
+        self, old_item: Optional[Dict[str, Any]]
+    ) -> None:
+        """Delete an owned payload made obsolete by a successful overwrite.
+
+        Called only after the manifest has been published pointing at the new
+        payload, and only for a prior version that is *not* preserved by any
+        snapshot. A failed/interrupted operation may instead leave an
+        unreferenced orphan — that is acceptable (no GC machinery).
+
+        Args:
+            old_item: The replaced item's metadata, or ``None`` if there was no
+                prior version.
+        """
+        if not old_item:
+            return
+        if old_item.get("in_snapshots"):
+            return  # preserved by a snapshot — never delete
+        filename = old_item.get("filename")
+        if not filename:
+            return  # references own no payload
+        if self._batch_mode:
+            # The manifest publish is deferred to batch exit; defer the deletion
+            # too, so an interrupted/stale batch can't remove a payload the
+            # committed manifest still references.
+            self._pending_obsolete_payloads.append(old_item)
+            return
+        item_type = old_item.get("item_type", "")
+        try:
+            from datafolio.storage import get_storage_directory
+
+            subdir = get_storage_directory(item_type)
+        except Exception:
+            return
+        old_path = self._storage.join_paths(self._bundle_dir, subdir, filename)
+        try:
+            if self._storage.exists(old_path):
+                self._storage.delete_file(old_path)
+        except Exception:
+            # Best-effort cleanup; an orphan is acceptable.
+            pass
+
+    def _commit_owned_item(
+        self,
+        name: str,
+        handler_key: str,
+        extension: str,
+        description: Optional[str],
+        build_metadata,
+    ) -> None:
+        """Add/overwrite an owned (payload-backed) item under shared invariants.
+
+        Runs the full guarded mutation for every owned item type so the
+        invariants live in one place:
+
+        1. acquire the mutation guard (lock + stale-writer check *before* any
+           payload is written);
+        2. copy-on-write a snapshotted prior version out of the way;
+        3. reserve a collision-safe versioned filename + ``version_id`` and let
+           ``build_metadata`` write the payload there;
+        4. apply the description semantics (never discard one implicitly);
+        5. publish the manifest atomically;
+        6. delete the now-obsolete prior payload (only if unsnapshotted).
+
+        Args:
+            name: Logical item name.
+            handler_key: Registered handler item_type (for the storage subdir).
+            extension: Payload file extension including the dot.
+            description: Description argument as passed by the caller.
+            build_metadata: ``callable(filename, version_id) -> metadata`` that
+                writes the payload to ``filename`` and returns its metadata dict.
+        """
+        handler = get_registry().get(handler_key)
+        subdir = handler.get_storage_subdir()
+        with self._mutation_guard():
+            prior = self._items.get(name)
+            if self._is_in_snapshots(name):
+                self._handle_copy_on_write(name)
+            version_id, filename = self._reserve_payload_filename(
+                name, extension, subdir
+            )
+            metadata = build_metadata(filename, version_id)
+            metadata["version_id"] = version_id
+            self._apply_description(name, metadata, description)
+            metadata.setdefault("in_snapshots", [])
+            metadata.setdefault("is_current", True)
+            self._items[name] = metadata
+            self._save_items()
+            self._obsolete_payload_after_commit(prior)
 
     def _save_snapshots(self) -> None:
         """Save snapshots.json manifest."""
@@ -1503,26 +1947,21 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         if name in self._snapshots:
             raise ValueError(f"Snapshot '{name}' already exists")
 
-        # Capture current item versions (using checksum as version identifier)
+        # Capture current item versions by their stable ``version_id``. Every
+        # version persisted by this build has one; it works uniformly for owned
+        # items (checksummed) and external references (no checksum), so the
+        # snapshot pins the exact descriptor and reopening resolves it again.
+        # Legacy items lacking a version_id get one assigned now (from their
+        # checksum where available) and it is persisted with this snapshot.
         item_versions: Dict[str, str] = {}
         for item_name, item_meta in self._items.items():
-            # Use checksum as version identifier to detect actual content changes
-            # This is more reliable than filename since filenames can be reused
-            checksum = item_meta.get("checksum", "")
-
-            # For cloud files or items without checksums, generate a version ID
-            if not checksum:
-                import uuid
-
-                # Generate a consistent version ID based on item metadata
-                # Use created_at timestamp if available, otherwise generate new UUID
-                if "created_at" in item_meta:
-                    version_id = f"v_{item_meta['created_at']}"
-                else:
-                    version_id = f"v_{uuid.uuid4().hex[:8]}"
-                item_versions[item_name] = version_id
-            else:
-                item_versions[item_name] = checksum
+            version_id = item_meta.get("version_id")
+            if not version_id:
+                version_id = item_meta.get("checksum") or self._next_version_id(
+                    item_name
+                )
+                item_meta["version_id"] = version_id
+            item_versions[item_name] = version_id
 
         # Capture current metadata state
         metadata_snapshot = dict(self.metadata) if hasattr(self, "metadata") else {}
@@ -1794,32 +2233,34 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         snapshot_meta = self._snapshots[snapshot]
         snapshot_items = snapshot_meta.get("item_versions", {})
 
-        # Get current item versions (name -> checksum mapping)
-        current_items = {
-            item["name"]: item["checksum"] for item in self._items.values()
-        }
+        # Map current items by name for version comparison.
+        current_by_name = {item["name"]: item for item in self._items.values()}
 
         # Find item differences
         snapshot_names = set(snapshot_items.keys())
-        current_names = set(current_items.keys())
+        current_names = set(current_by_name.keys())
 
         added_items = sorted(current_names - snapshot_names)
         removed_items = sorted(snapshot_names - current_names)
 
-        # Check for modified items (different checksums)
+        # Check for modified items by version token. Snapshots record a stable
+        # ``version_id`` (older snapshots recorded a checksum); an item is
+        # unchanged if the recorded token still matches the current item's
+        # version_id or checksum.
         shared_names = snapshot_names & current_names
         modified_items = []
         unchanged_items = []
 
         for item_name in shared_names:
-            # Compare checksums
-            snapshot_checksum = snapshot_items[item_name]
-            current_checksum = current_items[item_name]
-
-            if snapshot_checksum != current_checksum:
-                modified_items.append(item_name)
-            else:
+            snapshot_token = snapshot_items[item_name]
+            current = current_by_name[item_name]
+            if snapshot_token in (
+                current.get("version_id"),
+                current.get("checksum"),
+            ):
                 unchanged_items.append(item_name)
+            else:
+                modified_items.append(item_name)
 
         # Compare metadata
         snapshot_metadata = snapshot_meta.get("metadata_snapshot", {})
@@ -2269,26 +2710,35 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         return new_folio
 
     def _find_item_by_checksum(
-        self, name: str, checksum: str
+        self, name: str, version_token: str
     ) -> Optional[Dict[str, Any]]:
-        """Find item by name and checksum.
+        """Find the item version a snapshot pinned for ``name``.
+
+        Snapshots record a stable ``version_id`` per item. Older snapshots
+        recorded a checksum instead, so this matches either — the exact version
+        recorded at snapshot time is returned, whether it is still the current
+        item or has since been superseded and moved to ``_snapshot_versions``.
 
         Args:
-            name: Item name
-            checksum: Checksum to match
+            name: Item name.
+            version_token: The ``version_id`` (or legacy checksum) recorded in
+                the snapshot's ``item_versions``.
 
         Returns:
-            Item metadata dict or None if not found
+            Item metadata dict or None if not found.
         """
-        # Check current items
-        if name in self._items:
-            item = self._items[name]
-            if item.get("checksum") == checksum:
-                return item
 
-        # Check snapshot versions
+        def _matches(item: Dict[str, Any]) -> bool:
+            return (
+                item.get("version_id") == version_token
+                or item.get("checksum") == version_token
+            )
+
+        if name in self._items and _matches(self._items[name]):
+            return self._items[name]
+
         for item in self._snapshot_versions:
-            if item.get("name") == name and item.get("checksum") == checksum:
+            if item.get("name") == name and _matches(item):
                 return item
 
         return None
@@ -2497,95 +2947,33 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         in_snapshots = item.get("in_snapshots", [])
         return len(in_snapshots) > 0
 
-    def _rename_to_snapshot_version(self, name: str) -> None:
-        """Rename current item file to snapshot version format.
-
-        When an item is in snapshots and needs to be overwritten, this method:
-        1. Renames the current file from <name>.<ext> to <name>@<snapshot>.<ext>
-        2. Uses the first snapshot name from in_snapshots list
-        3. Updates the item metadata to mark it as not current
-
-        Args:
-            name: Item name to rename
-
-        Raises:
-            ValueError: If item not found or not in any snapshots
-        """
-        if name not in self._items:
-            raise ValueError(f"Item '{name}' not found")
-
-        item = self._items[name]
-        in_snapshots = item.get("in_snapshots", [])
-
-        if not in_snapshots:
-            raise ValueError(f"Item '{name}' is not in any snapshots")
-
-        # Get the first snapshot name to use in filename
-        first_snapshot = in_snapshots[0]
-
-        # Get current filename and create snapshot version filename
-        current_filename = item.get("filename")
-        if not current_filename:
-            # For referenced tables, no file to rename
-            return
-
-        # Create snapshot version filename: <name>@<snapshot>.<ext>
-        # Extract extension from current filename
-        from pathlib import Path
-
-        file_path = Path(current_filename)
-
-        # Create new filename with @snapshot, preserving any subdirectory structure
-        # e.g. "examples/data.parquet" → "examples/data@snap.parquet"
-        snapshot_filename = str(
-            file_path.parent / f"{file_path.stem}@{first_snapshot}{file_path.suffix}"
-        )
-
-        # Get storage subdir based on item type
-        from datafolio.storage import get_storage_directory
-
-        item_type = item.get("item_type", "")
-
-        # Referenced tables don't have files to rename
-        if item_type == "referenced_table":
-            return
-
-        subdir = get_storage_directory(item_type)
-
-        # Build full paths
-        old_path = self._storage.join_paths(self._bundle_dir, subdir, current_filename)
-        new_path = self._storage.join_paths(self._bundle_dir, subdir, snapshot_filename)
-
-        # Rename the file
-        if self._storage.exists(old_path):
-            # For cloud storage, this is copy + delete
-            # For local storage, this is os.rename
-            self._storage.copy_file(old_path, new_path)
-            self._storage.delete_file(old_path)
-
-        # Update item metadata
-        item["filename"] = snapshot_filename
-        item["is_current"] = False
-
     def _handle_copy_on_write(self, name: str) -> None:
-        """Handle copy-on-write logic when overwriting an item.
+        """Preserve a snapshotted item's version before it is overwritten.
 
-        If the item exists and is in snapshots:
-        1. Rename current file to @snapshot version
-        2. Move old metadata to _snapshot_versions list
-        3. Caller will create new current entry in _items
+        With versioned payload filenames (``<name>--r<rev><ext>``) each version
+        already lives in its own file, so overwriting never touches the bytes a
+        snapshot depends on — there is nothing to rename. This method simply
+        marks the outgoing version non-current and moves its descriptor to
+        ``_snapshot_versions`` (uniformly for every item type, including
+        external references, whose descriptor must be preserved exactly as
+        recorded at snapshot time). The caller then installs the new version as
+        current under the same logical name.
 
         Args:
-            name: Item name being added/overwritten
+            name: Item name being overwritten.
         """
-        if self._is_in_snapshots(name):
-            # Item is in snapshots - need to preserve it
-            self._rename_to_snapshot_version(name)
-
-            # Move old item from _items to _snapshot_versions
-            old_item = self._items[name]
-            self._snapshot_versions.append(old_item)
-            # Note: caller will add new item to _items with same name
+        if not self._is_in_snapshots(name):
+            return
+        old_item = self._items[name]
+        old_item["is_current"] = False
+        # Ensure the preserved version is addressable by a stable id so
+        # snapshots can pin it unambiguously across reopen.
+        if not old_item.get("version_id"):
+            old_item["version_id"] = old_item.get("checksum") or self._next_version_id(
+                name
+            )
+        self._snapshot_versions.append(old_item)
+        # Caller installs the replacement in _items[name].
 
     # ==================== Auto-Refresh Methods ====================
 
@@ -2624,6 +3012,11 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         """Refresh manifests from disk/cloud if they've been updated externally."""
         # Skip refresh if we're in the middle of a save operation
         if self._in_save_operation:
+            return
+        # A snapshot-mode folio is pinned to the versions recorded at snapshot
+        # time; auto-refreshing would reload the *current* items and silently
+        # drop the snapshot view. Never refresh in snapshot mode.
+        if self._in_snapshot_mode:
             return
         if self._check_if_stale():
             self.refresh()
@@ -2749,18 +3142,33 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         Delays saving items.json until the context exits. This is useful
         when adding many items at once to avoid repeated disk I/O.
 
+        The mutation guard (local write lock + stale-writer check) is held for
+        the *entire* batch, so the whole batch either commits or is rejected as
+        a unit — a stale writer is caught before any payload is written, and no
+        other writer can interleave. Obsolete payloads replaced during the batch
+        are deleted only after the single final manifest publish.
+
         Examples:
             >>> with folio.batch():
             ...     for i in range(100):
             ...         folio.add_numpy(f'array_{i}', arr)
             # items.json saved once at end of block
         """
-        self._batch_mode = True
-        try:
-            yield
-        finally:
-            self._batch_mode = False
-            self._save_items()
+        with self._mutation_guard():
+            self._batch_mode = True
+            try:
+                yield
+            finally:
+                self._batch_mode = False
+                self._save_items()
+                # Flush payload deletions deferred during the batch (now that
+                # the manifest pointing at the new payloads is published).
+                pending, self._pending_obsolete_payloads = (
+                    self._pending_obsolete_payloads,
+                    [],
+                )
+                for old_item in pending:
+                    self._obsolete_payload_after_commit(old_item)
 
     def validate(self) -> Dict[str, bool]:
         """Validate existence and integrity of all items.
@@ -3230,52 +3638,50 @@ For more information, see the [datafolio documentation](https://github.com/ceese
 
         validate_table_format(table_format)
 
-        # Handle overwriting logic (parity with add_table)
-        if name in self._items:
-            if self._is_in_snapshots(name):
-                # Item is in snapshots - must preserve it via copy-on-write
-                self._handle_copy_on_write(name)
-            elif not overwrite:
-                raise ValueError(
-                    f"Item '{name}' already exists in this DataFolio. "
-                    f"Use overwrite=True to replace it."
-                )
-            # else: overwrite=True and not in snapshots, so just replace it
+        # Overwriting an existing, non-snapshotted item requires overwrite=True.
+        if name in self._items and not self._is_in_snapshots(name) and not overwrite:
+            raise ValueError(
+                f"Item '{name}' already exists in this DataFolio. "
+                f"Use overwrite=True to replace it."
+            )
 
-        # Get handler and delegate metadata creation
+        # A reference owns no payload, so there is no versioned file to write —
+        # but it still needs the full guarded, copy-on-write, description-
+        # preserving lifecycle (and a stable version_id so snapshots can pin the
+        # exact descriptor recorded at snapshot time).
         registry = get_registry()
         handler = registry.get("referenced_table")
 
-        # Handler builds metadata (path resolution happens in handler)
-        metadata = handler.add(
-            self,
-            name,
-            str(path),
-            description=description,
-            inputs=inputs,
-            table_format=table_format,
-            allow_full_load=allow_full_load,
-            polars_only=polars_only,
-        )
+        with self._mutation_guard():
+            if self._is_in_snapshots(name):
+                self._handle_copy_on_write(name)
 
-        # Add extra fields not handled by base handler
-        if num_rows is not None:
-            metadata["num_rows"] = num_rows
-        if version is not None:
-            metadata["version"] = version
-        if code is not None:
-            metadata["code"] = code
+            metadata = handler.add(
+                self,
+                name,
+                str(path),
+                description=description,
+                inputs=inputs,
+                table_format=table_format,
+                allow_full_load=allow_full_load,
+                polars_only=polars_only,
+            )
 
-        # Initialize snapshot fields for new items
-        if "in_snapshots" not in metadata:
-            metadata["in_snapshots"] = []
-        if "is_current" not in metadata:
-            metadata["is_current"] = True
+            # Add extra fields not handled by base handler
+            if num_rows is not None:
+                metadata["num_rows"] = num_rows
+            if version is not None:
+                metadata["version"] = version
+            if code is not None:
+                metadata["code"] = code
 
-        self._items[name] = metadata
+            metadata["version_id"] = self._next_version_id(name)
+            self._apply_description(name, metadata, description)
+            metadata.setdefault("in_snapshots", [])
+            metadata.setdefault("is_current", True)
 
-        # Write immediately
-        self._save_items()
+            self._items[name] = metadata
+            self._save_items()
 
         return self
 
@@ -3327,48 +3733,39 @@ For more information, see the [datafolio documentation](https://github.com/ceese
 
         validate_item_name(name)
 
-        # Handle overwriting logic
-        if name in self._items:
-            if self._is_in_snapshots(name):
-                # Item is in snapshots - must preserve it via copy-on-write
-                self._handle_copy_on_write(name)
-            elif not overwrite:
-                # Item exists but not in snapshots - respect overwrite flag
-                raise ValueError(
-                    f"Item '{name}' already exists in this DataFolio. Use overwrite=True to replace it."
+        # Overwriting an existing, non-snapshotted item requires overwrite=True.
+        # A snapshotted item is always preserved via copy-on-write inside the
+        # guarded commit below.
+        if name in self._items and not self._is_in_snapshots(name) and not overwrite:
+            raise ValueError(
+                f"Item '{name}' already exists in this DataFolio. "
+                f"Use overwrite=True to replace it."
+            )
+
+        from datafolio.utils import get_file_extension
+
+        def _build(filename: str, version_id: str) -> Dict[str, Any]:
+            metadata = (
+                get_registry()
+                .get("included_table")
+                .add(
+                    self,
+                    name,
+                    data,
+                    description=description,
+                    inputs=inputs,
+                    _filename=filename,
                 )
-            # else: overwrite=True and not in snapshots, so just replace it
+            )
+            if models is not None:
+                metadata["models"] = models
+            if code is not None:
+                metadata["code"] = code
+            return metadata
 
-        # Get handler and delegate storage + metadata creation
-        registry = get_registry()
-        handler = registry.get("included_table")
-
-        # Handler builds metadata and writes data
-        metadata = handler.add(
-            self,
-            name,
-            data,
-            description=description,
-            inputs=inputs,
+        self._commit_owned_item(
+            name, "included_table", get_file_extension("parquet"), description, _build
         )
-
-        # Add extra fields not handled by base handler
-        if models is not None:
-            metadata["models"] = models
-        if code is not None:
-            metadata["code"] = code
-
-        # Initialize snapshot fields for new items
-        if "in_snapshots" not in metadata:
-            metadata["in_snapshots"] = []
-        if "is_current" not in metadata:
-            metadata["is_current"] = True
-
-        self._items[name] = metadata
-
-        # Update manifest
-        self._save_items()
-
         return self
 
     def get_table(
@@ -3497,9 +3894,13 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         if size is None and item.get("item_type") == "referenced_table":
             # Reference sizes aren't recorded at (offline) creation. Stat the
             # object now — a cheap metadata lookup (HEAD), far cheaper than the
-            # full read this guard protects. Unknown size is allowed through.
+            # full read this guard protects. Operate on the effective resolved
+            # path so legacy relative references stat correctly. Unknown size is
+            # allowed through.
             try:
-                size = self._storage.file_size(item["path"])
+                size = self._storage.file_size(
+                    self._resolve_reference_path(item["path"])
+                )
             except Exception:
                 size = None
         if size is not None and size > limit:
@@ -3512,7 +3913,7 @@ For more information, see the [datafolio documentation](https://github.com/ceese
                 f"(or set max_eager_bytes=None to disable this guard)."
             )
 
-    def scan_table(self, name: str, **kwargs) -> Any:  # Returns polars.LazyFrame
+    def scan_table(self, name: str, **kwargs: Any) -> Any:  # Returns polars.LazyFrame
         """Scan a table as a **genuinely lazy** polars LazyFrame.
 
         Returns a lazy scan with predicate/projection pushdown that does not
@@ -3563,7 +3964,7 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         handler = registry.get(item_type)
         return handler.get_lazy(self, name, **kwargs)
 
-    def get_lazy(self, name: str, **kwargs) -> Any:  # Returns polars.LazyFrame
+    def get_lazy(self, name: str, **kwargs: Any) -> Any:  # Returns polars.LazyFrame
         """Alias for :meth:`scan_table` (a genuinely lazy polars scan).
 
         Kept for backward compatibility; prefer :meth:`scan_table`, whose name
@@ -3892,42 +4293,37 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             >>> # Portable pipeline with custom transformer (skops)
             >>> folio.add_sklearn('pipeline', custom_pipeline, custom=True)
         """
-        # Validate inputs
-        if not overwrite and name in self._items:
-            raise ValueError(
-                f"Item '{name}' already exists in this DataFolio. Use overwrite=True to replace it."
-            )
-
-        # Get handler and delegate storage + metadata creation
-
-        registry = get_registry()
-        handler = registry.get("model")
-
-        # Handler builds metadata and writes model
-        metadata = handler.add(
-            self, name, model, description=description, inputs=inputs, custom=custom
-        )
-
-        # Validate item name
-
         validate_item_name(name)
 
-        # Add extra fields not handled by base handler
-        if hyperparameters is not None:
-            metadata["hyperparameters"] = hyperparameters
-        if code is not None:
-            metadata["code"] = code
+        if name in self._items and not overwrite:
+            raise ValueError(
+                f"Item '{name}' already exists in this DataFolio. "
+                f"Use overwrite=True to replace it."
+            )
 
-        # Initialize snapshot fields for new items
-        if "in_snapshots" not in metadata:
-            metadata["in_snapshots"] = []
-        if "is_current" not in metadata:
-            metadata["is_current"] = True
+        extension = ".skops" if custom else ".joblib"
 
-        self._items[name] = metadata
+        def _build(filename: str, version_id: str) -> Dict[str, Any]:
+            metadata = (
+                get_registry()
+                .get("model")
+                .add(
+                    self,
+                    name,
+                    model,
+                    description=description,
+                    inputs=inputs,
+                    custom=custom,
+                    _filename=filename,
+                )
+            )
+            if hyperparameters is not None:
+                metadata["hyperparameters"] = hyperparameters
+            if code is not None:
+                metadata["code"] = code
+            return metadata
 
-        self._save_items()
-
+        self._commit_owned_item(name, "model", extension, description, _build)
         return self
 
     def add_model(
@@ -4115,38 +4511,28 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             >>> # Update with overwrite
             >>> folio.add_artifact('loss_curve', 'plots/updated_loss.png', category='plots', overwrite=True)
         """
-        # Validate inputs
-        if not overwrite and name in self._items:
-            raise ValueError(
-                f"Item '{name}' already exists in this DataFolio. Use overwrite=True to replace it."
-            )
-
-        # Get handler and delegate storage + metadata creation
-
-        registry = get_registry()
-        handler = registry.get("artifact")
-
-        # Handler builds metadata and copies file
-        metadata = handler.add(self, name, str(path), description=description)
-
-        # Validate item name
-
         validate_item_name(name)
 
-        # Add extra fields not handled by base handler
-        if category is not None:
-            metadata["category"] = category
+        if name in self._items and not overwrite:
+            raise ValueError(
+                f"Item '{name}' already exists in this DataFolio. "
+                f"Use overwrite=True to replace it."
+            )
 
-        # Initialize snapshot fields for new items
-        if "in_snapshots" not in metadata:
-            metadata["in_snapshots"] = []
-        if "is_current" not in metadata:
-            metadata["is_current"] = True
+        # Owned payload filename preserves the source file's extension.
+        extension = Path(str(path)).suffix
 
-        self._items[name] = metadata
+        def _build(filename: str, version_id: str) -> Dict[str, Any]:
+            metadata = (
+                get_registry()
+                .get("artifact")
+                .add(self, name, str(path), description=description, _filename=filename)
+            )
+            if category is not None:
+                metadata["category"] = category
+            return metadata
 
-        self._save_items()
-
+        self._commit_owned_item(name, "artifact", extension, description, _build)
         return self
 
     def add_file(
@@ -4341,44 +4727,34 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             ...     inputs=['test_data'],
             ...     code='predictions = model.predict(X)')
         """
-        # Validate inputs
-        if not overwrite and name in self._items:
-            raise ValueError(
-                f"Item '{name}' already exists in this DataFolio. Use overwrite=True to replace it."
-            )
-
-        # Get handler and delegate storage + metadata creation
-        registry = get_registry()
-        handler = registry.get("numpy_array")
-
-        # Handler builds metadata and writes data
-        metadata = handler.add(
-            self,
-            name,
-            array,
-            description=description,
-            inputs=inputs,
-        )
-
-        # Validate item name
-
         validate_item_name(name)
 
-        # Add extra fields not handled by base handler
-        if code is not None:
-            metadata["code"] = code
+        # Overwriting any existing item requires overwrite=True; a snapshotted
+        # prior version is then preserved via copy-on-write in the commit.
+        if name in self._items and not overwrite:
+            raise ValueError(
+                f"Item '{name}' already exists in this DataFolio. "
+                f"Use overwrite=True to replace it."
+            )
 
-        # Initialize snapshot fields for new items
-        if "in_snapshots" not in metadata:
-            metadata["in_snapshots"] = []
-        if "is_current" not in metadata:
-            metadata["is_current"] = True
+        def _build(filename: str, version_id: str) -> Dict[str, Any]:
+            metadata = (
+                get_registry()
+                .get("numpy_array")
+                .add(
+                    self,
+                    name,
+                    array,
+                    description=description,
+                    inputs=inputs,
+                    _filename=filename,
+                )
+            )
+            if code is not None:
+                metadata["code"] = code
+            return metadata
 
-        self._items[name] = metadata
-
-        # Update manifest
-        self._save_items()
-
+        self._commit_owned_item(name, "numpy_array", ".npy", description, _build)
         return self
 
     def get_numpy(self, name: str) -> Any:
@@ -4493,38 +4869,32 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             >>> # With scalar
             >>> folio.add_json('best_accuracy', 0.95)
         """
-        # Validate inputs
-        if not overwrite and name in self._items:
-            raise ValueError(
-                f"Item '{name}' already exists in this DataFolio. Use overwrite=True to replace it."
-            )
-
-        # Get handler and delegate storage + metadata creation
-
-        registry = get_registry()
-        handler = registry.get("json_data")
-
-        # Handler builds metadata and writes data
-        metadata = handler.add(self, name, data, description=description, inputs=inputs)
-
-        # Validate item name
-
         validate_item_name(name)
 
-        # Add extra fields not handled by base handler
-        if code is not None:
-            metadata["code"] = code
+        if name in self._items and not overwrite:
+            raise ValueError(
+                f"Item '{name}' already exists in this DataFolio. "
+                f"Use overwrite=True to replace it."
+            )
 
-        # Initialize snapshot fields for new items
-        if "in_snapshots" not in metadata:
-            metadata["in_snapshots"] = []
-        if "is_current" not in metadata:
-            metadata["is_current"] = True
+        def _build(filename: str, version_id: str) -> Dict[str, Any]:
+            metadata = (
+                get_registry()
+                .get("json_data")
+                .add(
+                    self,
+                    name,
+                    data,
+                    description=description,
+                    inputs=inputs,
+                    _filename=filename,
+                )
+            )
+            if code is not None:
+                metadata["code"] = code
+            return metadata
 
-        self._items[name] = metadata
-
-        self._save_items()
-
+        self._commit_owned_item(name, "json_data", ".json", description, _build)
         return self
 
     def get_json(self, name: str) -> Any:
@@ -4650,40 +5020,32 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             ...     inputs=['event_log'],
             ...     code='timestamp = event_log.iloc[0]["timestamp"]')
         """
-        # Validate inputs
-        if not overwrite and name in self._items:
-            raise ValueError(
-                f"Item '{name}' already exists in this DataFolio. Use overwrite=True to replace it."
-            )
-
-        # Get handler and delegate storage + metadata creation
-
-        registry = get_registry()
-        handler = registry.get("timestamp")
-
-        # Handler builds metadata and writes data
-        metadata = handler.add(
-            self, name, timestamp, description=description, inputs=inputs
-        )
-
-        # Validate item name
-
         validate_item_name(name)
 
-        # Add extra fields not handled by base handler
-        if code is not None:
-            metadata["code"] = code
+        if name in self._items and not overwrite:
+            raise ValueError(
+                f"Item '{name}' already exists in this DataFolio. "
+                f"Use overwrite=True to replace it."
+            )
 
-        # Initialize snapshot fields for new items
-        if "in_snapshots" not in metadata:
-            metadata["in_snapshots"] = []
-        if "is_current" not in metadata:
-            metadata["is_current"] = True
+        def _build(filename: str, version_id: str) -> Dict[str, Any]:
+            metadata = (
+                get_registry()
+                .get("timestamp")
+                .add(
+                    self,
+                    name,
+                    timestamp,
+                    description=description,
+                    inputs=inputs,
+                    _filename=filename,
+                )
+            )
+            if code is not None:
+                metadata["code"] = code
+            return metadata
 
-        self._items[name] = metadata
-
-        self._save_items()
-
+        self._commit_owned_item(name, "timestamp", ".json", description, _build)
         return self
 
     def get_timestamp(self, name: str, as_unix: bool = False) -> Union[datetime, float]:

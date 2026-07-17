@@ -101,6 +101,21 @@ Methods for loading data from a DataFolio.
         show_source: false
         heading_level: 3
 
+::: datafolio.DataFolio.scan_table
+    options:
+        show_source: false
+        heading_level: 3
+
+::: datafolio.DataFolio.get_lazy
+    options:
+        show_source: false
+        heading_level: 3
+
+::: datafolio.DataFolio.inspect_table
+    options:
+        show_source: false
+        heading_level: 3
+
 ::: datafolio.DataFolio.get_table_path
     options:
         show_source: false
@@ -472,10 +487,10 @@ print(folio.loaded_snapshot)  # e.g., 'v1.0' or None
 | **Adding Data** | `add_table()`, `add_numpy()`, `add_json()`, `add_timestamp()`, `add_data()`, `reference_table()` |
 | **Adding Models** | `add_sklearn()`, `add_model()` |
 | **Adding Artifacts** | `add_artifact()` |
-| **Retrieving Data** | `get_table()`, `get_table_path()`, `get_numpy()`, `get_numpy_path()`, `get_json()`, `get_json_path()`, `get_timestamp()`, `get_timestamp_path()`, `get_data()`, `get_data_path()`, `get_item_path()` |
+| **Retrieving Data** | `get_table()`, `scan_table()`, `get_lazy()`, `get_table_path()`, `get_numpy()`, `get_numpy_path()`, `get_json()`, `get_json_path()`, `get_timestamp()`, `get_timestamp_path()`, `get_data()`, `get_data_path()`, `get_item_path()` |
 | **Retrieving Models** | `get_sklearn()`, `get_model()`, `get_model_path()` |
 | **Retrieving Artifacts** | `get_artifact_path()` |
-| **Inspecting Items** | `list_contents()`, `get_table_info()`, `get_model_info()`, `get_artifact_info()`, `describe()` |
+| **Inspecting Items** | `list_contents()`, `get_table_info()`, `inspect_table()`, `get_model_info()`, `get_artifact_info()`, `describe()` |
 | **Managing Items** | `delete()`, `copy()`, `validate()`, `is_valid()` |
 | **Lineage** | `get_inputs()`, `get_dependents()`, `get_lineage_graph()` |
 | **Snapshots** | `create_snapshot()`, `list_snapshots()`, `delete_snapshot()`, `load_snapshot()`, `get_snapshot()`, `get_snapshot_info()`, `compare_snapshots()`, `diff_from_snapshot()`, `restore_snapshot()`, `export_snapshot()` |

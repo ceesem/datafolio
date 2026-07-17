@@ -473,9 +473,11 @@ class TestSubdirectoryNames:
         folio.add_table("examples/data", df)
 
         assert "examples/data" in folio._items
-        assert folio._items["examples/data"]["filename"] == "examples/data.parquet"
+        # Payload filename is versioned but keeps the subdir + extension.
+        filename = folio._items["examples/data"]["filename"]
+        assert filename.startswith("examples/data--r") and filename.endswith(".parquet")
         # Verify file exists on disk
-        expected_path = tmp_path / "test" / "tables" / "examples" / "data.parquet"
+        expected_path = tmp_path / "test" / "tables" / filename
         assert expected_path.exists()
 
     def test_roundtrip_table_with_subdir_name(self, tmp_path):

@@ -1,6 +1,17 @@
 # Snapshots: Version Control for Experiments
 
-Snapshots provide immutable checkpoints of your DataFolio bundles, allowing you to version experiments, compare results, and maintain reproducibility without duplicating data.
+Snapshots let you version experiments, compare results, and return to previous
+states without duplicating data.
+
+!!! info "What a snapshot preserves"
+    A snapshot preserves folio-owned data (included tables, models, artifacts,
+    numpy arrays, JSON, timestamps) and the **recorded state** of external
+    references. It does **not** preserve or guarantee the *contents* of
+    referenced data — datafolio never copies or freezes external bytes, so the
+    data behind a `reference_table` can change after the snapshot is taken. See
+    `mutable_references()` and `inspect_table()` (which records a point-in-time
+    `source_identity`); `get_snapshot_info()` flags any mutable references a
+    snapshot contains.
 
 ## Why Use Snapshots?
 
@@ -21,7 +32,7 @@ Without snapshots, you'd need to either:
 
 ### The Solution
 
-Snapshots let you create immutable checkpoints before experimenting:
+Snapshots let you checkpoint owned data before experimenting:
 
 ```python
 from datafolio import DataFolio
@@ -47,7 +58,7 @@ good_model = baseline.get_model('model')  # Original 89% model
 
 ## Key Benefits
 
-**🔒 Immutable** - Once created, snapshots never change
+**🔒 Owned data is frozen** - A snapshot's owned items never change (external references record a link, not the bytes)
 **💾 Space-efficient** - Only changed items create new files (copy-on-write)
 **🔄 Git integration** - Automatically captures commit hash and status
 **📝 Metadata preservation** - Complete experiment state at that moment
@@ -650,11 +661,16 @@ A: Very little! Snapshots only create new files when you overwrite items. Unchan
 
 **Q: Can I modify a snapshot?**
 
-A: No, snapshots are immutable. This is essential for reproducibility.
+A: No — a snapshot's owned items are frozen (copy-on-write preserves them). Note
+that a snapshot preserves the *recorded state* of external references, not the
+bytes behind them: the data a `reference_table` points at can still change after
+the snapshot is taken.
 
 **Q: Can I export/share a snapshot?**
 
-A: Yes! Just share the entire bundle directory. Others can load the same snapshot.
+A: Yes! Just share the entire bundle directory. Others can load the same
+snapshot's owned data. External references still point at their original
+locations, which the recipient may or may not be able to reach.
 
 **Q: Do snapshots work with cloud storage?**
 

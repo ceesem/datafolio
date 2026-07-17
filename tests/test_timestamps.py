@@ -145,8 +145,10 @@ class TestAddTimestamp:
         event_time = datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
         folio.add_timestamp("event_time", event_time)
 
-        # Check file exists
-        timestamp_file = tmp_path / "test" / "artifacts" / "event_time.json"
+        # Check file exists (payload filename is versioned)
+        timestamp_file = (
+            tmp_path / "test" / "artifacts" / folio._items["event_time"]["filename"]
+        )
         assert timestamp_file.exists()
 
 
@@ -356,4 +358,6 @@ class TestTimestampEdgeCases:
         folio.add_timestamp("my_event", event_time)
 
         item = folio._items["my_event"]
-        assert item["filename"] == "my_event.json"
+        # Payload filename is versioned but derived from the name + .json.
+        assert item["filename"].startswith("my_event--r")
+        assert item["filename"].endswith(".json")

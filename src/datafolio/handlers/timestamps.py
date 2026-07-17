@@ -103,8 +103,8 @@ class TimestampHandler(BaseHandler):
         iso_string = utc_dt.isoformat()
         unix_ts = utc_dt.timestamp()
 
-        # Build filename
-        filename = f"{name}.json"
+        # Build filename (folio injects a collision-safe versioned name)
+        filename = kwargs.get("_filename") or f"{name}.json"
         subdir = self.get_storage_subdir()
         filepath = folio._storage.join_paths(folio._bundle_dir, subdir, filename)
 

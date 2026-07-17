@@ -96,8 +96,8 @@ class JsonHandler(BaseHandler):
         except (TypeError, ValueError) as e:
             raise TypeError(f"Data is not JSON-serializable: {e}")
 
-        # Build filename
-        filename = f"{name}.json"
+        # Build filename (folio injects a collision-safe versioned name)
+        filename = kwargs.get("_filename") or f"{name}.json"
         subdir = self.get_storage_subdir()
         filepath = folio._storage.join_paths(folio._bundle_dir, subdir, filename)
 

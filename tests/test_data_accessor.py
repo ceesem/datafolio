@@ -217,7 +217,9 @@ class TestItemProxy:
 
         path = folio.data.plot.path
         assert path is not None
-        assert "plot.png" in path
+        # Payload filenames are versioned but preserve the extension.
+        assert path.endswith(".png")
+        assert path.endswith(folio._items["plot"]["filename"])
 
     def test_item_proxy_path_included_table(self, tmp_path):
         """Test .path returns the bundle parquet path for included tables."""
@@ -227,7 +229,7 @@ class TestItemProxy:
 
         path = folio.data.results.path
         assert path is not None
-        assert path.endswith("tables/results.parquet")
+        assert path.endswith("tables/" + folio._items["results"]["filename"])
 
     def test_item_proxy_path_none_for_non_tables(self, tmp_path):
         """Test .path returns None for non-table, non-artifact items."""

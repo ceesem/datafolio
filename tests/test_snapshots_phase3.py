@@ -288,10 +288,12 @@ class TestSnapshotIntegrationWithCopyOnWrite:
         assert len(folio._items) == 1
         assert len(folio._snapshot_versions) == 1
 
-        # Snapshot version should be preserved
+        # Snapshot version should be preserved in its own distinct payload file
+        # (no rename with versioned filenames).
         snapshot_item = folio._snapshot_versions[0]
-        assert "@v1.0" in snapshot_item["filename"]
         assert "v1.0" in snapshot_item["in_snapshots"]
+        assert snapshot_item["filename"] != folio._items["data"]["filename"]
+        assert snapshot_item.get("version_id")
 
         # Current version should have new data
         loaded_df = folio.get_table("data")
@@ -322,8 +324,9 @@ class TestSnapshotIntegrationWithCopyOnWrite:
         assert "v1.0" in snapshot_item["in_snapshots"]
         assert "v1.1" in snapshot_item["in_snapshots"]
 
-        # Filename should use first snapshot name
-        assert "@v1.0" in snapshot_item["filename"]
+        # Preserved version keeps its own distinct, stable payload file.
+        assert snapshot_item["filename"] != folio._items["data"]["filename"]
+        assert snapshot_item.get("version_id")
 
 
 if __name__ == "__main__":

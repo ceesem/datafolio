@@ -134,14 +134,21 @@ class DataframeHandler(BaseHandler):
             TypeError: If data is not a supported frame type.
         """
         extension = get_file_extension(table_format)
-        filename = f"{name}{extension}"
+        # The folio allocates a collision-safe versioned filename and injects it
+        # so a new payload never overwrites bytes a committed manifest (or a
+        # snapshot) still references. Direct handler calls fall back to a stable
+        # name.
+        filename = kwargs.get("_filename") or f"{name}{extension}"
         subdir = self.get_storage_subdir()
         filepath = folio._storage.join_paths(folio._bundle_dir, subdir, filename)
 
         if self._is_polars_lazy(data):
-            # Streaming, bounded-memory materialization.
-            folio._storage.sink_parquet(filepath, data)
-            arrow_schema, num_rows = folio._storage.parquet_footer(filepath)
+            # Streaming, bounded-memory materialization. The footer is read from
+            # the local staging file, so a cloud write never re-downloads the
+            # just-uploaded object just to learn its schema/row count.
+            arrow_schema, num_rows = folio._storage.sink_parquet_with_footer(
+                filepath, data
+            )
         else:
             # Eager frame -> Arrow -> Parquet. Pass the original data so the
             # backend can use the native writer (Polars' own writer emits
@@ -295,11 +302,14 @@ class ReferenceTableHandler(BaseHandler):
 
         from datafolio.utils import is_cloud_path, resolve_path
 
-        # Path storage: a relative local path is preserved VERBATIM so the
-        # reference stays portable (it resolves against the bundle at access
-        # time, so moving the bundle + adjacent data keeps the link working).
-        # Cloud URIs and explicitly-absolute local paths are stored as given
-        # (absolute local becomes a file:// URI). No remote I/O either way.
+        # Reference path policy: external references are absolute and static, so
+        # that moving/copying a folio preserves the recorded reference exactly
+        # (it is never rebased or reinterpreted). Cloud URIs keep their full URI;
+        # an absolute local path is normalized to a ``file://`` URI. A *new*
+        # relative path is rejected with an actionable error (legacy relative
+        # references already in a manifest are still read — resolved against the
+        # bundle — for backward compatibility; see _resolve_reference_path). No
+        # remote I/O either way.
         ref_str = str(reference)
         if (
             is_cloud_path(ref_str)
@@ -308,7 +318,13 @@ class ReferenceTableHandler(BaseHandler):
         ):
             stored_path = resolve_path(ref_str)
         else:
-            stored_path = ref_str  # relative — preserve for portability
+            raise ValueError(
+                f"Relative reference path {ref_str!r} is not allowed. External "
+                f"references must be absolute and static so moving or copying the "
+                f"folio preserves the link exactly. Pass an absolute path or a "
+                f"file:// URI (e.g. {os.path.abspath(ref_str)!r}) or a cloud URI "
+                f"(s3://, gs://, ...)."
+            )
 
         # Layout guess against the effective location — local uses a cheap local
         # stat; cloud is a name-only heuristic. Neither performs remote I/O.

@@ -158,38 +158,66 @@ class TestUnsupportedFormats:
 
 
 # =============================================================================
-# Finding 10: relative local references stay relative in the manifest and
-# resolve against the bundle, so moving/copying a bundle keeps links working.
+# Finding 10 / P8: reference path policy. External references are absolute and
+# static. A NEW relative reference is rejected with a helpful error; LEGACY
+# relative references already recorded in a manifest are still read (resolved
+# against the bundle) for backward compatibility.
 # =============================================================================
 
 
-class TestRelativeReferences:
-    def test_relative_reference_stored_verbatim(self, tmp_path):
-        bundle = tmp_path / "proj"
-        folio = DataFolio(bundle)
-        # data lives alongside the bundle contents
-        pd.DataFrame({"a": [1, 2, 3]}).to_parquet(bundle / "ext.parquet", index=False)
-        folio.reference_table("ref", path="ext.parquet")  # relative
-        # manifest keeps it relative (not absolute file://)
-        assert folio.get_table_info("ref")["path"] == "ext.parquet"
-
-    def test_relative_reference_reads_via_bundle(self, tmp_path):
+class TestReferencePathPolicy:
+    def test_new_relative_reference_rejected(self, tmp_path):
         bundle = tmp_path / "proj"
         folio = DataFolio(bundle)
         pd.DataFrame({"a": [1, 2, 3]}).to_parquet(bundle / "ext.parquet", index=False)
-        folio.reference_table("ref", path="ext.parquet")
-        assert folio.get_table("ref")["a"].to_list() == [1, 2, 3]
+        with pytest.raises(ValueError, match="[Rr]elative reference"):
+            folio.reference_table("ref", path="ext.parquet")
+        # Nothing was recorded.
+        assert "ref" not in folio._items
 
-    def test_relative_reference_survives_move(self, tmp_path):
+    def test_new_relative_reference_error_is_actionable(self, tmp_path):
+        folio = DataFolio(tmp_path / "proj")
+        with pytest.raises(ValueError, match="absolute path or a file://"):
+            folio.reference_table("ref", path="data/ext.parquet")
+
+    def test_legacy_relative_reference_still_reads(self, tmp_path):
+        # Simulate a folio written by an older datafolio: a relative reference
+        # path recorded verbatim in the manifest.
+        import orjson
+
+        bundle = tmp_path / "proj"
+        folio = DataFolio(bundle)
+        pd.DataFrame({"a": [1, 2, 3]}).to_parquet(bundle / "ext.parquet", index=False)
+        folio.reference_table("ref", path=str(bundle / "ext.parquet"))
+        # Rewrite the stored path to be relative (legacy shape).
+        items_path = bundle / "items.json"
+        data = orjson.loads(items_path.read_bytes())
+        for item in data["items"]:
+            if item["name"] == "ref":
+                item["path"] = "ext.parquet"
+        items_path.write_bytes(orjson.dumps(data))
+
+        reopened = DataFolio(bundle)
+        assert reopened.get_table_info("ref")["path"] == "ext.parquet"
+        assert reopened.get_table("ref")["a"].to_list() == [1, 2, 3]
+
+    def test_legacy_relative_reference_survives_move(self, tmp_path):
         import shutil
+
+        import orjson
 
         src = tmp_path / "proj"
         folio = DataFolio(src)
         pd.DataFrame({"a": [1, 2, 3]}).to_parquet(src / "ext.parquet", index=False)
-        folio.reference_table("ref", path="ext.parquet")
+        folio.reference_table("ref", path=str(src / "ext.parquet"))
+        items_path = src / "items.json"
+        data = orjson.loads(items_path.read_bytes())
+        for item in data["items"]:
+            if item["name"] == "ref":
+                item["path"] = "ext.parquet"
+        items_path.write_bytes(orjson.dumps(data))
         del folio
 
-        # Move the whole bundle (with its adjacent data) elsewhere.
         dst = tmp_path / "moved"
         shutil.copytree(src, dst)
         shutil.rmtree(src)

@@ -43,7 +43,9 @@ class TestAddModel:
 
         metadata = folio._items["clf"]
         assert metadata["item_type"] == "model"
-        assert metadata["filename"] == "clf.joblib"
+        # Payload filenames are versioned but preserve the format extension.
+        assert metadata["filename"].startswith("clf--r")
+        assert metadata["filename"].endswith(".joblib")
         assert metadata["description"] == "Test classifier"
 
     def test_add_model_method_chaining(self, tmp_path):
@@ -124,7 +126,8 @@ class TestAddArtifact:
         metadata = folio._items["loss_curve"]
         assert metadata["item_type"] == "artifact"
         assert metadata["category"] == "plots"
-        assert metadata["filename"] == "loss_curve.png"
+        assert metadata["filename"].startswith("loss_curve--r")
+        assert metadata["filename"].endswith(".png")
 
     def test_add_artifact_preserves_extension(self, tmp_path):
         """Test that file extension is preserved."""
@@ -135,7 +138,8 @@ class TestAddArtifact:
         folio.add_artifact("config", artifact_file)
 
         metadata = folio._items["config"]
-        assert metadata["filename"] == "config.json"
+        # Versioned payload filename still preserves the source extension.
+        assert metadata["filename"].endswith(".json")
 
     def test_add_artifact_with_description(self, tmp_path):
         """Test artifact with description."""

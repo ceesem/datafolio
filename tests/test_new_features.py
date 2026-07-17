@@ -50,8 +50,8 @@ def test_validate(tmp_path):
     assert results["valid_json"] is True
     assert results["valid_ref"] is True
 
-    # Corrupt bundle (delete internal file)
-    (folio._bundle_path / "artifacts" / "valid_json.json").unlink()
+    # Corrupt bundle (delete internal file — payload filenames are versioned)
+    (folio._bundle_path / "artifacts" / folio._items["valid_json"]["filename"]).unlink()
 
     # Corrupt reference (delete external file)
     ref_path.unlink()
@@ -80,8 +80,8 @@ def test_checksum_validation(tmp_path):
     # Validate - should be True
     assert folio.validate()["my_art"] is True
 
-    # Modify file in bundle to corrupt it
-    bundle_file = folio._bundle_path / "artifacts" / "my_art.txt"
+    # Modify file in bundle to corrupt it (payload filenames are versioned)
+    bundle_file = folio._bundle_path / "artifacts" / folio._items["my_art"]["filename"]
     bundle_file.write_text("hacked content")
 
     # Validate - should be False due to checksum mismatch
@@ -145,7 +145,9 @@ def test_extended_checksums(tmp_path):
     assert folio.validate()["model"] is True
 
     # Corrupt one
-    (folio._bundle_path / "artifacts" / "config.json").write_text("{}")
+    (folio._bundle_path / "artifacts" / folio._items["config"]["filename"]).write_text(
+        "{}"
+    )
     assert folio.validate()["config"] is False
 
 
@@ -159,8 +161,10 @@ def test_is_valid(tmp_path):
     # Should be valid
     assert folio.is_valid() is True
 
-    # Corrupt one item
-    (folio._bundle_path / "artifacts" / "item1.json").write_text("corrupted")
+    # Corrupt one item (payload filenames are versioned)
+    (folio._bundle_path / "artifacts" / folio._items["item1"]["filename"]).write_text(
+        "corrupted"
+    )
 
     # Should be invalid
     assert folio.is_valid() is False

@@ -61,7 +61,7 @@ This is the core DataFolio workflow: track your data, models, and results; snaps
 
 - **Universal Data Management** - Single `add_data()` method handles DataFrames, numpy arrays, dicts, lists, and scalars
 - **Model Support** - Save and load scikit-learn models with full metadata
-- **Snapshots** - Create immutable checkpoints of experiments with copy-on-write versioning (no data duplication!)
+- **Snapshots** - Checkpoint owned data with copy-on-write versioning (no data duplication; external references preserve the link, not the bytes)
 - **Data Lineage** - Track inputs and dependencies between datasets and models
 - **Autocomplete Access** - IDE-friendly `folio.data.item_name.content` syntax with full autocomplete
 - **Multi-Instance Sync** - Multiple notebooks/processes can safely access the same bundle

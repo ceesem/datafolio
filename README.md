@@ -22,7 +22,7 @@ Note: DataFolio has been an exercise in how extensively I can use Claude Code. C
 - **Item Management**: Delete items with dependency tracking and warnings
 - **Git-Friendly**: All data stored as standard file formats in a simple directory structure
 - **Type-Safe**: Full type hints and comprehensive error handling
-- **Snapshots**: Create immutable checkpoints of your experiments with copy-on-write versioning
+- **Snapshots**: Checkpoint owned data with copy-on-write versioning (references preserve the link, not the bytes)
 - **CLI Tools**: Command-line interface for snapshot management and bundle operations
 
 ## Quick Start
@@ -201,7 +201,14 @@ are not supported — convert to Parquet first.
 
 ## Snapshots: Version Control for Experiments
 
-Snapshots let you create immutable checkpoints of your experiments, making it easy to track different versions, compare results, and return to previous states without duplicating data.
+Snapshots let you version your experiments — track different versions, compare
+results, and return to previous states without duplicating data.
+
+> **What a snapshot preserves:** folio-owned data (included tables, models,
+> artifacts, ...) and the *recorded state* of external references. It does **not**
+> preserve or guarantee the contents of referenced data — datafolio never copies
+> or freezes external bytes, so the data behind a `reference_table` can change
+> after a snapshot is taken.
 
 ### Why Snapshots?
 
@@ -260,7 +267,7 @@ datafolio snapshot reproduce v1.0
 
 ### Key Features
 
-- **Immutable**: Once created, snapshots never change—guaranteed reproducibility
+- **Owned data frozen**: A snapshot's owned items never change (external references preserve the link, not the bytes)
 - **Space-efficient**: Uses copy-on-write versioning—only changed items create new files
 - **Git integration**: Automatically captures commit hash, branch, and dirty status
 - **Environment tracking**: Records Python version and dependencies for full reproducibility
