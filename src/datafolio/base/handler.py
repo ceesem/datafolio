@@ -173,7 +173,7 @@ class BaseHandler(ABC):
             NotImplementedError: If this item type does not support lazy access
         """
         raise NotImplementedError(
-            f"'{self.item_type}' does not support lazy access via get_lazy()"
+            f"'{self.item_type}' does not support lazy access via scan_table()"
         )
 
     def inspect(self, folio: "DataFolio", name: str) -> Dict[str, Any]:

@@ -18,12 +18,6 @@ folio.get("t", frame="polars")    # eager polars.DataFrame (downloads/collects)
 folio.scan_table("t")             # genuinely lazy polars.LazyFrame
 ```
 
-Eager reads pass reader options through to the underlying Parquet reader:
-
-```python
-folio.get("t", columns=["user_id", "amount"], filters=[("amount", ">", 0)])
-```
-
 `scan_table` returns a `pl.LazyFrame`, so you get predicate/projection pushdown
 and never materialize more than you ask for:
 
@@ -50,6 +44,57 @@ and never materialize more than you ask for:
 For any scheme it **cannot** scan lazily, it raises a clear error instead of
 silently downloading the whole object and pretending it was lazy. If you want an
 eager read that downloads, use `get(..., frame="polars")`.
+
+## Working with large tables
+
+A design principle of datafolio is to be **as lightweight as possible and
+offload to better tools as quickly as possible**. It has no query API of its
+own: for anything that shouldn't be loaded whole, datafolio's job is to hand
+you a lazy frame or a file path and get out of the way.
+
+An eager `get()` on a table above the folio's `max_eager_bytes` ceiling
+(500 MB by default) raises rather than silently loading it — the error points
+you at the two paths below. Pass `allow_full_load=True` (or set
+`max_eager_bytes=None`) if you really do want everything in memory.
+
+**1) polars (recommended): `scan_table` and normal polars**
+
+```python
+df = (
+    folio.scan_table("transactions")          # lazy — nothing is read yet
+    .filter(pl.col("amount") > 1000)          # pushdown: filters at the file
+    .select(["user_id", "amount"])            # pushdown: reads two columns
+    .collect()                                # only now does I/O happen
+)
+```
+
+Everything polars can do — grouping, joins, window functions, streaming
+collection of larger-than-memory results (`collect(engine="streaming")`) —
+works on the LazyFrame; see the
+[polars lazy API docs](https://docs.pola.rs/user-guide/lazy/). This is also
+the only path for sharded/partitioned datasets and works over external
+references without downloading them.
+
+**2) pandas (no polars): take the path to pyarrow**
+
+If you're staying in pandas, get the payload path and use pandas'
+pyarrow-backed reader directly — column pruning and predicate pushdown are
+pandas/pyarrow features, not datafolio ones:
+
+```python
+import pandas as pd
+
+df = pd.read_parquet(
+    folio.item_path("transactions"),
+    columns=["user_id", "amount"],
+    filters=[("amount", ">", 1000)],
+    engine="pyarrow",
+)
+```
+
+`item_path` works for included tables and external references alike (for
+cloud folios it returns the object URI; reading it with pandas requires the
+matching fsspec backend, e.g. `s3fs`).
 
 ## Writing tables
 

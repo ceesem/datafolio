@@ -171,8 +171,6 @@ df = folio.get('data')        # Returns DataFrame
 arr = folio.get('embeddings') # Returns numpy array
 config = folio.get('config')  # Returns dict
 
-# Tables support reader options
-df = folio.get('data', columns=['x'], filters=[('x', '>', 1)])
 pl_df = folio.get('data', frame='polars')  # eager Polars DataFrame
 
 # get() on a file item returns the payload path

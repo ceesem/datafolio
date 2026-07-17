@@ -44,25 +44,6 @@ Deep dive into DataFolio's snapshot system:
 
 ---
 
-### [Parquet Optimization](parquet-optimization.md)
-**Work efficiently with large datasets**
-
-Advanced techniques for working with large Parquet files:
-- Column selection (column pruning) - Read only what you need
-- Row filtering (predicate pushdown) - Filter before loading
-- Memory optimization strategies
-- Working with datasets larger than memory
-- Cloud storage optimization
-- Integration with PyArrow and DuckDB
-- Real-world performance examples
-- Best practices and troubleshooting
-
-**Who should read this:** Anyone working with large datasets (>1GB), cloud storage, or wanting to optimize performance.
-
-**Time to complete:** 20-25 minutes
-
----
-
 ## Learning Path
 
 **For Beginners:**
@@ -77,8 +58,7 @@ Advanced techniques for working with large Parquet files:
 - **Sharing files with non-datafolio users** → `item_path()` / `describe(show_paths=True)` in the [API Reference](../reference/datafolio-api.md#sharing-paths-with-collaborators)
 - **Model deployment** → [Working with Models](models.md)
 - **Custom sklearn pipelines** → [Working with Models](models.md)
-- **Cloud storage** → [Parquet Optimization](parquet-optimization.md)
-- **Large datasets** → [Parquet Optimization](parquet-optimization.md)
+- **Cloud storage / large datasets** → [Polars & References](polars.md) (Working with large tables)
 
 ---
 

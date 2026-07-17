@@ -317,7 +317,7 @@ class ReferenceTableHandler(BaseHandler):
             allow_full_load: If True, this reference bypasses the folio's
                 ``max_eager_bytes`` guard on eager ``get_table`` reads.
             polars_only: If True, the reference can only be read lazily/via
-                polars (``get_lazy`` / ``frame='polars'``); eager pandas reads
+                polars (``scan_table`` / ``frame='polars'``); eager pandas reads
                 raise a clear error. If None (default), this is inferred: a
                 sharded/partitioned directory dataset is polars-only, since
                 pandas mishandles such layouts.
@@ -386,7 +386,7 @@ class ReferenceTableHandler(BaseHandler):
 
         # Sharded/partitioned directory datasets are polars-only by default:
         # pandas mishandles hive-partitioned/typed layouts (cryptic errors), so
-        # eager pandas reads are refused in favor of get_lazy / frame='polars'.
+        # eager pandas reads are refused in favor of scan_table / frame='polars'.
         is_polars_only = is_directory if polars_only is None else polars_only
         if is_polars_only:
             metadata["polars_only"] = True

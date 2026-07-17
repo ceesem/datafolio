@@ -143,7 +143,7 @@ class DataFolio(SnapshotMixin, ContextCaptureMixin):
             max_eager_bytes: Size ceiling (in bytes) for eager, full-table reads
                 via ``get_table``. A table whose recorded ``size_bytes`` exceeds
                 this raises unless it is flagged ``allow_full_load`` — use
-                ``get_lazy`` instead. Set to ``None`` to disable the guard
+                ``scan_table`` instead. Set to ``None`` to disable the guard
                 (default: 500 MB).
 
         Examples:
@@ -1465,15 +1465,18 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         is a file.
 
         Eager table reads are subject to the folio's ``max_eager_bytes``
-        guard; use :meth:`scan_table` for a lazy scan of large tables.
+        guard. datafolio deliberately has no query API of its own — for
+        anything bigger than memory (or partial reads), use
+        :meth:`scan_table` and normal polars, or take :meth:`item_path`
+        to pandas/pyarrow directly:
+        ``pd.read_parquet(folio.item_path(name), columns=[...])``.
 
         Args:
             name: Item name.
             **type_opts: Type-specific options. Tables: ``frame``
-                ('pandas'/'polars'), ``allow_full_load``, plus reader options
-                (``columns``, ``filters``, ...). Timestamps: ``as_unix``.
-                Models: ``trusted`` (skops-format models only). Unknown
-                options raise ``TypeError``.
+                ('pandas'/'polars'), ``allow_full_load``. Timestamps:
+                ``as_unix``. Models: ``trusted`` (skops-format models only).
+                Unknown options raise ``TypeError``.
 
         Returns:
             The item's content (or path, for files).
@@ -1501,9 +1504,8 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         if item_type in ("included_table", "referenced_table"):
             frame = type_opts.pop("frame", "pandas")
             allow_full_load = type_opts.pop("allow_full_load", False)
-            return self._get_table(
-                name, frame=frame, allow_full_load=allow_full_load, **type_opts
-            )
+            self._reject_unknown_opts(item_type, type_opts)
+            return self._get_table(name, frame=frame, allow_full_load=allow_full_load)
         if item_type == "timestamp":
             as_unix = type_opts.pop("as_unix", False)
             self._reject_unknown_opts(item_type, type_opts)
@@ -1535,7 +1537,6 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         name: str,
         frame: str = "pandas",
         allow_full_load: bool = False,
-        **kwargs: Any,
     ) -> Any:
         """Eager table read (pandas or polars) with the shared guards."""
         item = self._items[name]
@@ -1551,13 +1552,13 @@ For more information, see the [datafolio documentation](https://github.com/ceese
 
         if frame == "polars":
             # Eager polars: scan lazily then collect.
-            return handler.get_lazy(self, name, **kwargs).collect()
+            return handler.get_lazy(self, name).collect()
         elif frame == "pandas":
             # Sharded/partitioned (polars-only) tables can't be materialized
             # as pandas — raise a clear, actionable error.
             if item.get("polars_only"):
                 raise _polars_only_error(name)
-            return handler.get(self, name, **kwargs)
+            return handler.get(self, name)
         else:
             raise ValueError(f"Unknown frame '{frame}'. Use 'pandas' or 'polars'.")
 
@@ -2143,7 +2144,7 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             allow_full_load: If True, this reference bypasses the folio's
                 ``max_eager_bytes`` guard on eager ``get_table`` reads.
             polars_only: If True, this reference is readable only lazily / via
-                polars (``get_lazy`` / ``frame='polars'``); eager pandas reads
+                polars (``scan_table`` / ``frame='polars'``); eager pandas reads
                 raise a clear error. If None (default), inferred from the
                 layout: a sharded/partitioned directory dataset is polars-only.
 
@@ -2256,9 +2257,11 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             limit_mb = limit / (1024 * 1024)
             raise ValueError(
                 f"Table '{name}' is ~{size_mb:.0f} MB, above the "
-                f"{limit_mb:.0f} MB eager-load limit. Use get_lazy('{name}') "
-                f"for predicate/projection pushdown, or pass allow_full_load=True "
-                f"(or set max_eager_bytes=None to disable this guard)."
+                f"{limit_mb:.0f} MB eager-load limit. Use scan_table('{name}') "
+                f"for a lazy polars scan with predicate/projection pushdown "
+                f"(pip install 'datafolio[polars]' if needed), or pass "
+                f"allow_full_load=True (or set max_eager_bytes=None) to "
+                f"load it all anyway."
             )
 
     def scan_table(self, name: str, **kwargs: Any) -> Any:  # Returns polars.LazyFrame

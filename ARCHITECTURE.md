@@ -45,11 +45,18 @@ DataFolio is a system for bundling machine learning experiments—datasets, mode
 
 The architecture is built on these core principles:
 
-1. **Modularity**: Each data type is handled by a separate, focused module (~35-80 lines)
-2. **Extensibility**: Add new data types without modifying core code
-3. **Single Responsibility**: Each component has one clear purpose
-4. **Composition over Inheritance**: Handlers are plugins, not subclasses
-5. **Type Safety**: Enums and type hints throughout
+1. **As lightweight as possible; offload as quickly as possible**: datafolio
+   organizes, links, and hands off. It has no query API, no compute layer, and
+   no bespoke formats — big-table work belongs to polars/pyarrow, which
+   datafolio reaches via `scan_table()` (a plain `pl.LazyFrame`) or
+   `item_path()` (a plain file path)
+2. **Modularity**: Each data type is handled by a separate, focused handler module
+3. **Internal extensibility**: New data types are one handler file plus a
+   category entry — no changes to the core (a design seam, not a public
+   plugin API)
+4. **Single Responsibility**: Each component has one clear purpose
+5. **Composition over Inheritance**: Handlers are plugins, not subclasses
+6. **Type Safety**: Enums and type hints throughout
 
 ### 1.3 High-Level Architecture
 

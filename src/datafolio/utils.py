@@ -670,6 +670,7 @@ def _polars_only_error(name: str) -> ValueError:
     """Build the standard error for pandas access to a polars-only table."""
     return ValueError(
         f"Table '{name}' is a sharded/partitioned (polars-only) dataset and "
-        f"cannot be loaded as pandas. Use get_lazy('{name}') for a lazy scan, "
-        f"or get_table('{name}', frame='polars') to collect it eagerly."
+        f"cannot be loaded as pandas. Use scan_table('{name}') for a lazy "
+        f"scan, or get('{name}', frame='polars') to collect it eagerly. If "
+        f"polars is not installed: pip install 'datafolio[polars]'."
     )
