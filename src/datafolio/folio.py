@@ -4608,50 +4608,47 @@ For more information, see the [datafolio documentation](https://github.com/ceese
                 name, reference, description=description, **kwargs
             )
 
-        # Auto-detect handler using registry
-        from datafolio.base.registry import detect_handler, get_handler
+        # Type detection only. We then delegate to the type-specific public
+        # method so that duplicate-name checks, overwrite semantics, snapshot
+        # copy-on-write, and type-specific metadata are enforced identically to
+        # the explicit APIs (add_data must not bypass those invariants).
+        from datafolio.base.registry import detect_handler
 
         handler = detect_handler(data)
+        item_type = handler.item_type if handler is not None else None
 
-        # Fallback: primitives (int, float, str, bool, None) -> JSON handler
-        # These don't auto-detect to avoid conflicts, but add_data() accepts them
-        if handler is None and isinstance(data, (int, float, str, bool, type(None))):
-            handler = get_handler("json_data")
+        # Fallback: primitives (int, float, str, bool, None) -> JSON.
+        # These don't auto-detect (to avoid conflicts), but add_data accepts them.
+        if item_type is None and isinstance(data, (int, float, str, bool, type(None))):
+            item_type = "json_data"
 
-        if handler is None:
+        if item_type is None:
             raise TypeError(
                 f"Unsupported data type: {type(data).__name__}. "
                 f"No handler found for this type. "
-                f"Supported types: pandas.DataFrame, numpy.ndarray, "
+                f"Supported types: pandas.DataFrame, Polars DataFrame, numpy.ndarray, "
                 f"sklearn models, dict, list, datetime, file paths, or JSON scalars. "
                 f"Use explicit add_*() methods for more control."
             )
 
-        # Validate item name
-
-        validate_item_name(name)
-
-        # Use handler to add data
-        metadata = handler.add(
-            folio=self,
-            name=name,
-            data=data,
-            description=description,
-            inputs=kwargs.get("inputs"),
-            **kwargs,
-        )
-
-        # Initialize snapshot fields for new items
-        if "in_snapshots" not in metadata:
-            metadata["in_snapshots"] = []
-        if "is_current" not in metadata:
-            metadata["is_current"] = True
-
-        self._items[name] = metadata
-
-        self._save_items()
-
-        return self
+        # Delegate to the corresponding public method (value arg name varies).
+        if item_type == "included_table":
+            return self.add_table(name, data, description=description, **kwargs)
+        elif item_type == "numpy_array":
+            return self.add_numpy(name, data, description=description, **kwargs)
+        elif item_type == "json_data":
+            return self.add_json(name, data, description=description, **kwargs)
+        elif item_type == "timestamp":
+            return self.add_timestamp(name, data, description=description, **kwargs)
+        elif item_type == "model":
+            return self.add_model(name, data, description=description, **kwargs)
+        elif item_type == "artifact":
+            return self.add_artifact(name, data, description=description, **kwargs)
+        else:
+            raise TypeError(
+                f"Detected item type '{item_type}' has no generic add path. "
+                f"Use the corresponding explicit add_*() method."
+            )
 
     def get_data(self, name: str) -> Any:
         """Generic data getter that returns any data type.
@@ -4679,38 +4676,31 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             >>> embeddings = folio.get_data('embeddings')  # Returns numpy array
             >>> config = folio.get_data('config')  # Returns dict
         """
+        # Auto-refresh so a freshly-written item from another writer is visible.
+        self._refresh_if_needed()
+
         if name not in self._items:
             raise KeyError(f"Item '{name}' not found in DataFolio")
 
         item = self._items[name]
         item_type = item.get("item_type")
 
-        # Only allow "data" types - not models or artifacts
-        data_types = (
-            "referenced_table",
-            "included_table",
-            "numpy_array",
-            "json_data",
-            "timestamp",
-        )
-        if item_type not in data_types:
+        # Delegate to the type-specific public getter so caching, eager-size
+        # guards, polars_only handling, and refresh behave identically to the
+        # explicit APIs (get_data must not bypass those).
+        if item_type in ("referenced_table", "included_table"):
+            return self.get_table(name)
+        elif item_type == "numpy_array":
+            return self.get_numpy(name)
+        elif item_type == "json_data":
+            return self.get_json(name)
+        elif item_type == "timestamp":
+            return self.get_timestamp(name)
+        else:
+            # Not a "data" type (e.g. model or artifact), or unknown.
             raise ValueError(
                 f"Item '{name}' is not a data item (type: {item_type}). "
                 f"Use get_model() for models or get_artifact_path() for artifacts."
-            )
-
-        # Get handler from registry and use it to retrieve data
-        from datafolio.base.registry import get_handler
-
-        try:
-            handler = get_handler(item_type)
-            return handler.get(folio=self, name=name)
-        except KeyError:
-            # No handler registered for this type
-            raise ValueError(
-                f"Item '{name}' has unknown type '{item_type}'. "
-                f"No handler registered for this type. "
-                f"Use type-specific get methods if available."
             )
 
     def update_item(
