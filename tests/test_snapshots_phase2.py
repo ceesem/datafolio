@@ -48,7 +48,7 @@ class TestCopyOnWrite:
         folio.add("data", df1)
 
         # Manually mark as in snapshot (Phase 3 does this via create_snapshot()).
-        folio._items["data"]["in_snapshots"] = ["v1.0"]
+        folio.create_snapshot("v1.0")
 
         # Overwrite - should trigger copy-on-write
         folio.add("data", df2, overwrite=True)
@@ -84,7 +84,7 @@ class TestCopyOnWrite:
         tables_dir = Path(folio._bundle_dir) / "tables"
         assert (tables_dir / original_filename).exists()
 
-        folio._items["data"]["in_snapshots"] = ["v1.0"]
+        folio.create_snapshot("v1.0")
         folio.add("data", df2, overwrite=True)
 
         # The old file still exists under its ORIGINAL name (never renamed).
@@ -111,7 +111,7 @@ class TestCopyOnWrite:
         df2 = pd.DataFrame({"a": [4, 5, 6]})
 
         folio.add("data", df1)
-        folio._items["data"]["in_snapshots"] = ["v1.0"]
+        folio.create_snapshot("v1.0")
         folio.add("data", df2, overwrite=True)
 
         items_path = Path(folio._bundle_dir) / "items.json"
@@ -138,7 +138,7 @@ class TestCopyOnWrite:
         df2 = pd.DataFrame({"a": [4, 5, 6]})
 
         folio1.add("data", df1)
-        folio1._items["data"]["in_snapshots"] = ["v1.0"]
+        folio1.create_snapshot("v1.0")
         folio1.add("data", df2, overwrite=True)
         preserved_filename = folio1._snapshot_versions[0]["filename"]
 
@@ -161,10 +161,10 @@ class TestCopyOnWrite:
         df3 = pd.DataFrame({"a": [7, 8, 9]})
 
         folio.add("data", df1)
-        folio._items["data"]["in_snapshots"] = ["v1.0"]
+        folio.create_snapshot("v1.0")
 
         folio.add("data", df2, overwrite=True)
-        folio._items["data"]["in_snapshots"] = ["v2.0"]
+        folio.create_snapshot("v2.0")
 
         folio.add("data", df3, overwrite=True)
 
@@ -220,7 +220,7 @@ class TestCopyOnWriteErrors:
         df2 = pd.DataFrame({"a": [4, 5, 6]})
 
         folio.add("data", df1)
-        folio._items["data"]["in_snapshots"] = ["v1.0"]
+        folio.create_snapshot("v1.0")
 
         folio.add("data", df2, overwrite=True)
 

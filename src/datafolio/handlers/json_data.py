@@ -52,7 +52,7 @@ class JsonHandler(BaseHandler):
             try:
                 import orjson
 
-                orjson.dumps(data)
+                orjson.dumps(data, option=orjson.OPT_SERIALIZE_NUMPY)
                 return True
             except (TypeError, ValueError, ImportError):
                 return False
@@ -92,7 +92,7 @@ class JsonHandler(BaseHandler):
 
         # Validate JSON-serializability
         try:
-            orjson.dumps(data)
+            orjson.dumps(data, option=orjson.OPT_SERIALIZE_NUMPY)
         except (TypeError, ValueError) as e:
             raise TypeError(f"Data is not JSON-serializable: {e}")
 

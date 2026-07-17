@@ -5,12 +5,14 @@ __version__ = "1.3.0"
 from datafolio.folio import (
     ConcurrentWriteError,
     DataFolio,
+    ManifestReadError,
     UnsupportedManifestVersionError,
 )
 
 __all__ = [
     "DataFolio",
     "ConcurrentWriteError",
+    "ManifestReadError",
     "UnsupportedManifestVersionError",
     "__version__",
 ]

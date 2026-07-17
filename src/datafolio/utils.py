@@ -605,6 +605,13 @@ def validate_item_name(name: str) -> None:
                 f"Invalid item name '{name}': empty, '.', or '..' path "
                 f"segments are not allowed"
             )
+        if len(segment) > 200:
+            raise ValueError(
+                f"Invalid item name '{name}': segment '{segment[:32]}…' is "
+                f"longer than 200 characters. Payload filenames append a "
+                f"version suffix and extension, so segments need headroom "
+                f"below the filesystem's 255-character limit."
+            )
         if not _ITEM_NAME_SEGMENT.match(segment):
             raise ValueError(
                 f"Invalid item name '{name}': segment '{segment}' must start "

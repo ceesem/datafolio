@@ -72,6 +72,18 @@ class ConcurrentWriteError(RuntimeError):
     """
 
 
+class ManifestReadError(ConcurrentWriteError):
+    """Raised when items.json cannot be read and verified before a write.
+
+    The manifest is the commit record: if it is missing, unreadable, or
+    malformed at write time, proceeding could silently clobber another
+    writer's committed work — so datafolio fails CLOSED. Reopen or
+    :meth:`DataFolio.refresh` once the manifest is readable again, then
+    retry. (Subclasses :class:`ConcurrentWriteError` so existing
+    catch-and-retry handling keeps working.)
+    """
+
+
 class UnsupportedManifestVersionError(RuntimeError):
     """Raised when opening a folio written by a newer, unknown Datafolio.
 
@@ -126,6 +138,7 @@ class DataFolio(SnapshotMixin, ContextCaptureMixin):
         metadata: Optional[Dict[str, Any]] = None,
         random_suffix: bool = False,
         read_only: bool = False,
+        allow_existing: bool = False,
         use_https: bool = False,
         max_eager_bytes: Optional[int] = 500 * 1024 * 1024,
     ):
@@ -139,6 +152,9 @@ class DataFolio(SnapshotMixin, ContextCaptureMixin):
             metadata: Optional dictionary of analysis metadata (for new bundles)
             random_suffix: If True, append random suffix to bundle name (default: False)
             read_only: If True, prevent all write operations (default: False)
+            allow_existing: If True, allow creating a new folio inside an
+                existing NON-folio directory (its files are left alone). An
+                existing empty directory is always allowed. (default: False)
             use_https: If True, use HTTPS URLs for CloudFiles (for read-only access to public buckets) (default: False)
             max_eager_bytes: Size ceiling (in bytes) for eager, full-table reads
                 via ``get``. A table whose recorded ``size_bytes`` exceeds
@@ -206,6 +222,7 @@ class DataFolio(SnapshotMixin, ContextCaptureMixin):
 
         # Store random suffix setting for collision retry
         self._use_random_suffix = random_suffix
+        self._allow_existing_dir = allow_existing
 
         # Auto-refresh tracking for multi-instance consistency
         self._auto_refresh_enabled: bool = True  # Can be disabled if needed
@@ -322,6 +339,40 @@ class DataFolio(SnapshotMixin, ContextCaptureMixin):
         # Initialize data accessor for autocomplete support
         # Create it here (not lazily) so autocomplete is immediately available
         self._data_accessor = DataAccessor(self)
+
+    @property
+    def metadata(self) -> MetadataDict:
+        """Bundle-level metadata (auto-committing dict).
+
+        Assigning a plain dict replaces the metadata wholesale and commits
+        it (read-only folios refuse). Nested values are plain objects —
+        mutating them in place (``metadata['params']['lr'] = 0.1``) does NOT
+        auto-commit; reassign the key or call ``update()`` to persist.
+        """
+        # Reads auto-refresh like every other read entry point (skipped
+        # automatically during saves, mutations, and batches).
+        if getattr(self, "_metadata_dict", None) is not None:
+            self._refresh_if_needed()
+        return self._metadata_dict
+
+    @metadata.setter
+    def metadata(self, value) -> None:
+        if isinstance(value, MetadataDict):
+            # Internal wiring (init / reload) — adopt as-is, no commit.
+            self._metadata_dict = value
+            return
+        if not isinstance(value, dict):
+            raise TypeError(
+                f"folio.metadata must be assigned a dict (got "
+                f"{type(value).__name__}). To edit in place use "
+                f"folio.metadata['key'] = value or folio.metadata.update()."
+            )
+        self._check_read_only()
+        replacement = MetadataDict(self)
+        dict.update(replacement, value)
+        self._metadata_dict = replacement
+        with self._metadata_mutation():
+            replacement._touch()
 
     def _sync_data_accessor(self) -> None:
         """Sync data accessor after items have changed.
@@ -497,6 +548,15 @@ For more information, see the [datafolio documentation](https://github.com/casey
             # A derived convenience file must never break a real mutation.
             pass
 
+    def _is_dir_empty(self, path: str) -> bool:
+        """True if a LOCAL directory exists and contains nothing (cloud
+        prefixes with no objects already read as nonexistent)."""
+        try:
+            p = Path(path)
+            return p.is_dir() and not any(p.iterdir())
+        except OSError:
+            return False
+
     def _initialize_bundle(self, max_retries: int = 10) -> None:
         """Initialize new bundle directory structure with collision retry.
 
@@ -544,11 +604,19 @@ For more information, see the [datafolio documentation](https://github.com/casey
                     raise RuntimeError(
                         f"Failed to create unique bundle name after {max_retries} attempts"
                     )
+            elif self._is_dir_empty(self._bundle_dir) or self._allow_existing_dir:
+                # An existing EMPTY directory (mkdir-first workflows, or a
+                # crash that left a manifest-less husk) is always fine; a
+                # non-empty non-folio directory needs the explicit
+                # allow_existing=True opt-in. Existing files are untouched.
+                pass
             else:
                 # No random suffix - fail immediately on collision
                 raise FileExistsError(
-                    f"Bundle directory already exists: {self._bundle_dir}. "
-                    "Use use_random_suffix=True to generate unique names automatically."
+                    f"Bundle directory already exists and is not empty: "
+                    f"{self._bundle_dir}. Pass allow_existing=True to create "
+                    f"a folio alongside the existing files, or "
+                    f"random_suffix=True to generate a unique name."
                 )
 
         # Create directory structure
@@ -636,11 +704,8 @@ For more information, see the [datafolio documentation](https://github.com/casey
         """Save metadata.json."""
         path = self._storage.join_paths(self._bundle_dir, METADATA_FILE)
         # Convert MetadataDict to regular dict for serialization
-        data = (
-            dict(self.metadata)
-            if isinstance(self.metadata, MetadataDict)
-            else self.metadata
-        )
+        md = getattr(self, "_metadata_dict", None)
+        data = dict(md) if md is not None else self._metadata_raw
         self._storage.write_json(path, data)
 
     def _local_lock(self) -> Any:
@@ -785,13 +850,13 @@ For more information, see the [datafolio documentation](https://github.com/casey
                 self._manifest_revision = next_revision
 
             # Update metadata timestamp when items change
-            # This allows other instances to detect staleness
-            if hasattr(self, "metadata"):
+            md = getattr(self, "_metadata_dict", None)
+            if md is not None:
                 from datetime import datetime, timezone
 
-                # Use super() to update without triggering another save
-                super(MetadataDict, self.metadata).__setitem__(
-                    "updated_at", datetime.now(timezone.utc).isoformat()
+                # Use dict methods to update without triggering another save
+                dict.__setitem__(
+                    md, "updated_at", datetime.now(timezone.utc).isoformat()
                 )
                 self._save_metadata()
 
@@ -820,15 +885,43 @@ For more information, see the [datafolio documentation](https://github.com/casey
         """
         if self._manifest_revision is None:
             return  # nothing loaded/written yet (fresh bundle)
+
+        # FAIL CLOSED from here on: we have loaded a committed manifest, so a
+        # missing/unreadable/malformed one at write time means we cannot rule
+        # out clobbering another writer's committed work.
         if not self._storage.exists(path):
-            return
+            raise ManifestReadError(
+                f"items.json is missing from {self._bundle_dir} but this "
+                f"folio previously loaded revision {self._manifest_revision}. "
+                f"Refusing to write over an unverifiable manifest — reopen "
+                f"the folio and retry."
+            )
         try:
             on_disk = self._storage.read_json(path)
-        except Exception:
-            return  # unreadable -> let the write proceed/fail normally
-        disk_revision = (
-            int(on_disk.get("revision", 0) or 0) if isinstance(on_disk, dict) else 0
-        )
+        except Exception as exc:
+            raise ManifestReadError(
+                f"items.json at {self._bundle_dir} could not be read for the "
+                f"stale-writer check ({exc}). Refusing to write over an "
+                f"unverifiable manifest — retry once it is readable (call "
+                f"refresh() first if another writer may have advanced it)."
+            ) from exc
+        if isinstance(on_disk, dict):
+            try:
+                disk_revision = int(on_disk.get("revision", 0) or 0)
+            except (TypeError, ValueError) as exc:
+                raise ManifestReadError(
+                    f"items.json at {self._bundle_dir} has an invalid "
+                    f"revision field ({on_disk.get('revision')!r}); refusing "
+                    f"to write over a malformed manifest."
+                ) from exc
+        elif isinstance(on_disk, list):
+            disk_revision = 0  # legacy pre-versioning manifest
+        else:
+            raise ManifestReadError(
+                f"items.json at {self._bundle_dir} is not a recognizable "
+                f"manifest (got {type(on_disk).__name__}); refusing to write "
+                f"over a malformed manifest."
+            )
         if disk_revision > self._manifest_revision:
             raise ConcurrentWriteError(
                 f"items.json was modified by another writer (on-disk revision "
@@ -943,8 +1036,8 @@ For more information, see the [datafolio documentation](https://github.com/casey
         """
         if not old_item:
             return
-        if old_item.get("in_snapshots"):
-            return  # preserved by a snapshot — never delete
+        if self._live_snapshot_markers(old_item):
+            return  # preserved by a live snapshot — never delete
         filename = old_item.get("filename")
         if not filename:
             return  # references own no payload
@@ -1146,32 +1239,34 @@ For more information, see the [datafolio documentation](https://github.com/casey
         if not self._auto_refresh_enabled:
             return False
 
-        # Read the remote metadata.json to get its updated_at timestamp
-        metadata_path = self._storage.join_paths(self._bundle_dir, METADATA_FILE)
-        if not self._storage.exists(metadata_path):
-            # Metadata file doesn't exist - nothing to refresh
-            return False
-
+        # Compare the on-disk items.json revision with the one we loaded —
+        # items.json is the commit record, so this can't be blinded by a
+        # crash between the items and metadata writes (and metadata-only
+        # commits advance the same revision). Read errors leave reads
+        # available (writes fail closed separately).
+        items_path = self._storage.join_paths(self._bundle_dir, ITEMS_FILE)
         try:
-            remote_metadata = self._storage.read_json(metadata_path)
-            remote_updated_at = remote_metadata.get("updated_at")
-            local_updated_at = self.metadata.get("updated_at")
-
-            # If either is missing, can't compare - assume fresh
-            if remote_updated_at is None or local_updated_at is None:
+            if not self._storage.exists(items_path):
                 return False
-
-            # Compare timestamps - if different, we're stale
-            return remote_updated_at != local_updated_at
-
+            on_disk = self._storage.read_json(items_path)
+            if isinstance(on_disk, dict):
+                disk_revision = int(on_disk.get("revision", 0) or 0)
+            else:
+                disk_revision = 0  # legacy pre-versioning manifest
+            return disk_revision != (self._manifest_revision or 0)
         except Exception:
-            # If we can't read/parse metadata, assume fresh to avoid errors
+            # If we can't read/parse the manifest, keep serving what we have
             return False
 
     def _refresh_if_needed(self) -> None:
         """Refresh manifests from disk/cloud if they've been updated externally."""
         # Skip refresh if we're in the middle of a save operation
         if self._in_save_operation:
+            return
+        # Never refresh while a mutation or batch is in flight: reloading
+        # would silently discard staged in-memory state (a batch's deferred
+        # items, or a metadata change whose commit is pending).
+        if self._mutation_depth > 0 or self._batch_mode:
             return
         # A snapshot-mode folio is pinned to the versions recorded at snapshot
         # time; auto-refreshing would reload the *current* items and silently
@@ -1206,6 +1301,11 @@ For more information, see the [datafolio documentation](https://github.com/casey
             >>> # folio2 auto-refreshes on next read operation
             >>> assert 'results' in folio2.list_contents()['included_tables']
         """
+        if self._batch_mode:
+            raise RuntimeError(
+                "refresh() cannot run inside a batch() block: it would "
+                "discard the batch's staged changes. Exit the batch first."
+            )
         self._reload_committed()
         return self
 
@@ -1220,12 +1320,13 @@ For more information, see the [datafolio documentation](https://github.com/casey
         self._load_manifests()
 
         # Sync the MetadataDict with new values without triggering saves
-        if hasattr(self, "metadata") and isinstance(self.metadata, MetadataDict):
-            dict.clear(self.metadata)
-            dict.update(self.metadata, self._metadata_raw)
+        md = getattr(self, "_metadata_dict", None)
+        if isinstance(md, MetadataDict):
+            dict.clear(md)
+            dict.update(md, self._metadata_raw)
         else:
             # Initial creation (shouldn't happen in refresh, but defensive)
-            self.metadata = MetadataDict(self, **self._metadata_raw)
+            self._metadata_dict = MetadataDict(self, **self._metadata_raw)
 
         self._pending_obsolete_payloads = []
         self._sync_data_accessor()
@@ -1426,6 +1527,17 @@ For more information, see the [datafolio documentation](https://github.com/casey
         self._check_read_only()
         validate_item_name(name)
 
+        # numpy scalars (np.float64, np.int64, np.bool_, ...) are everyday
+        # values pulled out of arrays/aggregations; store them as their plain
+        # Python equivalents rather than bouncing users to .item().
+        try:
+            import numpy as _np
+
+            if isinstance(obj, _np.generic):
+                obj = obj.item()
+        except ImportError:
+            pass
+
         from datafolio.base.registry import detect_handler
 
         handler = detect_handler(obj)
@@ -1435,6 +1547,20 @@ For more information, see the [datafolio documentation](https://github.com/casey
         # but are valid JSON payloads.
         if item_type is None and isinstance(obj, (int, float, str, bool, type(None))):
             item_type = "json_data"
+
+        if item_type is None and isinstance(obj, (dict, list)):
+            # A dict/list that the JSON handler declined: surface the real
+            # serialization problem instead of "unsupported type: dict".
+            import orjson
+
+            try:
+                orjson.dumps(obj, option=orjson.OPT_SERIALIZE_NUMPY)
+            except (TypeError, orjson.JSONEncodeError) as exc:
+                raise TypeError(
+                    f"{type(obj).__name__} is not JSON-serializable: {exc}. "
+                    f"Convert the offending value (or store it with "
+                    f"add_model() / as a numpy array / table)."
+                ) from exc
 
         if item_type is None:
             raise TypeError(
@@ -2569,8 +2695,14 @@ For more information, see the [datafolio documentation](https://github.com/casey
                 else:
                     item["inputs"] = inputs
 
-            # Save updated manifest
-            self._save_items()
+            # Save updated manifest; a failed publish must not leave the
+            # edit (or its copy-on-write) to leak via a later mutation.
+            try:
+                self._save_items()
+            except BaseException:
+                if not self._batch_mode:
+                    self._reload_committed()
+                raise
 
         return self
 
@@ -2603,10 +2735,10 @@ For more information, see the [datafolio documentation](https://github.com/casey
         """
         self._check_read_only()
 
-        import warnings
-
-        # Convert single name to list for uniform processing
+        # Convert single name to list for uniform processing (deduped —
+        # deleting the same name twice in one call is a no-op, not an error)
         names_to_delete = [name] if isinstance(name, str) else name
+        names_to_delete = list(dict.fromkeys(names_to_delete))
 
         # Validate all items exist before deleting any
         for item_name in names_to_delete:
@@ -2615,48 +2747,62 @@ For more information, see the [datafolio documentation](https://github.com/casey
 
         with self._mutation_guard():
             newly_unreferenced: list = []
-            for item_name in names_to_delete:
-                item = self._items[item_name]
-
-                # Check for dependents and warn if requested
-                if warn_dependents:
-                    dependents = self.get_dependents(item_name)
-                    if dependents:
-                        warnings.warn(
-                            f"Deleting '{item_name}' which is used by: "
-                            f"{', '.join(dependents)}. "
-                            f"Those items may have broken lineage.",
-                            UserWarning,
-                            stacklevel=2,
-                        )
-
-                if self._is_in_snapshots(item_name):
-                    # A snapshot pins this version: keep the payload and move
-                    # the descriptor to the snapshot versions — deleting the
-                    # bytes would silently corrupt every snapshot containing
-                    # it. The logical name disappears from the working set.
-                    self._handle_copy_on_write(item_name)
-                else:
-                    # No snapshot references this version — its payload is
-                    # deleted only AFTER the manifest publish succeeds, so a
-                    # failed write never leaves the committed manifest
-                    # pointing at deleted bytes.
-                    newly_unreferenced.append(item)
-
-                # Remove from items manifest
-                del self._items[item_name]
-
-            # Publish the manifest, then best-effort delete the payloads it
-            # no longer references.
             try:
+                for item_name in names_to_delete:
+                    self._delete_one(item_name, warn_dependents, newly_unreferenced)
+
+                # Publish the manifest, then hand the payloads it no longer
+                # references to the deferred-deletion machinery. Inside a
+                # batch both the publish and the deletions defer to the
+                # batch's single commit — an aborted batch must never have
+                # deleted committed bytes.
                 self._save_items()
             except BaseException:
-                self._reload_committed()
+                if not self._batch_mode:
+                    self._reload_committed()
                 raise
             for item in newly_unreferenced:
-                self._delete_payload_if_unshared(item)
+                self._obsolete_payload_after_commit(item)
 
         return self
+
+    def _delete_one(
+        self,
+        item_name: str,
+        warn_dependents: bool,
+        newly_unreferenced: list,
+    ) -> None:
+        """Delete a single item in-memory (runs inside delete()'s guard)."""
+        import warnings
+
+        item = self._items[item_name]
+
+        # Check for dependents and warn if requested
+        if warn_dependents:
+            dependents = self.get_dependents(item_name)
+            if dependents:
+                warnings.warn(
+                    f"Deleting '{item_name}' which is used by: "
+                    f"{', '.join(dependents)}. "
+                    f"Those items may have broken lineage.",
+                    UserWarning,
+                    stacklevel=3,
+                )
+
+        if self._is_in_snapshots(item_name):
+            # A snapshot pins this version: keep the payload and move the
+            # descriptor to the snapshot versions — deleting the bytes would
+            # silently corrupt every snapshot containing it. The logical
+            # name disappears from the working set.
+            self._handle_copy_on_write(item_name)
+        else:
+            # No snapshot references this version — its payload is deleted
+            # only AFTER the manifest publish succeeds (deferred to the
+            # batch commit inside batch()).
+            newly_unreferenced.append(item)
+
+        # Remove from items manifest
+        del self._items[item_name]
 
     # ==================== Archive Methods ====================
 
@@ -2997,6 +3143,15 @@ For more information, see the [datafolio documentation](https://github.com/casey
         new_folio = DataFolio(
             path=new_path, metadata=new_metadata, random_suffix=random_suffix
         )
+        if not new_folio._is_new:
+            # The destination was an existing bundle: copying into it would
+            # merge, and the failure cleanup below could destroy it. copy()
+            # only ever targets a fresh location.
+            raise ValueError(
+                f"copy() destination already contains a folio: "
+                f"{new_folio._bundle_dir}. Use a fresh path (or a file-sync "
+                f"tool to mirror into an existing bundle)."
+            )
 
         # Wrap copy operation in try/except to cleanup on failure
         try:
@@ -3057,10 +3212,11 @@ For more information, see the [datafolio documentation](https://github.com/casey
             new_folio._save_items()
 
         except Exception:
-            # Cleanup on failure: remove the partially created bundle
+            # Cleanup on failure: remove the partially created bundle —
+            # but ONLY one this call created; never a pre-existing bundle.
             import shutil as shutil_module
 
-            if self._storage.exists(new_folio._bundle_dir):
+            if new_folio._is_new and self._storage.exists(new_folio._bundle_dir):
                 if is_cloud_path(new_folio._bundle_dir):
                     # Use cloudfiles to delete cloud directory
                     cf = cloudfiles.CloudFiles(new_folio._bundle_dir)

@@ -780,19 +780,28 @@ def validate(ctx, path):
         else:
             folio_path = find_folio_dir(ctx.obj.get("folio"))
 
-        # Validate the path
+        # Validate the path structure
         validate_existing_folio(folio_path)
 
-        # If we get here, validation succeeded
-        console.print(f"[green]✓[/green] Valid DataFolio bundle: {folio_path}")
+        # Run the real integrity validation: payload existence (and, for
+        # local owned items, checksum agreement) for every item.
+        folio = DataFolio(folio_path, read_only=True)
+        results = folio.validate()
+        failures = sorted(name for name, ok in results.items() if not ok)
 
-        # Show basic info
-        folio = DataFolio(folio_path)
-        contents = folio.list_contents()
+        contents = folio.list_contents(include_archived=True)
         num_items = sum(len(items) for items in contents.values())
         num_snapshots = len(folio.list_snapshots())
 
-        console.print(f"  Items: {num_items}")
+        if failures:
+            console.print(f"[red]✗[/red] Invalid DataFolio bundle: {folio_path}")
+            console.print(f"  Items: {num_items} ({len(failures)} failing)")
+            for name in failures:
+                console.print(f"  [red]✗[/red] {name}: missing or corrupt payload")
+            sys.exit(1)
+
+        console.print(f"[green]✓[/green] Valid DataFolio bundle: {folio_path}")
+        console.print(f"  Items: {num_items} (all payloads verified)")
         console.print(f"  Snapshots: {num_snapshots}")
 
         if folio.metadata.get("description"):
@@ -868,6 +877,7 @@ def init(ctx, path, description, name):
 
         # Check if bundle already exists (local only; for cloud paths
         # DataFolio detects and opens an existing bundle itself)
+        allow_existing = False
         if not is_cloud and (bundle_path / "items.json").exists():
             console.print(
                 f"[yellow]⚠ Warning:[/yellow] Bundle already exists at {bundle_path}"
@@ -875,6 +885,19 @@ def init(ctx, path, description, name):
             if not click.confirm("Reinitialize (this won't delete existing data)?"):
                 console.print("[yellow]Cancelled[/yellow]")
                 return
+        elif (
+            not is_cloud
+            and Path(bundle_path).is_dir()
+            and any(Path(bundle_path).iterdir())
+        ):
+            # An existing NON-folio directory with files in it (including the
+            # documented no-argument case: the current directory). Existing
+            # files are left alone; init only adds the folio manifests.
+            console.print(f"[yellow]⚠[/yellow] {bundle_path} exists and is not empty.")
+            if not click.confirm("Initialize a folio in this directory?"):
+                console.print("[yellow]Cancelled[/yellow]")
+                return
+            allow_existing = True
 
         # Initialize bundle
         console.print(f"[dim]Initializing bundle in:[/dim] {bundle_path}")
@@ -885,7 +908,9 @@ def init(ctx, path, description, name):
 
         # Create the bundle (DataFolio will create the directory)
         folio = DataFolio(
-            bundle_path, metadata={"description": description} if description else None
+            bundle_path,
+            metadata={"description": description} if description else None,
+            allow_existing=allow_existing,
         )
 
         console.print(

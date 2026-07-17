@@ -534,3 +534,237 @@ class TestP9RemainingMutationsGuarded:
         monkeypatch.setattr(ReferenceTableHandler, "inspect", slow_inspect)
         with pytest.raises(ConcurrentWriteError):
             folio.inspect_table("r")
+
+
+class TestFailClosedStaleCheck:
+    """The stale-writer check must fail CLOSED: a manifest that cannot be
+    read and verified blocks the write instead of letting a stale notebook
+    silently clobber committed work."""
+
+    def _flaky_items_read(self, monkeypatch, folio):
+        import datafolio.storage.backend as B
+
+        real = B.StorageBackend.read_json
+
+        def failing(self, path):
+            if str(path).endswith("items.json"):
+                raise OSError("sustained read error")
+            return real(self, path)
+
+        monkeypatch.setattr(B.StorageBackend, "read_json", failing)
+
+    def test_unreadable_manifest_blocks_stale_write(self, tmp_path, monkeypatch):
+        from datafolio import ManifestReadError
+
+        path = tmp_path / "b"
+        owner, stale = _make_stale_pair(path)
+        self._flaky_items_read(monkeypatch, stale)
+        with pytest.raises(ManifestReadError):
+            stale.add("from_stale", 3)
+        monkeypatch.undo()
+        # B's committed work survives
+        assert "advance" in DataFolio(path)._items
+
+    def test_malformed_manifest_blocks_write(self, tmp_path):
+        from datafolio import ManifestReadError
+
+        path = tmp_path / "b"
+        folio = DataFolio(path)
+        folio.add("seed", 1)
+        (path / "items.json").write_text('"not a manifest"')
+        with pytest.raises(ManifestReadError):
+            folio.add("x", 2)
+
+    def test_missing_manifest_blocks_write(self, tmp_path):
+        from datafolio import ManifestReadError
+
+        path = tmp_path / "b"
+        folio = DataFolio(path)
+        folio.add("seed", 1)
+        (path / "items.json").unlink()
+        with pytest.raises(ManifestReadError):
+            folio.add("x", 2)
+
+    def test_manifest_read_error_is_concurrent_write_error(self):
+        from datafolio import ConcurrentWriteError, ManifestReadError
+
+        assert issubclass(ManifestReadError, ConcurrentWriteError)
+
+    def test_fresh_bundle_still_initializes(self, tmp_path):
+        folio = DataFolio(tmp_path / "new")
+        folio.add("x", 1)
+        assert DataFolio(tmp_path / "new").get("x") == 1
+
+
+class TestBatchPayloadSafety:
+    """Payload bytes referenced by the committed manifest must survive an
+    aborted batch — deletion defers to the batch publish."""
+
+    def test_aborted_batch_delete_keeps_committed_payload(self, tmp_path):
+        path = tmp_path / "b"
+        folio = DataFolio(path)
+        folio.add("x", pd.DataFrame({"v": [1]}))
+        payload = path / "tables" / folio._items["x"]["filename"]
+
+        with pytest.raises(RuntimeError):
+            with folio.batch():
+                folio.delete("x")
+                raise RuntimeError("abort")
+
+        assert payload.exists()
+        assert folio.get("x")["v"].tolist() == [1]
+        assert DataFolio(path).get("x")["v"].tolist() == [1]
+        assert DataFolio(path).validate() == {"x": True}
+
+    def test_committed_batch_delete_removes_payload(self, tmp_path):
+        path = tmp_path / "b"
+        folio = DataFolio(path)
+        folio.add("x", pd.DataFrame({"v": [1]}))
+        payload = path / "tables" / folio._items["x"]["filename"]
+        with folio.batch():
+            folio.delete("x")
+        assert not payload.exists()
+        assert "x" not in DataFolio(path)._items
+
+    def test_restore_snapshot_in_batch_raises(self, tmp_path):
+        folio = DataFolio(tmp_path / "b")
+        folio.add("x", 1)
+        folio.create_snapshot("s")
+        with folio.batch():
+            with pytest.raises(RuntimeError, match="batch"):
+                folio.restore_snapshot("s", confirm=True)
+
+    def test_cleanup_in_batch_raises(self, tmp_path):
+        folio = DataFolio(tmp_path / "b")
+        folio.add("x", 1)
+        with folio.batch():
+            with pytest.raises(RuntimeError, match="batch"):
+                folio.cleanup_orphaned_versions()
+
+
+class TestBatchAutoRefresh:
+    def test_read_inside_batch_does_not_discard_staged_state(self, tmp_path):
+        path = tmp_path / "b"
+        folio = DataFolio(path)
+        folio.add("a", 1)
+        with folio.batch():
+            folio.metadata["note"] = "hi"
+            folio.add("b", 2)
+            assert folio.get("a") == 1  # a read mid-batch
+            folio.add("c", 3)
+        reopened = DataFolio(path)
+        assert sorted(reopened._items) == ["a", "b", "c"]
+        assert reopened.metadata["note"] == "hi"
+
+    def test_explicit_refresh_inside_batch_raises(self, tmp_path):
+        folio = DataFolio(tmp_path / "b")
+        with folio.batch():
+            folio.add("a", 1)
+            with pytest.raises(RuntimeError, match="batch"):
+                folio.refresh()
+
+
+class TestCopyDestinationProtection:
+    def test_copy_refuses_existing_bundle(self, tmp_path):
+        src = DataFolio(tmp_path / "src")
+        src.add("x", 1)
+        dest = DataFolio(tmp_path / "dest")
+        dest.add("precious", 42)
+        with pytest.raises((ValueError, FileExistsError)):
+            src.copy(tmp_path / "dest")
+        # Pre-existing bundle untouched
+        assert DataFolio(tmp_path / "dest").get("precious") == 42
+
+    def test_failed_copy_never_deletes_preexisting_bundle(self, tmp_path, monkeypatch):
+        src = DataFolio(tmp_path / "src")
+        src.add("x", pd.DataFrame({"v": [1]}))
+        dest = DataFolio(tmp_path / "dest")
+        dest.add("precious", 42)
+        # Even if the guard is somehow bypassed, cleanup must not rmtree
+        monkeypatch.setattr(
+            type(src),
+            "_copy_payload_file",
+            lambda *a, **k: (_ for _ in ()).throw(OSError("boom")),
+        )
+        with pytest.raises((ValueError, FileExistsError, OSError)):
+            src.copy(tmp_path / "dest")
+        assert (tmp_path / "dest" / "items.json").exists()
+        assert DataFolio(tmp_path / "dest").get("precious") == 42
+
+    def test_failed_copy_cleans_up_fresh_destination(self, tmp_path, monkeypatch):
+        src = DataFolio(tmp_path / "src")
+        src.add("x", pd.DataFrame({"v": [1]}))
+        monkeypatch.setattr(
+            type(src),
+            "_copy_payload_file",
+            lambda *a, **k: (_ for _ in ()).throw(OSError("boom")),
+        )
+        with pytest.raises(OSError):
+            src.copy(tmp_path / "fresh-dest")
+        assert not (tmp_path / "fresh-dest").exists()
+
+
+class TestUpdateItemRollback:
+    def _fail_publish(self, monkeypatch):
+        import datafolio.storage.backend as B
+
+        monkeypatch.setattr(
+            B.StorageBackend,
+            "write_json",
+            lambda *a, **k: (_ for _ in ()).throw(OSError("disk error")),
+        )
+
+    def test_failed_update_rolls_back(self, tmp_path, monkeypatch):
+        path = tmp_path / "b"
+        folio = DataFolio(path)
+        folio.add("x", 1, description="committed")
+        self._fail_publish(monkeypatch)
+        with pytest.raises(OSError):
+            folio.update_item("x", description="rejected")
+        monkeypatch.undo()
+        assert folio._items["x"]["description"] == "committed"
+        folio.add("y", 2)  # later mutation must not leak the edit
+        assert DataFolio(path)._items["x"]["description"] == "committed"
+
+    def test_failed_update_snapshotted_rolls_back_cow(self, tmp_path, monkeypatch):
+        path = tmp_path / "b"
+        folio = DataFolio(path)
+        folio.add("x", 1, description="committed")
+        folio.create_snapshot("s")
+        n_versions = len(folio._snapshot_versions)
+        self._fail_publish(monkeypatch)
+        with pytest.raises(OSError):
+            folio.update_item("x", description="rejected")
+        monkeypatch.undo()
+        assert folio._items["x"]["description"] == "committed"
+        assert len(folio._snapshot_versions) == n_versions
+        folio.add("y", 2)
+        reopened = DataFolio(path)
+        assert reopened._items["x"]["description"] == "committed"
+        assert len(reopened._snapshot_versions) == n_versions
+
+
+class TestDeleteAtomicity:
+    def test_duplicate_names_deduped(self, tmp_path):
+        path = tmp_path / "b"
+        folio = DataFolio(path)
+        folio.add("dup", 1)
+        folio.delete(["dup", "dup"])  # must not KeyError / diverge
+        assert "dup" not in folio._items
+        assert "dup" not in DataFolio(path)._items
+
+    def test_mid_loop_exception_rolls_back(self, tmp_path):
+        import warnings as w
+
+        path = tmp_path / "b"
+        folio = DataFolio(path)
+        folio.add("base", 1)
+        folio.add("dependent", 2, inputs=["base"])
+        with w.catch_warnings():
+            w.simplefilter("error")  # dependents warning becomes an exception
+            with pytest.raises(UserWarning):
+                folio.delete(["base"])
+        # Nothing half-applied in memory or persisted by a later mutation
+        assert "base" in folio._items
+        folio.add("other", 3)
+        assert "base" in DataFolio(path)._items

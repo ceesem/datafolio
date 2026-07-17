@@ -405,8 +405,13 @@ class SnapshotMixin:
                 item_meta["version_id"] = version_id
             item_versions[item_name] = version_id
 
-        # Capture current metadata state
-        metadata_snapshot = dict(self.metadata) if hasattr(self, "metadata") else {}
+        # Capture current metadata state (DEEP copy: later nested edits of
+        # the live metadata must not rewrite what the snapshot recorded)
+        import copy as _copy
+
+        metadata_snapshot = (
+            _copy.deepcopy(dict(self.metadata)) if hasattr(self, "metadata") else {}
+        )
 
         # Build snapshot metadata
         snapshot_meta: Dict[str, Any] = {
@@ -444,7 +449,8 @@ class SnapshotMixin:
                 item = self._items[item_name]
                 if "in_snapshots" not in item:
                     item["in_snapshots"] = []
-                item["in_snapshots"].append(name)
+                if name not in item["in_snapshots"]:
+                    item["in_snapshots"].append(name)
             self._snapshots[name] = snapshot_meta
 
             # Cross-file ordering: commit the pinned item descriptors
@@ -550,10 +556,14 @@ class SnapshotMixin:
 
             for item in self._items.values():
                 if "in_snapshots" in item and name in item["in_snapshots"]:
-                    item["in_snapshots"].remove(name)
+                    item["in_snapshots"] = [
+                        s for s in item["in_snapshots"] if s != name
+                    ]
             for item in self._snapshot_versions:
                 if "in_snapshots" in item and name in item["in_snapshots"]:
-                    item["in_snapshots"].remove(name)
+                    item["in_snapshots"] = [
+                        s for s in item["in_snapshots"] if s != name
+                    ]
 
             # Cross-file ordering for deletion: retract the snapshot from
             # snapshots.json FIRST, then unmark items.json. If the second
@@ -781,19 +791,28 @@ class SnapshotMixin:
 
         deleted_files = []
 
-        # Find orphaned snapshot versions
+        # Find orphaned snapshot versions: no LIVE marker (ghost markers —
+        # naming snapshots absent from the registry — don't count).
         orphaned_versions = []
         for item in self._snapshot_versions:
-            in_snapshots = item.get("in_snapshots", [])
-            # If not in any snapshot, it's orphaned
-            if not in_snapshots:
+            if not self._live_snapshot_markers(item):
                 orphaned_versions.append(item)
 
         for item in orphaned_versions:
-            if item.get("filename"):
+            # Report only files that will actually be deletable (a payload
+            # shared with a live descriptor after a metadata-only
+            # copy-on-write is kept).
+            if item.get("filename") and not self._payload_is_shared(item):
                 deleted_files.append(item["filename"])
 
-        if dry_run or not deleted_files:
+        if not dry_run and self._batch_mode:
+            raise RuntimeError(
+                "cleanup_orphaned_versions() cannot run inside a batch() "
+                "block: its payload deletion must follow a real manifest "
+                "publish. Exit the batch first."
+            )
+
+        if dry_run or not orphaned_versions:
             return deleted_files
 
         # Publish the manifest without the orphans FIRST, then best-effort
@@ -801,7 +820,9 @@ class SnapshotMixin:
         # write must not leave committed entries pointing at deleted bytes).
         # The whole operation is guarded like any other mutation.
         with self._mutation_guard():
-            removed = [i for i in orphaned_versions if i.get("filename")]
+            # Remove every orphaned descriptor (including payload-less
+            # reference versions, which would otherwise linger forever).
+            removed = list(orphaned_versions)
             for item in removed:
                 self._snapshot_versions.remove(item)
             try:
@@ -842,6 +863,13 @@ class SnapshotMixin:
             >>> # Working state now matches v1.0 snapshot
         """
         self._check_read_only()
+
+        if self._batch_mode:
+            raise RuntimeError(
+                "restore_snapshot() cannot run inside a batch() block: its "
+                "payload cleanup must follow a real manifest publish. Exit "
+                "the batch first."
+            )
 
         if not confirm:
             raise ValueError(
@@ -1270,6 +1298,19 @@ class SnapshotMixin:
             if item.get("item_type") == "referenced_table"
         ]
 
+    def _live_snapshot_markers(self, item: Dict[str, Any]) -> list[str]:
+        """The item's snapshot markers that name snapshots that actually exist.
+
+        A crash between the two snapshot-file writes can commit
+        ``in_snapshots`` markers for a snapshot that never became visible in
+        the registry ("ghost markers", harmless by design). Preservation
+        decisions must ignore them — otherwise every overwrite of a
+        ghost-marked item leaks a payload pinned by nothing, forever.
+        """
+        return [
+            snap for snap in item.get("in_snapshots", []) if snap in self._snapshots
+        ]
+
     def _is_in_snapshots(self, name: str) -> bool:
         """Check if an item is referenced by any snapshots.
 
@@ -1283,8 +1324,7 @@ class SnapshotMixin:
             return False
 
         item = self._items[name]
-        in_snapshots = item.get("in_snapshots", [])
-        return len(in_snapshots) > 0
+        return bool(self._live_snapshot_markers(item))
 
     def _handle_copy_on_write(self, name: str) -> None:
         """Preserve a snapshotted item's version before it is overwritten.
