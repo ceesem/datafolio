@@ -44,25 +44,6 @@ Deep dive into DataFolio's snapshot system:
 
 ---
 
-### [Caching](caching.md)
-**Speed up remote data access**
-
-Local caching for cloud-stored bundles:
-- Why and when to use caching
-- Enabling and configuring caching
-- Cache management (status, clearing, invalidation)
-- Performance examples and benchmarks
-- Team collaboration with shared caches
-- Offline work preparation
-- Best practices and troubleshooting
-- Interaction with Parquet filtering
-
-**Who should read this:** Anyone working with remote bundles (S3, GCS, etc.) or wanting faster repeated data access.
-
-**Time to complete:** 15-20 minutes
-
----
-
 ### [Parquet Optimization](parquet-optimization.md)
 **Work efficiently with large datasets**
 
@@ -71,7 +52,7 @@ Advanced techniques for working with large Parquet files:
 - Row filtering (predicate pushdown) - Filter before loading
 - Memory optimization strategies
 - Working with datasets larger than memory
-- Cloud storage optimization and caching
+- Cloud storage optimization
 - Integration with PyArrow and DuckDB
 - Real-world performance examples
 - Best practices and troubleshooting
@@ -96,9 +77,8 @@ Advanced techniques for working with large Parquet files:
 - **Sharing files with non-datafolio users** → `get_item_path()` / `describe(show_paths=True)` in the [API Reference](../reference/datafolio-api.md#sharing-paths-with-collaborators)
 - **Model deployment** → [Working with Models](models.md)
 - **Custom sklearn pipelines** → [Working with Models](models.md)
-- **Cloud storage** → [Caching](caching.md) + [Parquet Optimization](parquet-optimization.md)
+- **Cloud storage** → [Parquet Optimization](parquet-optimization.md)
 - **Large datasets** → [Parquet Optimization](parquet-optimization.md)
-- **Fast remote access** → [Caching](caching.md)
 
 ---
 

@@ -12,7 +12,6 @@ nav:
     - Polars & References: guides/polars.md
     - Using a folio without Datafolio: guides/format.md
     - Snapshots: guides/snapshots.md
-    - Caching: guides/caching.md
     - Parquet Optimization: guides/parquet-optimization.md
 - API Reference:
     - DataFolio Methods: reference/datafolio-api.md

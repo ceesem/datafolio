@@ -664,16 +664,11 @@ results = folio.get_table('results')
 | Variable | Description |
 |----------|-------------|
 | `DATAFOLIO_PATH` | Default path for folio operations |
-| `DATAFOLIO_CACHE_ENABLED` | Enable caching ('true'/'false') |
-| `DATAFOLIO_CACHE_DIR` | Cache directory path |
-| `DATAFOLIO_CACHE_TTL` | Cache TTL in seconds |
 
 **Example:**
 
 ```bash
 export DATAFOLIO_PATH=/data/experiments/current
-export DATAFOLIO_CACHE_ENABLED=true
-export DATAFOLIO_CACHE_DIR=/tmp/datafolio_cache
 
 # Now CLI commands use these defaults
 datafolio describe

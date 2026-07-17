@@ -66,7 +66,6 @@ This is the core DataFolio workflow: track your data, models, and results; snaps
 - **Autocomplete Access** - IDE-friendly `folio.data.item_name.content` syntax with full autocomplete
 - **Multi-Instance Sync** - Multiple notebooks/processes can safely access the same bundle
 - **Cloud Storage** - Works with local paths, S3, GCS, Azure, and more
-- **Caching** - Smart caching for remote data reduces download times
 - **Git-Friendly** - All data stored as standard file formats in a simple directory structure
 - **CLI Tools** - Command-line interface for snapshot management and bundle operations
 
@@ -123,8 +122,7 @@ exact_data = paper_version.get_table('test_data')
 
 ```python
 # Use cloud storage for team access
-folio = DataFolio('s3://team-bucket/shared-experiment',
-    cache_enabled=True)  # Cache for faster local access
+folio = DataFolio('s3://team-bucket/shared-experiment')
 
 # Everyone sees the same data
 df = folio.get_table('results')

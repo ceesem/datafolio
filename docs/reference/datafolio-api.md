@@ -358,32 +358,6 @@ Methods for working with snapshots (read-only copies).
 
 ---
 
-## Caching
-
-Methods for managing the local cache (for remote bundles).
-
-::: datafolio.DataFolio.cache_status
-    options:
-        show_source: false
-        heading_level: 3
-
-::: datafolio.DataFolio.clear_cache
-    options:
-        show_source: false
-        heading_level: 3
-
-::: datafolio.DataFolio.invalidate_cache
-    options:
-        show_source: false
-        heading_level: 3
-
-::: datafolio.DataFolio.refresh_cache
-    options:
-        show_source: false
-        heading_level: 3
-
----
-
 ## Bundle Management
 
 Methods for managing the DataFolio bundle itself.
@@ -494,7 +468,6 @@ print(folio.loaded_snapshot)  # e.g., 'v1.0' or None
 | **Managing Items** | `delete()`, `copy()`, `validate()`, `is_valid()` |
 | **Lineage** | `get_inputs()`, `get_dependents()`, `get_lineage_graph()` |
 | **Snapshots** | `create_snapshot()`, `list_snapshots()`, `delete_snapshot()`, `load_snapshot()`, `get_snapshot()`, `get_snapshot_info()`, `compare_snapshots()`, `diff_from_snapshot()`, `restore_snapshot()`, `export_snapshot()` |
-| **Caching** | `cache_status()`, `clear_cache()`, `invalidate_cache()`, `refresh_cache()` |
 | **Bundle Management** | `refresh()` |
 
 ---
@@ -522,27 +495,6 @@ print(folio.tables)  # Property access
 
 # Use data accessor with autocomplete
 df_via_accessor = folio.data.results
-```
-
-### With Caching
-```python
-# Enable caching for remote bundles
-folio = datafolio.DataFolio(
-    'gs://my-bucket/my-bundle',
-    cache_enabled=True,
-    cache_dir='/tmp/my-cache'
-)
-
-# First access downloads and caches
-df = folio.get_table('large_table')  # Downloads from cloud
-
-# Second access uses cache (much faster!)
-df = folio.get_table('large_table')  # Reads from local cache
-
-# Check cache statistics
-status = folio.cache_status()
-print(f"Cache hits: {status['cache_hits']}")
-print(f"Cache misses: {status['cache_misses']}")
 ```
 
 ### With Snapshots

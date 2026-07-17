@@ -210,8 +210,7 @@ df = folio.get_table('transactions',
 ```python
 from datafolio import DataFolio
 
-folio = DataFolio('s3://fraud-detection/production',
-    cache_enabled=True)  # Cache for repeated access
+folio = DataFolio('s3://fraud-detection/production')
 
 # Full dataset: 10TB of transaction data
 # We need: Recent high-value transactions from flagged countries
@@ -440,27 +439,6 @@ folio.add_table('category_summary', result,
 
 ## Cloud Storage Optimization
 
-### Caching for Repeated Access
-
-```python
-# Enable caching for cloud data
-folio = DataFolio('s3://my-bucket/experiment',
-    cache_enabled=True,
-    cache_dir='/fast/local/disk')
-
-# First access: Downloads from S3 (slow)
-df1 = folio.get_table('data',
-    filters=[('country', '==', 'US')],
-    engine='pyarrow')  # 30s
-
-# Second access: Reads from local cache (fast!)
-df2 = folio.get_table('data',
-    filters=[('country', '==', 'CA')],
-    engine='pyarrow')  # 0.5s
-
-# Note: Different filters still benefit from cached file
-```
-
 ### Minimize Data Transfer
 
 ```python
@@ -613,7 +591,6 @@ print("Available columns:", info.get('columns', []))
 - Ensure you're using `engine='pyarrow'`
 - Check filter selectivity (how many rows match)
 - Consider breaking into smaller chunks
-- Enable caching for cloud data
 
 ## Summary
 
@@ -622,7 +599,6 @@ print("Available columns:", info.get('columns', []))
 | **Column selection** | You need only some columns | 5-50x faster, 5-50x less memory |
 | **Row filtering** | You need only some rows | 10-1000x faster, 10-1000x less memory |
 | **Both combined** | Large datasets | 50-10000x faster! |
-| **Caching** | Cloud storage, repeated access | 10-100x faster on subsequent reads |
 | **PyArrow engine** | Any filtering | Required for filters |
 | **Chunked processing** | Data too large for memory | Enables processing unlimited data |
 
