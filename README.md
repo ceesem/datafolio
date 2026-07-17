@@ -115,7 +115,7 @@ Track dependencies between datasets and models:
 
 ```python
 # Create dependency chain
-folio.reference_table('raw', reference='s3://bucket/raw.parquet')
+folio.reference_table('raw', path='s3://bucket/raw.parquet')
 folio.add_table('clean', cleaned_df, inputs=['raw'])
 folio.add_table('features', feature_df, inputs=['clean'])
 folio.add_model('model', clf, inputs=['features'])
@@ -161,6 +161,43 @@ experiments/my_experiment/
     ├── config.json           # JSON data
     └── plot.png              # Any file type
 ```
+
+## Polars, Lazy Scans & External References
+
+Parquet is the canonical table format. Tables come back as **pandas** by default
+(unchanged), but you can also work with **polars** — eager or lazy:
+
+```python
+import polars as pl
+
+folio.add_table('t', df)                       # pandas or polars DataFrame
+folio.add_table('big', lazyframe)              # LazyFrame → streamed to parquet (bounded memory)
+
+folio.get_table('t')                           # pandas DataFrame (default)
+folio.get_table('t', frame='polars')           # eager polars DataFrame
+folio.scan_table('t')                          # genuinely lazy pl.LazyFrame (get_lazy is an alias)
+folio.scan_table('t').filter(pl.col('a') > 0).select('b').collect()  # pushdown
+```
+
+**External references** link to data you don't copy into the bundle. Creating a
+reference is a cheap, offline manifest write — it performs **no** network I/O:
+
+```python
+folio.reference_table('raw', path='s3://bucket/huge.parquet')  # no download, no stat
+folio.scan_table('raw')            # lazy scan over the external parquet (pushdown, no full read)
+folio.inspect_table('raw')         # opt-in: reads schema/size/identity now
+```
+
+Sharded / hive-partitioned directory references are read lazily via polars; a
+plain pandas `get_table` on one raises a clear "polars-only" error. `scan_table`
+is genuinely lazy (local, `s3://`, `gs://`, `az://`, `http(s)://`) and raises
+rather than silently downloading a scheme it can't scan lazily. Delta/Iceberg
+are not supported — convert to Parquet first.
+
+> **Snapshots & references:** snapshots freeze *owned* items (included tables,
+> models, artifacts). A referenced table's external bytes are **not** owned and
+> may change; snapshots preserve the link, not the content. See
+> `folio.mutable_references()` and `folio.inspect_table()`.
 
 ## Snapshots: Version Control for Experiments
 

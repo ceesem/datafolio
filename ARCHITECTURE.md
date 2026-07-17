@@ -1,5 +1,15 @@
 # DataFolio Architecture
 
+> **Accuracy note.** The Overview and Core-Components sections reflect the
+> current codebase (6 handlers; pandas/Polars/LazyFrame tables; offline
+> references + `inspect_table`; genuinely-lazy `scan_table`; a versioned,
+> atomic, single-writer manifest). **PyTorch support has been removed** — any
+> later section describing a `PyTorchHandler`, `add_pytorch`/`get_pytorch`,
+> `write_pytorch`/`read_pytorch`, or a `pytorch_model` item type is historical
+> and no longer applies; models are scikit-learn style via the `model` handler.
+> Line-count and test-count figures elsewhere in this document are illustrative,
+> not current — run `uv run pytest --cov=datafolio tests` for live numbers.
+
 ## Table of Contents
 - [1. Overview](#1-overview)
 - [2. Core Components](#2-core-components)
@@ -39,24 +49,25 @@ The architecture is built on these core principles:
 │                      User Code                               │
 │  folio = DataFolio('experiment')                            │
 │  folio.add_data('data', df)        ← Auto-detection         │
-│  folio.add_pytorch('model', net)   ← Type-specific          │
+│  folio.add_table('t', lazyframe)   ← Type-specific          │
 └─────────────────────┬───────────────────────────────────────┘
                       │
 ┌─────────────────────▼───────────────────────────────────────┐
-│                   DataFolio (764 lines)                      │
+│                       DataFolio                              │
 │  • Bundle orchestration                                      │
 │  • Metadata & lineage tracking                              │
+│  • Versioned/atomic manifest, one-writer model              │
 │  • Delegates to handlers for type-specific logic            │
 └─────────┬─────────────────────────┬─────────────────────────┘
           │                         │
     ┌─────▼──────┐          ┌───────▼────────┐
     │  Storage   │          │   Handlers     │
-    │  Backend   │          │   (8 types)    │
-    │  229 lines │          │                 │
-    │            │          │  • Tables (2)   │
-    │  • Local   │          │  • Models (2)   │
-    │  • Cloud   │          │  • Arrays       │
-    │  • Formats │          │  • JSON         │
+    │  Backend   │          │   (6 types)    │
+    │            │          │                 │
+    │  • Local   │          │  • Tables (2)   │
+    │  • Cloud   │          │  • Models       │
+    │  • Formats │          │  • Arrays       │
+    │  • Streams │          │  • JSON         │
     │            │          │  • Artifacts    │
     │            │          │  • Timestamps   │
     └────────────┘          └─────────────────┘
@@ -65,25 +76,27 @@ The architecture is built on these core principles:
 ### 1.4 Current State Summary
 
 **Codebase Metrics:**
-- **Main file**: 764 lines (reduced from 3,659 - **79% smaller**)
-- **8 handlers**: All implemented and tested
-- **5 modules at 100% coverage**: metadata.py, timestamps.py, categories.py, handlers/__init__.py, base/registry.py
+- **Handler-based architecture**: a slim `DataFolio` facade delegating to
+  focused handlers and a storage backend.
+- **6 handlers**: tables (included + referenced), sklearn models, numpy arrays,
+  JSON data, artifacts, timestamps.
 
-**Test Coverage:**
-- **417 tests passing** (all green)
-- **79% overall coverage**
-- **108 handler & component unit tests**
-- **309 integration tests**
+**Testing:**
+- Full suite green via `poe test`; both unit and integration tests
+  (see `tests/`). Run `uv run pytest --cov=datafolio tests` for current
+  coverage.
 
 **Supported Data Types:**
-1. `included_table` - Pandas DataFrames (Parquet)
-2. `referenced_table` - External table references
+1. `included_table` - pandas/Polars DataFrames & Polars LazyFrames (Parquet)
+2. `referenced_table` - external table references (Parquet/CSV, not copied)
 3. `numpy_array` - NumPy arrays (.npy)
 4. `json_data` - Dictionaries and lists (JSON)
-5. `model` - Scikit-learn models (Joblib)
-6. `pytorch_model` - PyTorch models (.pt with enhanced reconstruction)
-7. `artifact` - Arbitrary files
-8. `timestamp` - DateTime objects (ISO 8601)
+5. `model` - Scikit-learn models (Joblib/skops)
+6. `artifact` - Arbitrary files
+7. `timestamp` - DateTime objects (ISO 8601)
+
+> PyTorch support has been removed; models are scikit-learn style via the
+> `model` handler.
 
 **Storage Support:**
 - Local filesystem
@@ -95,7 +108,7 @@ The architecture is built on these core principles:
 
 The system consists of six main components that work together to provide the handler-based architecture.
 
-### 2.1 DataFolio Class (`folio.py` - 764 lines)
+### 2.1 DataFolio Class (`folio.py`)
 
 The main orchestrator that users interact with. Responsibilities:
 
@@ -122,18 +135,19 @@ folio.get_data(name)
 folio.delete(name)
 
 # Type-specific API (explicit handlers)
-folio.add_table(name, df, ...)
-folio.add_pytorch(name, model, init_args=None, save_class=False, ...)
+folio.add_table(name, df_or_lazyframe, ...)   # pandas / polars / LazyFrame
 folio.add_numpy(name, array, ...)
 folio.add_json(name, data, ...)
-folio.add_model(name, model, ...)  # Auto-detects sklearn/pytorch
+folio.add_model(name, model, ...)             # scikit-learn style
 folio.add_artifact(name, filepath, ...)
 folio.add_timestamp(name, dt, ...)
-folio.reference_table(name, path, ...)
+folio.reference_table(name, path, ...)        # external link (offline)
 
 # Retrieval (type-specific methods available)
-folio.get_table(name)
-folio.get_pytorch(name, model_class=None, reconstruct=True)
+folio.get_table(name)                          # pandas (default)
+folio.get_table(name, frame="polars")          # eager polars
+folio.scan_table(name)                         # genuinely lazy pl.LazyFrame
+folio.inspect_table(name)                      # enrich a reference (I/O)
 # ... etc
 
 # Metadata & lineage
@@ -151,7 +165,7 @@ folio.validate()  # Check integrity
 folio.is_valid()  # Boolean check
 ```
 
-### 2.2 BaseHandler (`base/handler.py` - 27 lines)
+### 2.2 BaseHandler (`base/handler.py`)
 
 Abstract base class defining the handler interface. All handlers must inherit from this.
 
