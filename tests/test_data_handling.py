@@ -35,17 +35,18 @@ class TestReferenceTable:
         assert ref["description"] == "Raw training data"
         assert ref["item_type"] == "referenced_table"
 
-    def test_reference_table_delta_with_version(self, tmp_path):
-        """Test referencing Delta table with version."""
+    def test_reference_table_delta_rejected(self, tmp_path):
+        """Delta references are rejected (no reader) with actionable guidance."""
         folio = DataFolio(tmp_path / "test")
-        folio.reference_table(
-            "features", path="s3://bucket/features/", table_format="delta", version=3
-        )
-
-        ref = folio._items["features"]
-        assert ref["table_format"] == "delta"
-        assert ref["version"] == 3
-        assert ref["item_type"] == "referenced_table"
+        with pytest.raises(
+            ValueError, match="delta.*not supported|not supported.*delta"
+        ):
+            folio.reference_table(
+                "features",
+                path="s3://bucket/features/",
+                table_format="delta",
+                version=3,
+            )
 
     def test_reference_table_method_chaining(self, tmp_path):
         """Test method chaining works."""

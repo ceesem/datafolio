@@ -159,38 +159,42 @@ class TestHandlerLazy:
         assert isinstance(lf, pl.LazyFrame)
         assert lf.filter(pl.col("a") > 1).collect().shape == (2, 2)
 
-    def test_reference_infer_schema(self, tmp_path):
+    def test_reference_schema_via_inspect(self, tmp_path):
         df = pd.DataFrame({"a": [1, 2, 3], "b": [4.0, 5.0, 6.0]})
         ext = tmp_path / "ext.parquet"
         df.to_parquet(ext, index=False)
 
         folio = DataFolio(tmp_path / "b")
-        folio.reference_table("ref", ext)  # infer_schema=True by default
+        folio.reference_table("ref", ext)  # offline: no schema yet
+        assert "columns" not in folio.get_table_info("ref")
 
+        folio.inspect_table("ref")  # explicit enrichment
         info = folio.get_table_info("ref")
         assert info["columns"] == ["a", "b"]
         assert set(info["dtypes"]) == {"a", "b"}
         assert info["num_rows"] == 3
 
-    def test_reference_infer_schema_disabled(self, tmp_path):
+    def test_reference_creation_is_offline(self, tmp_path):
         df = pd.DataFrame({"a": [1, 2, 3]})
-        ext = tmp_path / "ext.parquet"
-        df.to_parquet(ext, index=False)
-
-        folio = DataFolio(tmp_path / "b")
-        folio.reference_table("ref", ext, infer_schema=False)
-
-        info = folio.get_table_info("ref")
-        assert "columns" not in info
-
-    def test_reference_records_size(self, tmp_path):
-        df = pd.DataFrame({"a": range(100)})
         ext = tmp_path / "ext.parquet"
         df.to_parquet(ext, index=False)
 
         folio = DataFolio(tmp_path / "b")
         folio.reference_table("ref", ext)
 
+        info = folio.get_table_info("ref")
+        assert "columns" not in info
+
+    def test_reference_records_size_via_inspect(self, tmp_path):
+        df = pd.DataFrame({"a": range(100)})
+        ext = tmp_path / "ext.parquet"
+        df.to_parquet(ext, index=False)
+
+        folio = DataFolio(tmp_path / "b")
+        folio.reference_table("ref", ext)
+        assert "size_bytes" not in folio.get_table_info("ref")
+
+        folio.inspect_table("ref")
         info = folio.get_table_info("ref")
         assert info["size_bytes"] == ext.stat().st_size
 
@@ -332,7 +336,8 @@ class TestParity:
             folio.reference_table("ref", e2)
 
         folio.reference_table("ref", e2, overwrite=True)
-        assert folio.get_table_info("ref")["num_rows"] == 5
+        assert folio.get_table_info("ref")["path"].endswith("e2.parquet")
+        assert folio.get_table("ref")["a"].to_list() == [1, 2, 3, 4, 5]
 
     def test_snapshot_get_table_pandas_still_works(self, tmp_path):
         folio = DataFolio(tmp_path / "b")
@@ -380,9 +385,12 @@ class TestShardedPolarsOnly:
         assert info["is_directory"] is True
         assert info["polars_only"] is True
 
-    def test_directory_reference_schema_inferred(self, tmp_path):
+    def test_directory_reference_schema_via_inspect(self, tmp_path):
         folio = DataFolio(tmp_path / "b")
         folio.reference_table("big", path=self._hive_dir(tmp_path))
+        assert "columns" not in folio.get_table_info("big")  # offline creation
+
+        folio.inspect_table("big")
         info = folio.get_table_info("big")
         # partition column 'g' is included in the scanned schema
         assert set(info["columns"]) == {"g", "x"}

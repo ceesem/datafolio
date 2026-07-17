@@ -239,12 +239,17 @@ class ReferenceTableHandler(BaseHandler):
         description: Optional[str] = None,
         inputs: Optional[list[str]] = None,
         table_format: str = "parquet",
-        infer_schema: bool = True,
         allow_full_load: bool = False,
         polars_only: Optional[bool] = None,
         **kwargs,
     ) -> Dict[str, Any]:
         """Add reference to external table.
+
+        This is a cheap, purely-local manifest operation: it performs **no
+        remote I/O**. It does not stat the object, read its schema, count its
+        rows, or check that it exists. Use :meth:`DataFolio.inspect_table` to
+        enrich the manifest with schema/size/identity, and
+        :meth:`DataFolio.validate` to check existence.
 
         Args:
             folio: DataFolio instance
@@ -253,10 +258,6 @@ class ReferenceTableHandler(BaseHandler):
             description: Optional description
             inputs: Optional lineage inputs
             table_format: Format of the table (default: 'parquet')
-            infer_schema: If True and polars is available, cheaply read the
-                parquet footer to populate ``columns``/``dtypes``/``num_rows``
-                so a reference carries the same schema metadata as an included
-                table. Best-effort: silently skipped on any failure.
             allow_full_load: If True, this reference bypasses the folio's
                 ``max_eager_bytes`` guard on eager ``get_table`` reads.
             polars_only: If True, the reference can only be read lazily/via
@@ -271,13 +272,13 @@ class ReferenceTableHandler(BaseHandler):
         """
         from datafolio.utils import is_cloud_path, resolve_path
 
-        # Resolve path (handles local/cloud)
+        # Resolve path (handles local/cloud). Cloud URIs are kept verbatim; a
+        # local path is normalized but NOT stat'd here (no I/O).
         resolved_path = resolve_path(reference)
 
-        # Check if directory
+        # Layout guess — local uses a cheap local stat; cloud is a name-only
+        # heuristic. Neither performs remote I/O.
         is_directory = False
-
-        # Handle local paths (including file://)
         check_path = resolved_path
         if check_path.startswith("file://"):
             check_path = check_path[7:]
@@ -287,13 +288,12 @@ class ReferenceTableHandler(BaseHandler):
 
             is_directory = os.path.isdir(check_path)
         else:
-            # For cloud paths, we can't easily check isdir without network calls
-            # Heuristic: if it ends with '/', treat as directory
-            # Or if table_format implies directory (like 'delta')
-            if resolved_path.endswith("/") or table_format in ("delta", "iceberg"):
+            # For cloud paths we can't check isdir without a network call, so
+            # use a name heuristic only: a trailing '/' implies a directory.
+            if resolved_path.endswith("/"):
                 is_directory = True
 
-        # Build metadata
+        # Build metadata (manifest-only; enrichment happens in inspect_table).
         metadata = {
             "name": name,
             "item_type": self.item_type,
@@ -313,18 +313,6 @@ class ReferenceTableHandler(BaseHandler):
         if is_polars_only:
             metadata["polars_only"] = True
 
-        # Best-effort size (drives the eager-load guard). Unknown -> unset.
-        size_bytes = folio._storage.file_size(resolved_path)
-        if size_bytes is not None:
-            metadata["size_bytes"] = size_bytes
-
-        # Cheap schema inference via a polars scan (footer-only for a single
-        # file; reads shard metadata for a directory dataset), so references
-        # carry the same columns/dtypes/num_rows an included table would.
-        # Works for both single parquet files and sharded/hive directories.
-        if infer_schema and table_format == "parquet":
-            self._infer_schema(folio, resolved_path, metadata)
-
         # Add optional fields
         if description:
             metadata["description"] = description
@@ -333,32 +321,62 @@ class ReferenceTableHandler(BaseHandler):
 
         return metadata
 
-    @staticmethod
-    def _infer_schema(folio: "DataFolio", path: str, metadata: Dict[str, Any]) -> None:
-        """Populate columns/dtypes/num_rows from a parquet footer (best-effort).
+    def inspect(self, folio: "DataFolio", name: str) -> Dict[str, Any]:
+        """Read the external object and return enrichment metadata.
 
-        Uses a polars lazy scan so only the file footer is read for the schema
-        (and, where polars can optimize it, for the row count). Any failure
-        (polars missing, unreachable remote, bad file) is swallowed so that
-        creating a reference never fails on metadata inference.
+        Unlike :meth:`add`, this performs remote I/O. It verifies the object
+        exists, records its size, and (for parquet) reads the schema and row
+        count via a polars scan. Failures raise actionable errors rather than
+        being silently swallowed.
+
+        Args:
+            folio: DataFolio instance
+            name: Item name
+
+        Returns:
+            Dict of fields to merge into the manifest entry (``size_bytes``,
+            ``columns``, ``dtypes``, ``num_cols``, ``num_rows``, refreshed
+            ``is_directory``).
+
+        Raises:
+            FileNotFoundError: If the referenced object does not exist.
+            RuntimeError: If the object exists but its schema cannot be read.
         """
-        try:
-            from datafolio.readers import scan_parquet
+        item = folio._items[name]
+        path = item["path"]
+        table_format = item.get("table_format", "parquet")
 
-            lf = scan_parquet(path, use_https=folio._storage._use_https)
-            schema = lf.collect_schema()
-            metadata["columns"] = list(schema.names())
-            metadata["dtypes"] = {n: str(t) for n, t in schema.items()}
-            metadata["num_cols"] = len(schema)
+        if not folio._storage.exists(path):
+            raise FileNotFoundError(f"Referenced table '{name}' not found at {path}")
+
+        updated: Dict[str, Any] = {}
+
+        size_bytes = folio._storage.file_size(path)
+        if size_bytes is not None:
+            updated["size_bytes"] = size_bytes
+
+        if table_format == "parquet":
+            try:
+                from datafolio.readers import scan_parquet
+
+                lf = scan_parquet(path, use_https=folio._storage._use_https)
+                schema = lf.collect_schema()
+                updated["columns"] = list(schema.names())
+                updated["dtypes"] = {n: str(t) for n, t in schema.items()}
+                updated["num_cols"] = len(schema)
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Could not read schema for reference '{name}' at {path}: {exc}"
+                ) from exc
+            # Row count is best-effort (may require reading shard metadata).
             try:
                 import polars as pl
 
-                metadata["num_rows"] = int(lf.select(pl.len()).collect().item())
+                updated["num_rows"] = int(lf.select(pl.len()).collect().item())
             except Exception:
                 pass
-        except Exception:
-            # Never fail reference creation on schema inference.
-            pass
+
+        return updated
 
     def get(self, folio: "DataFolio", name: str, **kwargs) -> Any:
         """Load DataFrame from external reference.

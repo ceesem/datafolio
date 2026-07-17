@@ -24,8 +24,8 @@ class TableReference(TypedDict, total=False):
     name: str
     item_type: str  # 'referenced_table'
     path: str
-    table_format: str  # 'parquet', 'delta', 'csv'
-    is_directory: bool  # True if path points to a directory (e.g. Delta table)
+    table_format: str  # 'parquet' (canonical) or 'csv'
+    is_directory: bool  # True if path points to a directory (sharded dataset)
     num_rows: Optional[int]
     num_cols: Optional[int]
     columns: Optional[list[str]]
@@ -255,19 +255,35 @@ def resolve_path(
 
 
 def validate_table_format(table_format: str) -> None:
-    """Validate that table format is supported.
+    """Validate that table format is supported end-to-end.
+
+    Only formats that work through registration, reading, lazy scanning, and
+    validation are accepted. Parquet is the canonical first-class format;
+    CSV is supported as a narrow reference format.
+
+    Delta and Iceberg are explicitly rejected: they were previously accepted
+    at creation but have no reader, so a reference to one could never be read.
+    Rather than record an unreadable item, we fail fast with guidance.
 
     Args:
         table_format: Format string to validate
 
     Raises:
-        ValueError: If format is not supported
+        ValueError: If format is not supported (includes an actionable message
+            for delta/iceberg).
     """
-    supported_formats = {"parquet", "delta", "csv"}
+    supported_formats = {"parquet", "csv"}
+    if table_format in ("delta", "iceberg"):
+        raise ValueError(
+            f"Table format '{table_format}' is not supported: datafolio has no "
+            f"{table_format} reader, so such a reference could never be read. "
+            f"Use 'parquet' (canonical) or 'csv'. To point at a "
+            f"{table_format} table, export/convert it to Parquet first."
+        )
     if table_format not in supported_formats:
         raise ValueError(
             f"Unsupported table format: {table_format}. "
-            f"Supported formats: {supported_formats}"
+            f"Supported formats: {sorted(supported_formats)}"
         )
 
 
@@ -289,8 +305,7 @@ def get_file_extension(table_format: str) -> str:
     extensions = {
         "parquet": ".parquet",
         "csv": ".csv",
-        "arrow": ".arrow",
-        "delta": "",  # Delta Lake is a directory
+        "arrow": ".arrow",  # internal reader only, not a public reference format
     }
     return extensions.get(table_format, f".{table_format}")
 

@@ -3052,11 +3052,17 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         inputs: Optional[list[str]] = None,
         code: Optional[str] = None,
         overwrite: bool = False,
-        infer_schema: bool = True,
         allow_full_load: bool = False,
         polars_only: Optional[bool] = None,
     ) -> Self:
         """Add a reference to an external table (not copied to bundle).
+
+        This is a cheap, offline manifest operation and performs **no remote
+        I/O**: it does not stat the object, read its schema, count rows, or
+        verify existence. Linking a private or currently-unreachable URI is
+        therefore fast and never blocks on network/credentials. Use
+        :meth:`inspect_table` to enrich the entry with schema/size/identity, and
+        :meth:`validate` to check existence.
 
         Writes immediately to items.json. Behaves like :meth:`add_table` with
         respect to existing names: overwriting requires ``overwrite=True``, and
@@ -3065,16 +3071,13 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         Args:
             name: Unique name for this table
             path: Path to the table (local or cloud)
-            table_format: Format of the table ('parquet', 'delta', 'csv')
+            table_format: Format of the table ('parquet' (canonical) or 'csv')
             num_rows: Optional number of rows (overrides inferred value)
-            version: Optional version number (for Delta tables)
+            version: Optional source version number recorded in the manifest
             description: Optional description
             inputs: Optional list of items this was derived from
             code: Optional code snippet that created this
             overwrite: If True, allow replacing an existing table (default: False)
-            infer_schema: If True (and polars is available), cheaply read the
-                parquet footer to populate columns/dtypes/num_rows so the
-                reference carries the same schema metadata as an included table.
             allow_full_load: If True, this reference bypasses the folio's
                 ``max_eager_bytes`` guard on eager ``get_table`` reads.
             polars_only: If True, this reference is readable only lazily / via
@@ -3128,7 +3131,6 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             description=description,
             inputs=inputs,
             table_format=table_format,
-            infer_schema=infer_schema,
             allow_full_load=allow_full_load,
             polars_only=polars_only,
         )
@@ -3369,6 +3371,14 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         if limit is None:
             return
         size = item.get("size_bytes")
+        if size is None and item.get("item_type") == "referenced_table":
+            # Reference sizes aren't recorded at (offline) creation. Stat the
+            # object now — a cheap metadata lookup (HEAD), far cheaper than the
+            # full read this guard protects. Unknown size is allowed through.
+            try:
+                size = self._storage.file_size(item["path"])
+            except Exception:
+                size = None
         if size is not None and size > limit:
             size_mb = size / (1024 * 1024)
             limit_mb = limit / (1024 * 1024)
@@ -3552,6 +3562,55 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             return item
         else:
             raise ValueError(f"Item '{name}' is not a table (type: {item_type})")
+
+    def inspect_table(self, name: str) -> Union[TableReference, IncludedTable]:
+        """Read a table's source and enrich its manifest entry.
+
+        Unlike :meth:`reference_table` (a cheap, offline manifest write), this
+        performs I/O against the table's location to record schema, size, row
+        count, and (for external references) available source identity. The
+        enriched metadata is persisted to the manifest and returned.
+
+        This is the explicit, opt-in counterpart to offline reference creation:
+        linking a table never touches the network, but inspecting it does.
+
+        Args:
+            name: Name of the table (included or referenced)
+
+        Returns:
+            The updated manifest entry.
+
+        Raises:
+            KeyError: If the table name doesn't exist.
+            ValueError: If the named item is not a table.
+            FileNotFoundError: If a referenced object does not exist.
+            RuntimeError: If the object exists but its schema can't be read.
+
+        Examples:
+            >>> folio.reference_table('big', path='s3://bucket/data.parquet')
+            >>> info = folio.inspect_table('big')  # reads schema/size now
+            >>> info['columns'], info['num_rows']
+        """
+        self._check_read_only()
+        self._refresh_if_needed()
+
+        if name not in self._items:
+            raise KeyError(f"Table '{name}' not found in DataFolio")
+
+        item = self._items[name]
+        item_type = item.get("item_type")
+        if item_type not in ("referenced_table", "included_table"):
+            raise ValueError(f"Item '{name}' is not a table (type: {item_type})")
+
+        registry = get_registry()
+        handler = registry.get(item_type)
+        enrichment = handler.inspect(self, name)
+
+        if enrichment:
+            self._items[name].update(enrichment)
+            self._save_items()
+
+        return self._items[name]
 
     def get_model_info(self, name: str) -> IncludedItem:
         """Get metadata about a model.

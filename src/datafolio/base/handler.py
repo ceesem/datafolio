@@ -176,6 +176,22 @@ class BaseHandler(ABC):
             f"'{self.item_type}' does not support lazy access via get_lazy()"
         )
 
+    def inspect(self, folio: "DataFolio", name: str) -> Dict[str, Any]:
+        """Read the stored item and return enrichment metadata (optional hook).
+
+        Default implementation returns an empty dict (nothing to enrich).
+        Reference handlers override this to perform explicit remote I/O and
+        report schema/size/identity. May raise actionable errors on failure.
+
+        Args:
+            folio: DataFolio instance
+            name: Item name
+
+        Returns:
+            Dict of fields to merge into the manifest entry.
+        """
+        return {}
+
     def delete(self, folio: "DataFolio", name: str) -> None:
         """Delete data files for this item.
 

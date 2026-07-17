@@ -184,7 +184,7 @@ def read_table(
 
     Args:
         path: Path to the table (local or cloud)
-        table_format: Format of the table ('parquet', 'delta', 'csv')
+        table_format: Format of the table ('parquet' or 'csv')
         **kwargs: Additional arguments passed to the format-specific reader
 
     Returns:
@@ -197,7 +197,7 @@ def read_table(
 
     Examples:
         >>> df = read_table('/path/data.parquet', 'parquet')
-        >>> df = read_table('s3://bucket/delta', 'delta', version=3)
+        >>> df = read_table('s3://bucket/data.csv', 'csv')
     """
     match table_format:
         case "parquet":

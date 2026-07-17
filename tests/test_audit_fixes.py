@@ -66,3 +66,92 @@ class TestGenericApiInvariants:
         folio.reference_table("ref", ext)
         with pytest.raises(ValueError, match="eager-load limit"):
             folio.get_data("ref")
+
+
+# =============================================================================
+# Finding 2: creating a reference must perform NO remote I/O. Enrichment is an
+# explicit, separate operation (inspect_table).
+# =============================================================================
+
+
+class TestOfflineReferenceCreation:
+    def test_reference_creation_does_no_remote_io(self, tmp_path, monkeypatch):
+        """Linking an S3/GCS URI must not stat, scan, or open a client."""
+        import datafolio.readers as readers
+        from datafolio.storage.backend import StorageBackend
+
+        def boom(*a, **k):  # pragma: no cover - must never be called
+            raise AssertionError("reference creation performed remote I/O")
+
+        # Build the folio first (its __init__ legitimately constructs a local
+        # CloudFiles for the bundle dir), THEN forbid any remote-I/O entrypoints.
+        folio = DataFolio(tmp_path / "b")
+
+        # file_size (HEAD) and scan_parquet (schema/data) are the remote-I/O
+        # entrypoints; constructing a cloud client for the reference is also a
+        # failure. (exists() on a local manifest file is fine — not remote.)
+        monkeypatch.setattr(StorageBackend, "file_size", boom)
+        monkeypatch.setattr(readers, "scan_parquet", boom)
+        import cloudfiles
+
+        monkeypatch.setattr(cloudfiles, "CloudFiles", lambda *a, **k: boom())
+
+        # Should complete purely as a manifest write.
+        folio.reference_table("remote", path="s3://bucket/private/data.parquet")
+        info = folio.get_table_info("remote")
+        assert info["path"] == "s3://bucket/private/data.parquet"
+        # No auto-enriched fields.
+        assert "size_bytes" not in info
+        assert "columns" not in info
+        assert "num_rows" not in info
+
+    def test_reference_creation_preserves_explicit_num_rows(self, tmp_path):
+        folio = DataFolio(tmp_path / "b")
+        folio.reference_table(
+            "remote", path="s3://bucket/data.parquet", num_rows=1_000_000
+        )
+        assert folio.get_table_info("remote")["num_rows"] == 1_000_000
+
+    def test_inspect_table_enriches_local(self, tmp_path):
+        df = pd.DataFrame({"a": [1, 2, 3], "b": [4.0, 5.0, 6.0]})
+        ext = tmp_path / "e.parquet"
+        df.to_parquet(ext, index=False)
+        folio = DataFolio(tmp_path / "b")
+        folio.reference_table("ref", ext)
+        assert "columns" not in folio.get_table_info("ref")  # offline creation
+
+        result = folio.inspect_table("ref")
+        info = folio.get_table_info("ref")
+        assert info["columns"] == ["a", "b"]
+        assert info["num_rows"] == 3
+        assert info["size_bytes"] == ext.stat().st_size
+        # inspect returns the enriched info
+        assert result["num_rows"] == 3
+
+    def test_inspect_table_unreachable_raises_actionable(self, tmp_path):
+        folio = DataFolio(tmp_path / "b")
+        folio.reference_table("gone", path=str(tmp_path / "does_not_exist.parquet"))
+        with pytest.raises((FileNotFoundError, RuntimeError, ValueError)):
+            folio.inspect_table("gone")
+
+
+# =============================================================================
+# Finding 6: only accept formats that work end-to-end (parquet, csv). Delta and
+# Iceberg are rejected immediately with an actionable error.
+# =============================================================================
+
+
+class TestUnsupportedFormats:
+    @pytest.mark.parametrize("fmt", ["delta", "iceberg"])
+    def test_delta_iceberg_rejected(self, tmp_path, fmt):
+        folio = DataFolio(tmp_path / "b")
+        with pytest.raises(ValueError, match="not supported"):
+            folio.reference_table("x", path="s3://bucket/data", table_format=fmt)
+        # nothing was recorded
+        assert "x" not in folio._items
+
+    @pytest.mark.parametrize("fmt", ["parquet", "csv"])
+    def test_supported_formats_accepted(self, tmp_path, fmt):
+        folio = DataFolio(tmp_path / "b")
+        folio.reference_table("x", path=f"s3://bucket/data.{fmt}", table_format=fmt)
+        assert folio.get_table_info("x")["table_format"] == fmt
