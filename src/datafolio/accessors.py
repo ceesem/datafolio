@@ -71,6 +71,41 @@ class ItemProxy:
             raise ValueError(f"Unknown item type: {item_type}")
 
     @property
+    def lazy(self) -> Any:
+        """Get this table as a polars LazyFrame (tables only).
+
+        Works identically for included and referenced tables — a lazy scan with
+        predicate/projection pushdown, no full download.
+
+        Returns:
+            polars LazyFrame
+
+        Raises:
+            ValueError: If this item is not a table
+            ImportError: If polars is not installed
+
+        Examples:
+            >>> lf = folio.data.big_ref.lazy
+            >>> lf.filter(pl.col("x") > 0).select("y").collect()
+        """
+        self._folio._refresh_if_needed()
+        return self._folio.get_lazy(self._name)
+
+    @property
+    def polars(self) -> Any:
+        """Get this table as an eager polars DataFrame (tables only).
+
+        Returns:
+            polars DataFrame
+
+        Raises:
+            ValueError: If this item is not a table
+            ImportError: If polars is not installed
+        """
+        self._folio._refresh_if_needed()
+        return self._folio.get_table(self._name, frame="polars")
+
+    @property
     def description(self) -> Optional[str]:
         """Get the description of this item.
 
@@ -103,11 +138,13 @@ class ItemProxy:
 
         Returns:
             - For referenced tables: external file path
+            - For included tables: path to the parquet file inside the bundle
             - For artifacts: artifact file path
             - For other types: None
 
         Examples:
             >>> folio.data.external_data.path  # 's3://bucket/data.parquet'
+            >>> folio.data.results.path  # '/path/to/bundle/tables/results.parquet'
             >>> folio.data.plot.path  # '/path/to/bundle/artifacts/plot.png'
         """
         # Auto-refresh before accessing
@@ -116,8 +153,8 @@ class ItemProxy:
         item = self._folio._items[self._name]
         item_type = item.get("item_type")
 
-        if item_type == "referenced_table":
-            return item.get("path")
+        if item_type in ("referenced_table", "included_table"):
+            return self._folio.get_table_path(self._name)
         elif item_type == "artifact":
             return self._folio.get_artifact_path(self._name)
         else:

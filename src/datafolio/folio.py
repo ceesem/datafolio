@@ -96,20 +96,26 @@ class SnapshotView:
         """Get item versions in this snapshot."""
         return self._snapshot_meta.get("item_versions", {})
 
-    def get_table(self, name: str) -> Any:
+    def get_table(self, name: str, frame: str = "pandas") -> Any:
         """Get a table as it existed in this snapshot.
 
         Args:
             name: Table name
+            frame: Output flavor — ``'pandas'`` (default) or ``'polars'`` for an
+                eager polars DataFrame.
 
         Returns:
-            Table data (pandas DataFrame)
+            Table data (pandas or polars DataFrame)
 
         Raises:
             KeyError: If table not in snapshot
+            ValueError: If ``frame`` is invalid
         """
         if name not in self.item_versions:
             raise KeyError(f"Table '{name}' not found in snapshot '{self._name}'")
+
+        if frame not in ("pandas", "polars"):
+            raise ValueError(f"Unknown frame '{frame}'. Use 'pandas' or 'polars'.")
 
         # Find the snapshot version item
         snapshot_item = self._find_snapshot_item(name)
@@ -126,6 +132,8 @@ class SnapshotView:
         original_item = self._folio._items.get(name)
         try:
             self._folio._items[name] = snapshot_item
+            if frame == "polars":
+                return handler.get_lazy(self._folio, name).collect()
             return handler.get(self._folio, name)
         finally:
             # Restore original item
@@ -273,6 +281,7 @@ class DataFolio:
         cache_dir: Optional[Union[str, Path]] = None,
         cache_ttl: Optional[int] = None,
         use_https: bool = False,
+        max_eager_bytes: Optional[int] = 500 * 1024 * 1024,
     ):
         """Initialize a new or open an existing DataFolio.
 
@@ -288,6 +297,11 @@ class DataFolio:
             cache_dir: Optional cache directory (default: ~/.datafolio_cache)
             cache_ttl: Optional TTL override in seconds (default: 1800 = 30 minutes)
             use_https: If True, use HTTPS URLs for CloudFiles (for read-only access to public buckets) (default: False)
+            max_eager_bytes: Size ceiling (in bytes) for eager, full-table reads
+                via ``get_table``. A table whose recorded ``size_bytes`` exceeds
+                this raises unless it is flagged ``allow_full_load`` — use
+                ``get_lazy`` instead. Set to ``None`` to disable the guard
+                (default: 500 MB).
 
         Examples:
             Create new bundle with exact name:
@@ -337,6 +351,9 @@ class DataFolio:
 
         # HTTPS mode flag (for read-only access to public cloud buckets)
         self._use_https = use_https
+
+        # Ceiling for eager full-table reads (None disables the guard)
+        self._max_eager_bytes = max_eager_bytes
 
         # Snapshot mode flags (set by load_snapshot())
         self._in_snapshot_mode = False
@@ -3023,26 +3040,37 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         description: Optional[str] = None,
         inputs: Optional[list[str]] = None,
         code: Optional[str] = None,
+        overwrite: bool = False,
+        infer_schema: bool = True,
+        allow_full_load: bool = False,
     ) -> Self:
         """Add a reference to an external table (not copied to bundle).
 
-        Writes immediately to items.json.
+        Writes immediately to items.json. Behaves like :meth:`add_table` with
+        respect to existing names: overwriting requires ``overwrite=True``, and
+        replacing a snapshotted name triggers copy-on-write.
 
         Args:
             name: Unique name for this table
             path: Path to the table (local or cloud)
             table_format: Format of the table ('parquet', 'delta', 'csv')
-            num_rows: Optional number of rows
+            num_rows: Optional number of rows (overrides inferred value)
             version: Optional version number (for Delta tables)
             description: Optional description
             inputs: Optional list of items this was derived from
             code: Optional code snippet that created this
+            overwrite: If True, allow replacing an existing table (default: False)
+            infer_schema: If True (and polars is available), cheaply read the
+                parquet footer to populate columns/dtypes/num_rows so the
+                reference carries the same schema metadata as an included table.
+            allow_full_load: If True, this reference bypasses the folio's
+                ``max_eager_bytes`` guard on eager ``get_table`` reads.
 
         Returns:
             Self for method chaining
 
         Raises:
-            ValueError: If name already exists or format is invalid
+            ValueError: If name already exists (and overwrite=False) or format is invalid
 
         Examples:
             >>> folio = DataFolio('experiments', prefix='test')
@@ -3053,12 +3081,24 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             ...     num_rows=1_000_000
             ... )
         """
+        self._check_read_only()
 
-        # Validate inputs
-        if name in self._items:
-            raise ValueError(f"Item '{name}' already exists in this DataFolio")
+        # Validate item name
+        validate_item_name(name)
 
         validate_table_format(table_format)
+
+        # Handle overwriting logic (parity with add_table)
+        if name in self._items:
+            if self._is_in_snapshots(name):
+                # Item is in snapshots - must preserve it via copy-on-write
+                self._handle_copy_on_write(name)
+            elif not overwrite:
+                raise ValueError(
+                    f"Item '{name}' already exists in this DataFolio. "
+                    f"Use overwrite=True to replace it."
+                )
+            # else: overwrite=True and not in snapshots, so just replace it
 
         # Get handler and delegate metadata creation
         registry = get_registry()
@@ -3072,11 +3112,9 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             description=description,
             inputs=inputs,
             table_format=table_format,
+            infer_schema=infer_schema,
+            allow_full_load=allow_full_load,
         )
-
-        # Validate item name
-
-        validate_item_name(name)
 
         # Add extra fields not handled by base handler
         if num_rows is not None:
@@ -3191,7 +3229,13 @@ For more information, see the [datafolio documentation](https://github.com/ceese
 
         return self
 
-    def get_table(self, name: str, **kwargs) -> Any:  # Returns pandas.DataFrame
+    def get_table(
+        self,
+        name: str,
+        frame: str = "pandas",
+        allow_full_load: bool = False,
+        **kwargs,
+    ) -> Any:  # Returns pandas.DataFrame or polars.DataFrame
         """Get a table by name (works for both included and referenced).
 
         For included tables, reads from bundle directory.
@@ -3199,21 +3243,32 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         If caching is enabled (cache_enabled=True), cloud-based tables are cached locally
         for faster repeated access.
 
-        Supports all pandas.read_parquet() arguments for filtering and optimization:
+        The ``frame`` argument selects the returned DataFrame flavor. With
+        ``frame='pandas'`` (default), supports all pandas.read_parquet() arguments
+        for filtering and optimization:
         - `columns`: List of column names to read (column pruning)
         - `filters`: Row filtering predicates (row filtering)
         - `engine`: Parquet engine ('pyarrow' or 'fastparquet')
 
+        This is an *eager* read: it materializes the whole table. For large
+        (especially referenced) tables, use :meth:`get_lazy` instead. The eager
+        read is subject to the folio's ``max_eager_bytes`` guard.
+
         Args:
             name: Name of the table
-            **kwargs: Additional arguments passed to pd.read_parquet()
-                     (e.g., columns, filters, engine)
+            frame: Output flavor — ``'pandas'`` (default) or ``'polars'`` for an
+                eager polars DataFrame.
+            allow_full_load: Bypass the ``max_eager_bytes`` guard for this call.
+            **kwargs: Additional arguments passed to the reader
+                     (pandas: columns, filters, engine)
 
         Returns:
-            pandas DataFrame
+            pandas DataFrame (``frame='pandas'``) or polars DataFrame (``frame='polars'``)
 
         Raises:
             KeyError: If table name doesn't exist
+            ValueError: If the table exceeds ``max_eager_bytes`` (and isn't
+                flagged ``allow_full_load``), or if ``frame`` is invalid
             ImportError: If reading from cloud requires missing dependencies
             FileNotFoundError: If referenced file doesn't exist
 
@@ -3225,6 +3280,9 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             >>> folio.add_table('test', df)
             >>> retrieved = folio.get_table('test')
             >>> assert len(retrieved) == 3
+
+            Eager polars DataFrame:
+            >>> pdf = folio.get_table('test', frame='polars')
 
             Column selection (read only specific columns):
             >>> df_subset = folio.get_table('test', columns=['a'])
@@ -3250,10 +3308,99 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         if item_type not in ("included_table", "referenced_table"):
             raise ValueError(f"Item '{name}' is not a table (type: {item_type})")
 
-        # Get handler and delegate to it (with caching if enabled)
+        # Guard against accidentally materializing a huge table
+        self._check_eager_size(name, item, allow_full_load)
+
+        # Get handler and delegate to it
         registry = get_registry()
         handler = registry.get(item_type)
-        return self._get_with_cache(name, lambda: handler.get(self, name, **kwargs))
+
+        if frame == "polars":
+            # Eager polars: scan lazily then collect. Bypasses the pandas file
+            # cache (it serializes to/from pandas parquet).
+            return handler.get_lazy(self, name, **kwargs).collect()
+        elif frame == "pandas":
+            # Eager pandas (with local caching if enabled)
+            return self._get_with_cache(name, lambda: handler.get(self, name, **kwargs))
+        else:
+            raise ValueError(f"Unknown frame '{frame}'. Use 'pandas' or 'polars'.")
+
+    def _check_eager_size(
+        self, name: str, item: Dict[str, Any], allow_full_load: bool
+    ) -> None:
+        """Enforce the eager-load size guard for a table.
+
+        Raises if the table's recorded ``size_bytes`` exceeds
+        ``max_eager_bytes`` and neither the call nor the item opts out via
+        ``allow_full_load``. Unknown size (no ``size_bytes``) is allowed through.
+
+        Args:
+            name: Table name (for the error message)
+            item: The item's metadata dict
+            allow_full_load: Per-call override
+
+        Raises:
+            ValueError: If the eager load exceeds the configured ceiling
+        """
+        if allow_full_load or item.get("allow_full_load"):
+            return
+        limit = self._max_eager_bytes
+        if limit is None:
+            return
+        size = item.get("size_bytes")
+        if size is not None and size > limit:
+            size_mb = size / (1024 * 1024)
+            limit_mb = limit / (1024 * 1024)
+            raise ValueError(
+                f"Table '{name}' is ~{size_mb:.0f} MB, above the "
+                f"{limit_mb:.0f} MB eager-load limit. Use get_lazy('{name}') "
+                f"for predicate/projection pushdown, or pass allow_full_load=True "
+                f"(or set max_eager_bytes=None to disable this guard)."
+            )
+
+    def get_lazy(self, name: str, **kwargs) -> Any:  # Returns polars.LazyFrame
+        """Get a table as a polars LazyFrame (works for included and referenced).
+
+        Returns a lazy scan with predicate/projection pushdown — for referenced
+        tables this reads from the external path without copying or fully
+        downloading it. Not subject to the ``max_eager_bytes`` guard and does
+        not use the local file cache (the whole point is to avoid a full read).
+
+        Args:
+            name: Name of the table
+            **kwargs: Additional arguments passed to the polars scanner
+                (e.g. ``storage_options`` for cloud credentials)
+
+        Returns:
+            polars LazyFrame
+
+        Raises:
+            KeyError: If table name doesn't exist
+            ValueError: If the named item is not a table
+            ImportError: If polars is not installed
+            NotImplementedError: If the table's format has no lazy scanner
+
+        Examples:
+            >>> import polars as pl
+            >>> folio.reference_table('big', path='s3://bucket/huge.parquet')
+            >>> lf = folio.get_lazy('big')
+            >>> lf.filter(pl.col('x') > 0).select('y').collect()  # pushdown
+        """
+        # Auto-refresh if bundle was updated externally
+        self._refresh_if_needed()
+
+        if name not in self._items:
+            raise KeyError(f"Table '{name}' not found in DataFolio")
+
+        item = self._items[name]
+        item_type = item.get("item_type")
+
+        if item_type not in ("included_table", "referenced_table"):
+            raise ValueError(f"Item '{name}' is not a table (type: {item_type})")
+
+        registry = get_registry()
+        handler = registry.get(item_type)
+        return handler.get_lazy(self, name, **kwargs)
 
     def get_data_path(self, name: str) -> str:
         """Get the path to any stored item, delegating to the appropriate type-specific method.

@@ -131,6 +131,7 @@ class DataframeHandler(BaseHandler):
         folio._storage.write_parquet(filepath, data)
 
         checksum = folio._storage.calculate_checksum(filepath)
+        size_bytes = folio._storage.file_size(filepath)
 
         metadata = {
             "name": name,
@@ -145,6 +146,8 @@ class DataframeHandler(BaseHandler):
             "dtypes": {field.name: str(field.type) for field in arrow_table.schema},
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
+        if size_bytes is not None:
+            metadata["size_bytes"] = size_bytes
 
         if description:
             metadata["description"] = description
@@ -174,6 +177,27 @@ class DataframeHandler(BaseHandler):
         )
 
         return folio._storage.read_parquet(filepath, **kwargs)
+
+    def get_lazy(self, folio: "DataFolio", name: str, **kwargs) -> Any:
+        """Lazily scan the bundled table as a polars LazyFrame.
+
+        Args:
+            folio: DataFolio instance
+            name: Item name
+            **kwargs: Additional arguments passed to the polars scanner
+
+        Returns:
+            polars LazyFrame backed by the bundle's parquet file
+        """
+        item = folio._items[name]
+        subdir = self.get_storage_subdir()
+        filepath = folio._storage.join_paths(
+            folio._bundle_dir, subdir, item["filename"]
+        )
+
+        return folio._storage.scan_table(
+            filepath, item.get("table_format", "parquet"), **kwargs
+        )
 
 
 class ReferenceTableHandler(BaseHandler):
@@ -215,6 +239,8 @@ class ReferenceTableHandler(BaseHandler):
         description: Optional[str] = None,
         inputs: Optional[list[str]] = None,
         table_format: str = "parquet",
+        infer_schema: bool = True,
+        allow_full_load: bool = False,
         **kwargs,
     ) -> Dict[str, Any]:
         """Add reference to external table.
@@ -226,6 +252,12 @@ class ReferenceTableHandler(BaseHandler):
             description: Optional description
             inputs: Optional lineage inputs
             table_format: Format of the table (default: 'parquet')
+            infer_schema: If True and polars is available, cheaply read the
+                parquet footer to populate ``columns``/``dtypes``/``num_rows``
+                so a reference carries the same schema metadata as an included
+                table. Best-effort: silently skipped on any failure.
+            allow_full_load: If True, this reference bypasses the folio's
+                ``max_eager_bytes`` guard on eager ``get_table`` reads.
             **kwargs: Additional arguments
 
         Returns:
@@ -265,14 +297,18 @@ class ReferenceTableHandler(BaseHandler):
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
 
-        # Optionally read metadata (can be slow for large files)
-        if kwargs.get("read_metadata", False) and not is_directory:
-            try:
-                df = folio._storage.read_table(resolved_path, table_format)
-                metadata["num_rows"] = len(df)
-            except Exception:
-                # Don't fail add() if we can't read the remote file
-                pass
+        if allow_full_load:
+            metadata["allow_full_load"] = True
+
+        # Best-effort size (drives the eager-load guard). Unknown -> unset.
+        size_bytes = folio._storage.file_size(resolved_path)
+        if size_bytes is not None:
+            metadata["size_bytes"] = size_bytes
+
+        # Cheap schema inference via the parquet footer, so references carry the
+        # same columns/dtypes/num_rows an included table would.
+        if infer_schema and not is_directory and table_format == "parquet":
+            self._infer_schema(folio, resolved_path, metadata)
 
         # Add optional fields
         if description:
@@ -281,6 +317,33 @@ class ReferenceTableHandler(BaseHandler):
             metadata["inputs"] = inputs
 
         return metadata
+
+    @staticmethod
+    def _infer_schema(folio: "DataFolio", path: str, metadata: Dict[str, Any]) -> None:
+        """Populate columns/dtypes/num_rows from a parquet footer (best-effort).
+
+        Uses a polars lazy scan so only the file footer is read for the schema
+        (and, where polars can optimize it, for the row count). Any failure
+        (polars missing, unreachable remote, bad file) is swallowed so that
+        creating a reference never fails on metadata inference.
+        """
+        try:
+            from datafolio.readers import scan_parquet
+
+            lf = scan_parquet(path, use_https=folio._storage._use_https)
+            schema = lf.collect_schema()
+            metadata["columns"] = list(schema.names())
+            metadata["dtypes"] = {n: str(t) for n, t in schema.items()}
+            metadata["num_cols"] = len(schema)
+            try:
+                import polars as pl
+
+                metadata["num_rows"] = int(lf.select(pl.len()).collect().item())
+            except Exception:
+                pass
+        except Exception:
+            # Never fail reference creation on schema inference.
+            pass
 
     def get(self, folio: "DataFolio", name: str, **kwargs) -> Any:
         """Load DataFrame from external reference.
@@ -298,6 +361,26 @@ class ReferenceTableHandler(BaseHandler):
 
         return folio._storage.read_table(
             remote_path, item.get("table_format", "parquet"), **kwargs
+        )
+
+    def get_lazy(self, folio: "DataFolio", name: str, **kwargs) -> Any:
+        """Lazily scan the external table as a polars LazyFrame.
+
+        This is the marquee case for references: predicate/projection pushdown
+        over a large external parquet (e.g. ``s3://``/``gs://``) without copying
+        it into the bundle or pulling it fully into memory.
+
+        Args:
+            folio: DataFolio instance
+            name: Item name
+            **kwargs: Additional arguments passed to the polars scanner
+
+        Returns:
+            polars LazyFrame backed by the external path
+        """
+        item = folio._items[name]
+        return folio._storage.scan_table(
+            item["path"], item.get("table_format", "parquet"), **kwargs
         )
 
     def delete(self, folio: "DataFolio", name: str) -> None:

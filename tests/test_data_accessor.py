@@ -219,14 +219,22 @@ class TestItemProxy:
         assert path is not None
         assert "plot.png" in path
 
-    def test_item_proxy_path_none_for_tables(self, tmp_path):
-        """Test .path returns None for included tables."""
+    def test_item_proxy_path_included_table(self, tmp_path):
+        """Test .path returns the bundle parquet path for included tables."""
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
         folio.add_table("results", df)
 
         path = folio.data.results.path
-        assert path is None
+        assert path is not None
+        assert path.endswith("tables/results.parquet")
+
+    def test_item_proxy_path_none_for_non_tables(self, tmp_path):
+        """Test .path returns None for non-table, non-artifact items."""
+        folio = DataFolio(tmp_path / "test")
+        folio.add_json("config", {"lr": 0.01})
+
+        assert folio.data.config.path is None
 
     def test_item_proxy_inputs(self, tmp_path):
         """Test .inputs property returns lineage inputs."""

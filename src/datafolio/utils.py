@@ -27,6 +27,11 @@ class TableReference(TypedDict, total=False):
     table_format: str  # 'parquet', 'delta', 'csv'
     is_directory: bool  # True if path points to a directory (e.g. Delta table)
     num_rows: Optional[int]
+    num_cols: Optional[int]
+    columns: Optional[list[str]]
+    dtypes: Optional[dict[str, str]]
+    size_bytes: Optional[int]  # Size of the external file, if known
+    allow_full_load: Optional[bool]  # Bypass the eager-load size guard
     version: Optional[int]  # For Delta tables
     description: Optional[str]
     # Lineage fields
@@ -47,6 +52,7 @@ class IncludedTable(TypedDict, total=False):
     table_format: str  # 'parquet'
     is_directory: bool  # False for included tables (usually)
     checksum: str  # MD5 checksum
+    size_bytes: Optional[int]  # Size of the bundled file, if known
     num_rows: int
     num_cols: int
     columns: list[str]

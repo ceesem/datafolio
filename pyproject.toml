@@ -22,8 +22,11 @@ dependencies = [
 authors = [
     { name = "Casey Schneider-Mizell", email = "caseysm@gmail.com" },
 ]
-license = "MIT" 
+license = "MIT"
 license-files = ["LICENSE"]
+
+[project.optional-dependencies]
+polars = ["polars>=1.0.0"]
 
 [project.scripts]
 datafolio = "datafolio.cli:cli"
@@ -36,6 +39,7 @@ dev = [
     "bump-my-version",
     "poethepoet",
     "scikit-learn",
+    "polars>=1.0.0",
  ]
 docs = [
     "mkdocs",

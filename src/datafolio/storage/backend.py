@@ -270,6 +270,38 @@ class StorageBackend:
                     hash_md5.update(chunk)
             return hash_md5.hexdigest()
 
+    def file_size(self, path: str) -> Optional[int]:
+        """Return the size in bytes of a file or directory (local or cloud).
+
+        Best-effort: returns ``None`` when the size can't be determined cheaply
+        (e.g. a cloud object whose backend doesn't expose size without a full
+        read). For directories, sums the sizes of contained files.
+
+        Args:
+            path: File or directory path (local or cloud)
+
+        Returns:
+            Size in bytes, or ``None`` if it can't be determined.
+        """
+        if path.startswith("file://"):
+            path = path[7:]
+
+        if is_cloud_path(path):
+            try:
+                cf, filename = self._get_cloud_client(path, use_https=self._use_https)
+                size = cf.size(filename)
+                # cloudfiles may return an int, or None if unknown
+                return int(size) if size is not None else None
+            except Exception:
+                return None
+        else:
+            p = Path(path)
+            if p.is_dir():
+                return sum(f.stat().st_size for f in p.rglob("*") if f.is_file())
+            if p.exists():
+                return p.stat().st_size
+            return None
+
     # =========================================================================
     # JSON I/O
     # =========================================================================
@@ -645,3 +677,30 @@ class StorageBackend:
         from datafolio.readers import read_table
 
         return read_table(path, table_format, **kwargs)
+
+    def scan_table(self, path: str, table_format: str, **kwargs) -> Any:
+        """Lazily scan a table as a polars LazyFrame (local or cloud).
+
+        Convenience method that delegates to readers.scan_table. Uses polars'
+        native scanners (with predicate/projection pushdown) where possible and
+        a byte fallback otherwise.
+
+        Args:
+            path: Path to the table
+            table_format: Format of the table ('parquet', 'csv')
+            **kwargs: Additional arguments passed to the format-specific scanner
+
+        Returns:
+            polars LazyFrame
+
+        Raises:
+            ImportError: If polars is not installed
+            NotImplementedError: If the format has no lazy scanner
+
+        Examples:
+            >>> storage = StorageBackend()
+            >>> lf = storage.scan_table('s3://bucket/data.parquet', 'parquet')
+        """
+        from datafolio.readers import scan_table
+
+        return scan_table(path, table_format, use_https=self._use_https, **kwargs)

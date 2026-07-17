@@ -153,6 +153,29 @@ class BaseHandler(ABC):
         """
         pass
 
+    def get_lazy(self, folio: "DataFolio", name: str, **kwargs) -> Any:
+        """Lazily load data as a polars LazyFrame (optional hook).
+
+        Default implementation raises ``NotImplementedError``. Table handlers
+        override this to return a ``pl.LazyFrame`` backed by the stored file so
+        callers get predicate/projection pushdown without materializing the
+        whole table. Non-table handlers (models, arrays, JSON) leave it unset.
+
+        Args:
+            folio: DataFolio instance
+            name: Item name
+            **kwargs: Handler-specific options (passed to the scanner)
+
+        Returns:
+            A polars LazyFrame
+
+        Raises:
+            NotImplementedError: If this item type does not support lazy access
+        """
+        raise NotImplementedError(
+            f"'{self.item_type}' does not support lazy access via get_lazy()"
+        )
+
     def delete(self, folio: "DataFolio", name: str) -> None:
         """Delete data files for this item.
 
