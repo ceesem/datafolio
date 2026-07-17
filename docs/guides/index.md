@@ -56,6 +56,7 @@ Deep dive into DataFolio's snapshot system:
 - **Curating results for publication** → `archive()` / `copy(follow_lineage=True)` in the [API Reference](../reference/datafolio-api.md#archiving-items)
 - **Team collaboration** → [Getting Started](getting-started.md) (Multi-Instance Access section)
 - **Sharing files with non-datafolio users** → `item_path()` / `describe(show_paths=True)` in the [API Reference](../reference/datafolio-api.md#sharing-paths-with-collaborators)
+- **Downloading a folio for offline analysis** → [Getting Started](getting-started.md#taking-a-cloud-folio-offline) (any file-sync tool works)
 - **Model deployment** → [Working with Models](models.md)
 - **Custom sklearn pipelines** → [Working with Models](models.md)
 - **Cloud storage / large datasets** → [Polars & References](polars.md) (Working with large tables)

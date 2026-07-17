@@ -2770,7 +2770,14 @@ For more information, see the [datafolio documentation](https://github.com/ceese
     ) -> "DataFolio":
         """Create a copy of this bundle at a new location.
 
-        Useful for creating derived experiments or checkpoints.
+        Useful for creating derived experiments or checkpoints. This is a
+        **fork**, not a clone: only current item versions are copied (no
+        snapshot history or snapshots.json), archived items are excluded by
+        default, and the copy gets a fresh bundle identity. To download or
+        mirror a folio in full, use an ordinary file-sync tool instead
+        (``gsutil rsync`` / ``aws s3 sync`` / ``rclone``) — the bundle is
+        plain files with a relative-path manifest, so a synced directory is
+        a complete, working folio.
 
         Args:
             path: Destination path for the new bundle. Used as the exact bundle

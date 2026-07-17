@@ -547,6 +547,34 @@ data = folio2.get('analysis')  # Works immediately ✅
 
 All read operations automatically refresh from disk, so you always see the latest state.
 
+## Taking a Cloud Folio Offline
+
+A folio is nothing but ordinary files plus a self-contained, relative-path
+manifest — so downloading one is a job for the tool that owns downloading,
+not for datafolio:
+
+```bash
+gsutil -m rsync -r gs://bucket/experiments/my-exp ~/analysis/my-exp
+# or: aws s3 sync s3://bucket/experiments/my-exp ~/analysis/my-exp
+# or: rclone sync remote:bucket/experiments/my-exp ~/analysis/my-exp
+```
+
+```python
+folio = DataFolio('~/analysis/my-exp')   # a complete, normal local folio
+```
+
+You get parallel, resumable, incremental transfer, and the copy is complete:
+all items, all snapshot versions, `snapshots.json` — everything. Re-running
+the sync later picks up only what changed.
+
+The one thing that stays where it is: external references
+(`reference_table`) keep pointing at their original locations — datafolio
+never copies data it doesn't own. `folio.mutable_references()` lists them.
+
+(`folio.copy()` also works cloud→local, but it *forks* rather than clones:
+current item versions only, no snapshot history, fresh bundle identity. Use
+it for derived experiments; use a sync tool for downloads.)
+
 ## Complete Workflow Example
 
 Here's a complete example from data loading to model deployment:
