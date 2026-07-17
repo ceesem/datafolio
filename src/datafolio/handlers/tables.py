@@ -270,34 +270,42 @@ class ReferenceTableHandler(BaseHandler):
         Returns:
             Metadata dict for this reference
         """
+        import os
+
         from datafolio.utils import is_cloud_path, resolve_path
 
-        # Resolve path (handles local/cloud). Cloud URIs are kept verbatim; a
-        # local path is normalized but NOT stat'd here (no I/O).
-        resolved_path = resolve_path(reference)
-
-        # Layout guess — local uses a cheap local stat; cloud is a name-only
-        # heuristic. Neither performs remote I/O.
-        is_directory = False
-        check_path = resolved_path
-        if check_path.startswith("file://"):
-            check_path = check_path[7:]
-
-        if not is_cloud_path(check_path):
-            import os
-
-            is_directory = os.path.isdir(check_path)
+        # Path storage: a relative local path is preserved VERBATIM so the
+        # reference stays portable (it resolves against the bundle at access
+        # time, so moving the bundle + adjacent data keeps the link working).
+        # Cloud URIs and explicitly-absolute local paths are stored as given
+        # (absolute local becomes a file:// URI). No remote I/O either way.
+        ref_str = str(reference)
+        if (
+            is_cloud_path(ref_str)
+            or ref_str.startswith("file://")
+            or os.path.isabs(ref_str)
+        ):
+            stored_path = resolve_path(ref_str)
         else:
-            # For cloud paths we can't check isdir without a network call, so
-            # use a name heuristic only: a trailing '/' implies a directory.
-            if resolved_path.endswith("/"):
-                is_directory = True
+            stored_path = ref_str  # relative — preserve for portability
+
+        # Layout guess against the effective location — local uses a cheap local
+        # stat; cloud is a name-only heuristic. Neither performs remote I/O.
+        effective = folio._resolve_reference_path(stored_path)
+        check_path = effective[7:] if effective.startswith("file://") else effective
+
+        is_directory = False
+        if not is_cloud_path(check_path):
+            is_directory = os.path.isdir(check_path)
+        elif check_path.endswith("/"):
+            # trailing '/' implies a directory (no network call)
+            is_directory = True
 
         # Build metadata (manifest-only; enrichment happens in inspect_table).
         metadata = {
             "name": name,
             "item_type": self.item_type,
-            "path": resolved_path,
+            "path": stored_path,
             "table_format": table_format,
             "is_directory": is_directory,
             "created_at": datetime.now(timezone.utc).isoformat(),
@@ -343,7 +351,7 @@ class ReferenceTableHandler(BaseHandler):
             RuntimeError: If the object exists but its schema cannot be read.
         """
         item = folio._items[name]
-        path = item["path"]
+        path = folio._resolve_reference_path(item["path"])
         table_format = item.get("table_format", "parquet")
 
         if not folio._storage.exists(path):
@@ -390,7 +398,7 @@ class ReferenceTableHandler(BaseHandler):
             pandas DataFrame loaded from external location
         """
         item = folio._items[name]
-        remote_path = item["path"]
+        remote_path = folio._resolve_reference_path(item["path"])
 
         return folio._storage.read_table(
             remote_path, item.get("table_format", "parquet"), **kwargs
@@ -413,7 +421,9 @@ class ReferenceTableHandler(BaseHandler):
         """
         item = folio._items[name]
         return folio._storage.scan_table(
-            item["path"], item.get("table_format", "parquet"), **kwargs
+            folio._resolve_reference_path(item["path"]),
+            item.get("table_format", "parquet"),
+            **kwargs,
         )
 
     def delete(self, folio: "DataFolio", name: str) -> None:

@@ -2662,10 +2662,11 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             is_valid = False
 
             if item_type == "referenced_table":
-                # For references, just check existence
+                # For references, just check existence (resolve relative paths
+                # against the bundle so portable references validate correctly).
                 path = item.get("path")
                 if path:
-                    is_valid = self._storage.exists(path)
+                    is_valid = self._storage.exists(self._resolve_reference_path(path))
             elif "filename" in item:
                 # For included items, check existence in bundle
                 # Get handler to find subdir
@@ -3515,7 +3516,7 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         item_type = item.get("item_type")
 
         if item_type == "referenced_table":
-            return item["path"]
+            return self._resolve_reference_path(item["path"])
         elif item_type == "included_table":
             registry = get_registry()
             handler = registry.get(item_type)
@@ -3523,6 +3524,26 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             return self._storage.join_paths(self._bundle_dir, subdir, item["filename"])
         else:
             raise ValueError(f"Item '{name}' is not a table (type: {item_type})")
+
+    def _resolve_reference_path(self, path: str) -> str:
+        """Resolve a stored reference path to an accessible location.
+
+        Cloud URIs, ``file://`` URIs, and absolute local paths are returned
+        unchanged. A relative path is resolved against the bundle directory so
+        that references stored relative to the bundle stay portable when the
+        bundle (and its adjacent data) is moved or copied.
+
+        Args:
+            path: The path string stored in the manifest.
+
+        Returns:
+            A path usable by the storage backend / readers.
+        """
+        import os
+
+        if is_cloud_path(path) or path.startswith("file://") or os.path.isabs(path):
+            return path
+        return self._storage.join_paths(self._bundle_dir, path)
 
     def get_table_info(self, name: str) -> Union[TableReference, IncludedTable]:
         """Get metadata about a table (referenced or included).

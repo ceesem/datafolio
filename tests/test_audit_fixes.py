@@ -155,3 +155,58 @@ class TestUnsupportedFormats:
         folio = DataFolio(tmp_path / "b")
         folio.reference_table("x", path=f"s3://bucket/data.{fmt}", table_format=fmt)
         assert folio.get_table_info("x")["table_format"] == fmt
+
+
+# =============================================================================
+# Finding 10: relative local references stay relative in the manifest and
+# resolve against the bundle, so moving/copying a bundle keeps links working.
+# =============================================================================
+
+
+class TestRelativeReferences:
+    def test_relative_reference_stored_verbatim(self, tmp_path):
+        bundle = tmp_path / "proj"
+        folio = DataFolio(bundle)
+        # data lives alongside the bundle contents
+        pd.DataFrame({"a": [1, 2, 3]}).to_parquet(bundle / "ext.parquet", index=False)
+        folio.reference_table("ref", path="ext.parquet")  # relative
+        # manifest keeps it relative (not absolute file://)
+        assert folio.get_table_info("ref")["path"] == "ext.parquet"
+
+    def test_relative_reference_reads_via_bundle(self, tmp_path):
+        bundle = tmp_path / "proj"
+        folio = DataFolio(bundle)
+        pd.DataFrame({"a": [1, 2, 3]}).to_parquet(bundle / "ext.parquet", index=False)
+        folio.reference_table("ref", path="ext.parquet")
+        assert folio.get_table("ref")["a"].to_list() == [1, 2, 3]
+
+    def test_relative_reference_survives_move(self, tmp_path):
+        import shutil
+
+        src = tmp_path / "proj"
+        folio = DataFolio(src)
+        pd.DataFrame({"a": [1, 2, 3]}).to_parquet(src / "ext.parquet", index=False)
+        folio.reference_table("ref", path="ext.parquet")
+        del folio
+
+        # Move the whole bundle (with its adjacent data) elsewhere.
+        dst = tmp_path / "moved"
+        shutil.copytree(src, dst)
+        shutil.rmtree(src)
+
+        moved = DataFolio(dst)
+        assert moved.get_table("ref")["a"].to_list() == [1, 2, 3]
+
+    def test_absolute_reference_unchanged(self, tmp_path):
+        data = tmp_path / "ext.parquet"
+        pd.DataFrame({"a": [1]}).to_parquet(data, index=False)
+        folio = DataFolio(tmp_path / "proj")
+        folio.reference_table("ref", path=str(data))  # absolute
+        stored = folio.get_table_info("ref")["path"]
+        assert stored.startswith("file://") or stored == str(data)
+        assert folio.get_table("ref")["a"].to_list() == [1]
+
+    def test_cloud_reference_unchanged(self, tmp_path):
+        folio = DataFolio(tmp_path / "proj")
+        folio.reference_table("ref", path="s3://bucket/data.parquet")
+        assert folio.get_table_info("ref")["path"] == "s3://bucket/data.parquet"
