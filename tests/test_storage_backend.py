@@ -201,7 +201,7 @@ class TestFileSystemCloud:
         mock_cf.delete.assert_called_once_with("file.txt")
 
     def test_copy_file_local_to_cloud(self, storage, temp_dir):
-        """Test copy_file() from local to cloud."""
+        """copy_file() streams a file object to the cloud (bounded memory)."""
         src = temp_dir / "source.txt"
         src.write_text("test content")
 
@@ -210,11 +210,14 @@ class TestFileSystemCloud:
         with patch("cloudfiles.CloudFiles", return_value=mock_cf):
             storage.copy_file(str(src), "s3://bucket/dest.txt")
 
-        # Verify CloudFiles.put was called with correct content
+        # Verify CloudFiles.put was called with a file object (not whole bytes)
         assert mock_cf.put.called
         call_args = mock_cf.put.call_args
         assert call_args[0][0] == "dest.txt"
-        assert call_args[0][1] == b"test content"
+        content = call_args[0][1]
+        assert hasattr(content, "read")  # streamed a BinaryIO, not bytes
+        # (file handle is read by cloudfiles; here we just confirm its identity)
+        assert getattr(content, "name", "").endswith("source.txt")
 
 
 # ============================================================================

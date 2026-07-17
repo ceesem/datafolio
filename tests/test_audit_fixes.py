@@ -342,3 +342,84 @@ class TestLazyFrameInput:
         folio = DataFolio(tmp_path / "b")
         folio.add_table("t", pl.LazyFrame({"a": [1, 2, 3]}))
         assert folio.scan_table("t").collect()["a"].to_list() == [1, 2, 3]
+
+
+# =============================================================================
+# Finding 5: cloud Parquet writes must not buffer the whole file in memory.
+# =============================================================================
+
+
+class TestBoundedCloudWrites:
+    def test_cloud_write_uses_tempfile_not_bytesio(self, tmp_path, monkeypatch):
+        """write_parquet(cloud) serializes to a temp file + streams it, and
+        never builds a whole-file in-memory buffer via _cloud_write_bytes."""
+        import os
+        import shutil
+
+        from datafolio.storage.backend import StorageBackend
+
+        backend = StorageBackend()
+        captured = {}
+
+        def fake_upload(dst, local_src):
+            # Proof it's a real on-disk file, not an in-memory buffer.
+            assert os.path.exists(local_src)
+            captured["dst"] = dst
+            shutil.copy(local_src, tmp_path / "uploaded.parquet")
+
+        def boom_bytes(*a, **k):  # pragma: no cover
+            raise AssertionError("whole-file BytesIO path was used")
+
+        monkeypatch.setattr(backend, "_upload_file", fake_upload)
+        monkeypatch.setattr(backend, "_cloud_write_bytes", boom_bytes)
+
+        backend.write_parquet("s3://bucket/x.parquet", pl.DataFrame({"a": [1, 2, 3]}))
+
+        assert captured["dst"] == "s3://bucket/x.parquet"
+        assert pl.read_parquet(tmp_path / "uploaded.parquet")["a"].to_list() == [
+            1,
+            2,
+            3,
+        ]
+
+    def test_upload_file_streams_file_object(self, tmp_path, monkeypatch):
+        """_upload_file passes a file OBJECT to CloudFiles.put, not bytes."""
+        from datafolio.storage.backend import StorageBackend
+
+        backend = StorageBackend()
+        src = tmp_path / "x.bin"
+        src.write_bytes(b"hello world")
+        captured = {}
+
+        class FakeCF:
+            def put(self, filename, content, **k):
+                captured["is_file_obj"] = hasattr(content, "read")
+
+        monkeypatch.setattr(
+            backend,
+            "_get_cloud_client",
+            lambda dst, use_https=False: (FakeCF(), "x.bin"),
+        )
+        backend._upload_file("s3://bucket/x.bin", str(src))
+        assert captured["is_file_obj"] is True
+
+    def test_cloud_write_tempfile_cleaned_up(self, tmp_path, monkeypatch):
+        """The temp file is removed even if the upload fails."""
+        import glob
+        import os
+        import tempfile
+
+        from datafolio.storage.backend import StorageBackend
+
+        backend = StorageBackend()
+        before = set(glob.glob(os.path.join(tempfile.gettempdir(), "*.parquet")))
+
+        def failing_upload(dst, local_src):
+            raise RuntimeError("upload failed")
+
+        monkeypatch.setattr(backend, "_upload_file", failing_upload)
+        with pytest.raises(RuntimeError):
+            backend.write_parquet("s3://bucket/x.parquet", pl.DataFrame({"a": [1]}))
+
+        after = set(glob.glob(os.path.join(tempfile.gettempdir(), "*.parquet")))
+        assert after == before  # no leaked temp files

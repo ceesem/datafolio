@@ -231,9 +231,8 @@ class StorageBackend:
             >>> storage.copy_file('/local/file.txt', 's3://bucket/file.txt')
         """
         if is_cloud_path(dst):
-            with open(src, "rb") as f:
-                content = f.read()
-            self._cloud_write_bytes(dst, content)
+            # Stream the file object rather than buffering the whole file.
+            self._upload_file(dst, str(src))
         else:
             import shutil
 
@@ -388,17 +387,40 @@ class StorageBackend:
             >>> storage = StorageBackend()
             >>> storage.write_parquet('/path/to/data.parquet', df)
         """
+        if is_cloud_path(path):
+            # Bounded memory: serialize to a temp local file, then stream-upload
+            # the file object (no whole-file BytesIO). Temp file always cleaned.
+            import os
+            import tempfile
+
+            fd, tmp = tempfile.mkstemp(suffix=".parquet")
+            os.close(fd)
+            try:
+                self._write_parquet_local(tmp, df)
+                self._upload_file(path, tmp)
+            finally:
+                if os.path.exists(tmp):
+                    os.unlink(tmp)
+        else:
+            self._ensure_parent_dir(path)
+            self._write_parquet_local(path, df)
+
+    def _write_parquet_local(self, path: str, df: Any) -> None:
+        """Write a DataFrame / PyArrow Table to a local Parquet file.
+
+        Polars DataFrames use Polars' own writer (so parquet statistics stay
+        readable by Polars' predicate-pushdown engine); everything else goes
+        through PyArrow.
+
+        Args:
+            path: Local file path
+            df: Polars DataFrame, pandas DataFrame, or pyarrow.Table
+        """
         try:
             import polars as pl
 
             if isinstance(df, pl.DataFrame):
-                if is_cloud_path(path):
-                    buffer = io.BytesIO()
-                    df.write_parquet(buffer)
-                    self._cloud_write_bytes(path, buffer.getvalue())
-                else:
-                    self._ensure_parent_dir(path)
-                    df.write_parquet(path)
+                df.write_parquet(path)
                 return
         except ImportError:
             pass
@@ -406,33 +428,27 @@ class StorageBackend:
         import pyarrow as pa
         import pyarrow.parquet as pq
 
-        if isinstance(df, pa.Table):
-            table = df
-        else:
-            table = pa.Table.from_pandas(df, preserve_index=False)
-
-        if is_cloud_path(path):
-            buffer = io.BytesIO()
-            pq.write_table(table, buffer)
-            self._cloud_write_bytes(path, buffer.getvalue())
-        else:
-            self._ensure_parent_dir(path)
-            pq.write_table(table, path)
+        table = (
+            df
+            if isinstance(df, pa.Table)
+            else pa.Table.from_pandas(df, preserve_index=False)
+        )
+        pq.write_table(table, path)
 
     def _upload_file(self, dst: str, local_src: str) -> None:
-        """Upload a local file to a cloud destination.
+        """Upload a local file to a cloud destination without buffering it.
 
-        Reads the local file and writes it to cloud storage. (See F5: this is
-        the seam where a streaming/file-based cloud upload replaces whole-file
-        buffering.)
+        Passes an open file object to CloudFiles.put (which accepts a
+        ``BinaryIO``), so the whole file is never read into a Python bytes
+        buffer. This is the bounded-memory cloud upload path.
 
         Args:
             dst: Cloud destination path
             local_src: Local source file path
         """
+        cf, filename = self._get_cloud_client(dst)
         with open(local_src, "rb") as f:
-            content = f.read()
-        self._cloud_write_bytes(dst, content)
+            cf.put(filename, f)
 
     def sink_parquet(self, path: str, lazyframe: Any) -> None:
         """Stream a Polars LazyFrame to Parquet with bounded memory.
