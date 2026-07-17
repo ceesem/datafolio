@@ -1270,6 +1270,10 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         exit. Cloud object stores have no local lock; the stale check still runs
         (best-effort — object stores lack conditional writes).
         """
+        # Every mutation flows through this guard, so read-only enforcement
+        # lives here as well as in the public methods (defense in depth).
+        self._check_read_only()
+
         # Reentrant: an outer guard (or batch) already holds the lock and has
         # done the stale check. Just nest.
         if self._mutation_depth > 0:
@@ -1521,7 +1525,53 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             # committed manifest still references.
             self._pending_obsolete_payloads.append(old_item)
             return
-        item_type = old_item.get("item_type", "")
+        self._delete_payload_if_unshared(old_item)
+
+    def _payload_is_shared(self, item: Dict[str, Any]) -> bool:
+        """Check whether another manifest descriptor references item's payload.
+
+        A metadata-only copy-on-write (see :meth:`update_item`) produces two
+        descriptors pointing at the same payload file. Any code path that
+        deletes a payload must first confirm no *other* descriptor (current or
+        snapshot version) still references it.
+
+        Args:
+            item: The descriptor about to lose its payload.
+
+        Returns:
+            True if some other descriptor references the same file.
+        """
+        filename = item.get("filename")
+        if not filename:
+            return False
+        item_type = item.get("item_type")
+        for other in list(self._items.values()) + self._snapshot_versions:
+            if other is item:
+                continue
+            if (
+                other.get("filename") == filename
+                and other.get("item_type") == item_type
+            ):
+                return True
+        return False
+
+    def _delete_payload_if_unshared(self, item: Dict[str, Any]) -> None:
+        """Best-effort deletion of a descriptor's payload file.
+
+        The file is left alone when another descriptor still references it
+        (shared payload after a metadata-only copy-on-write) or when the
+        storage directory can't be resolved. Failures never propagate — an
+        orphaned file is acceptable, a broken mutation is not.
+
+        Args:
+            item: The descriptor whose payload should be removed.
+        """
+        filename = item.get("filename")
+        if not filename:
+            return  # references own no payload
+        if self._payload_is_shared(item):
+            return
+        item_type = item.get("item_type", "")
         try:
             from datafolio.storage import get_storage_directory
 
@@ -1535,6 +1585,42 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         except Exception:
             # Best-effort cleanup; an orphan is acceptable.
             pass
+
+    def _copy_payload_file(self, src_path: str, dst_path: str) -> None:
+        """Copy one payload file between bundles (local or cloud on each side).
+
+        Reads the whole object via cloudfiles (the same credential chain used
+        for all bundle I/O; ``use_https`` honored on the read side) and writes
+        it to the destination. Local paths are converted to absolute
+        ``file://`` URIs for a uniform code path; parent directories of a
+        local destination are created as needed (namespaced item names map to
+        subdirectories).
+
+        Args:
+            src_path: Full path of the source payload file.
+            dst_path: Full path of the destination payload file.
+
+        Raises:
+            FileNotFoundError: If the source payload does not exist.
+        """
+        src_cf_path = (
+            src_path
+            if is_cloud_path(src_path)
+            else f"file://{Path(src_path).resolve()}"
+        )
+        src_dir, _, src_filename = src_cf_path.rpartition("/")
+        src_cf = cloudfiles.CloudFiles(src_dir, use_https=self._use_https)
+        content = src_cf.get(src_filename)
+        if content is None:
+            raise FileNotFoundError(f"Payload file not found: {src_path}")
+
+        if is_cloud_path(dst_path) and not dst_path.startswith("file://"):
+            dst_dir, _, dst_filename = dst_path.rpartition("/")
+            cloudfiles.CloudFiles(dst_dir).put(dst_filename, content)
+        else:
+            dst = Path(dst_path.removeprefix("file://"))
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            dst.write_bytes(content)
 
     def _commit_owned_item(
         self,
@@ -1903,6 +1989,16 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             >>> folio.add_table('results', new_df, overwrite=True)  # Creates v2
         """
         self._check_read_only()
+
+        if self._batch_mode:
+            # Inside batch() the manifest publish is deferred to batch exit,
+            # but snapshots.json is not — a snapshot taken here would either
+            # be silently lost or pin uncommitted state. Refuse loudly.
+            raise RuntimeError(
+                "create_snapshot() cannot be called inside a batch() block: "
+                "the batch's items are not committed yet. Exit the batch "
+                "first, then create the snapshot."
+            )
 
         from datetime import datetime, timezone
 
@@ -2290,28 +2386,14 @@ For more information, see the [datafolio documentation](https://github.com/ceese
 
         # Delete orphaned versions
         for item in orphaned_versions:
-            item_name = item.get("name")
-            item_type = item.get("item_type")
             filename = item.get("filename")
 
             if not dry_run and filename:
-                # Delete the physical file directly by filename
-                # Don't use handler.delete() as that would delete from _items
-                try:
-                    # Determine storage directory dynamically
-                    from datafolio.storage import get_storage_directory
-
-                    subdir = get_storage_directory(item_type)
-
-                    # Delete the snapshot version file
-                    file_path = self._storage.join_paths(
-                        self._bundle_dir, subdir, filename
-                    )
-                    if self._storage.exists(file_path):
-                        self._storage.delete_file(file_path)
-                except Exception:
-                    # Deletion failed - still remove from manifest
-                    pass
+                # Delete the physical file (unless another descriptor still
+                # shares it — a metadata-only copy-on-write can leave the
+                # current item pointing at this same payload). Don't use
+                # handler.delete() as that would delete from _items.
+                self._delete_payload_if_unshared(item)
 
                 # Remove from snapshot_versions list
                 self._snapshot_versions.remove(item)
@@ -2331,6 +2413,7 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         This operation:
         - Replaces current metadata with snapshot metadata
         - Sets current item versions to match snapshot
+        - Restores items deleted after the snapshot was taken
         - Removes items added after snapshot
         - Does NOT delete the snapshot itself
 
@@ -2365,97 +2448,65 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         snap_items = snap_meta.get("item_versions", {})
         snap_metadata = snap_meta.get("metadata_snapshot", {})
 
-        # Restore metadata
-        self.metadata.clear()
-        self.metadata.update(snap_metadata)
+        # Every version already lives in its own payload file, so restoring is
+        # pure manifest surgery: repoint each logical name at the descriptor
+        # the snapshot pinned. No payload is ever copied or moved, so an
+        # interrupted restore can't lose data.
+        with self._mutation_guard():
+            # Resolve every pinned descriptor up front — fail loudly BEFORE
+            # touching any state if the snapshot is unrestorable.
+            pinned_by_name: Dict[str, Dict[str, Any]] = {}
+            for item_name, version_token in snap_items.items():
+                pinned = self._find_item_by_checksum(item_name, version_token)
+                if pinned is None:
+                    raise KeyError(
+                        f"Cannot restore snapshot '{snapshot}': it pins version "
+                        f"'{version_token}' of item '{item_name}', but that "
+                        f"version is no longer in the manifest (was it removed "
+                        f"by cleanup_orphaned_versions?)."
+                    )
+                pinned_by_name[item_name] = pinned
 
-        # Find items to remove (items not in snapshot)
-        current_item_names = set(self._items.keys())
-        snapshot_item_names = set(snap_items.keys())
-        items_to_remove = current_item_names - snapshot_item_names
+            # Restore metadata
+            self.metadata.clear()
+            self.metadata.update(snap_metadata)
 
-        # Remove items not in snapshot
-        for item_name in items_to_remove:
-            item = self._items[item_name]
-            item_type = item.get("item_type")
+            # Remove items not in the snapshot (added after it was taken). A
+            # version pinned by some OTHER snapshot is preserved as a snapshot
+            # version; an unpinned one is gone for good (this is the
+            # documented destructive part).
+            for item_name in set(self._items) - set(snap_items):
+                item = self._items[item_name]
+                if item.get("in_snapshots"):
+                    self._handle_copy_on_write(item_name)
+                else:
+                    self._delete_payload_if_unshared(item)
+                del self._items[item_name]
 
-            # Delete physical file
-            from datafolio.base.registry import get_handler
+            # Repoint every snapshot item at its pinned descriptor.
+            for item_name, pinned in pinned_by_name.items():
+                current = self._items.get(item_name)
+                if current is pinned:
+                    continue  # already the working version
 
-            try:
-                handler = get_handler(item_type)
-                handler.delete(folio=self, name=item_name)
-            except (KeyError, Exception):
-                pass
+                # Displace the current version (if any): preserve it when a
+                # snapshot pins it, otherwise drop it and its payload.
+                if current is not None:
+                    if current.get("in_snapshots"):
+                        self._handle_copy_on_write(item_name)
+                    else:
+                        self._delete_payload_if_unshared(current)
+                    del self._items[item_name]
 
-            del self._items[item_name]
+                # Promote the pinned descriptor back to current. It stays
+                # listed in the snapshots that pin it.
+                if pinned in self._snapshot_versions:
+                    self._snapshot_versions.remove(pinned)
+                pinned["is_current"] = True
+                self._items[item_name] = pinned
 
-        # For items in snapshot, restore them from snapshot version if needed
-        for item_name, snapshot_checksum in snap_items.items():
-            if item_name in self._items:
-                current_item = self._items[item_name]
-                current_checksum = current_item.get("checksum", "")
-
-                # If different version, need to restore from snapshot version
-                if current_checksum != snapshot_checksum:
-                    # Find the snapshot version item
-                    snapshot_item = None
-                    for item in self._snapshot_versions:
-                        if item.get("name") == item_name and snapshot in item.get(
-                            "in_snapshots", []
-                        ):
-                            snapshot_item = item
-                            break
-
-                    if snapshot_item:
-                        # Copy snapshot version file to current location
-                        from datafolio.base.registry import get_handler
-
-                        try:
-                            handler = get_handler(snapshot_item["item_type"])
-
-                            # Get paths
-                            snapshot_filename = snapshot_item.get("filename")
-                            current_filename = current_item.get("filename")
-
-                            if snapshot_filename and current_filename:
-                                # Determine storage directory dynamically
-                                from datafolio.storage import get_storage_directory
-
-                                item_type = snapshot_item.get("item_type", "")
-                                subdir = get_storage_directory(item_type)
-
-                                # Copy snapshot file to current file
-                                snapshot_path = self._storage.join_paths(
-                                    self._bundle_dir, subdir, snapshot_filename
-                                )
-                                current_path = self._storage.join_paths(
-                                    self._bundle_dir, subdir, current_filename
-                                )
-
-                                if self._storage.exists(snapshot_path):
-                                    # Delete current file and copy snapshot file
-                                    if self._storage.exists(current_path):
-                                        self._storage.delete_file(current_path)
-                                    self._storage.copy_file(snapshot_path, current_path)
-
-                                    # Update item metadata to match snapshot
-                                    current_item.update(
-                                        {
-                                            "checksum": snapshot_item.get("checksum"),
-                                            "num_rows": snapshot_item.get("num_rows"),
-                                            "num_cols": snapshot_item.get("num_cols"),
-                                            "dtypes": snapshot_item.get("dtypes"),
-                                            "columns": snapshot_item.get("columns"),
-                                        }
-                                    )
-                        except (KeyError, Exception):
-                            # Handler not found or restore failed
-                            pass
-
-        # Save updated state
-        self._save_items()
-        self._save_metadata()
+            # Save updated state
+            self._save_items()
 
         return self
 
@@ -2644,31 +2695,29 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         # Update new folio's metadata
         new_folio.metadata.update(snapshot_metadata)
 
-        # Copy all items from snapshot
-        for item_name in snapshot_folio._items.keys():
-            item_meta = snapshot_folio._items[item_name]
-            item_type = item_meta["item_type"]
+        # Copy all items from the snapshot by copying their payload FILES
+        # directly (never a deserialize/re-serialize round-trip): descriptors
+        # — including descriptions, lineage, and type-specific metadata — are
+        # carried over verbatim, external references stay references (their
+        # data is not owned and is never copied), and bytes are preserved
+        # exactly.
+        import copy as _copy
 
-            # Get the handler for this item type
-            from datafolio.base.registry import get_handler
+        from datafolio.storage import get_storage_directory
 
-            handler = get_handler(item_type)
+        for item_name, item_meta in snapshot_folio._items.items():
+            new_item = _copy.deepcopy(dict(item_meta))
+            new_item["in_snapshots"] = []
+            new_item["is_current"] = True
 
-            if handler:
-                # Load the item from snapshot
-                item_data = handler.get(snapshot_folio, item_name)
+            filename = item_meta.get("filename")
+            if filename:
+                subdir = get_storage_directory(item_meta["item_type"])
+                src = self._storage.join_paths(self._bundle_dir, subdir, filename)
+                dst = self._storage.join_paths(new_folio._bundle_dir, subdir, filename)
+                self._copy_payload_file(src, dst)
 
-                # Add to new folio - handler writes data and returns metadata
-                new_metadata = handler.add(new_folio, item_name, item_data)
-
-                # Initialize snapshot fields for new items
-                if "in_snapshots" not in new_metadata:
-                    new_metadata["in_snapshots"] = []
-                if "is_current" not in new_metadata:
-                    new_metadata["is_current"] = True
-
-                # Store metadata
-                new_folio._items[item_name] = new_metadata
+            new_folio._items[item_name] = new_item
 
         # Save items manifest
         new_folio._save_items()
@@ -4181,6 +4230,8 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             >>> # Portable pipeline with custom transformer (skops)
             >>> folio.add_sklearn('pipeline', custom_pipeline, custom=True)
         """
+        self._check_read_only()
+
         validate_item_name(name)
 
         if name in self._items and not overwrite:
@@ -4395,6 +4446,8 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             >>> # Update with overwrite
             >>> folio.add_artifact('loss_curve', 'plots/updated_loss.png', category='plots', overwrite=True)
         """
+        self._check_read_only()
+
         validate_item_name(name)
 
         if name in self._items and not overwrite:
@@ -4611,6 +4664,8 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             ...     inputs=['test_data'],
             ...     code='predictions = model.predict(X)')
         """
+        self._check_read_only()
+
         validate_item_name(name)
 
         # Overwriting any existing item requires overwrite=True; a snapshotted
@@ -4752,6 +4807,8 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             >>> # With scalar
             >>> folio.add_json('best_accuracy', 0.95)
         """
+        self._check_read_only()
+
         validate_item_name(name)
 
         if name in self._items and not overwrite:
@@ -4902,6 +4959,8 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             ...     inputs=['event_log'],
             ...     code='timestamp = event_log.iloc[0]["timestamp"]')
         """
+        self._check_read_only()
+
         validate_item_name(name)
 
         if name in self._items and not overwrite:
@@ -5175,11 +5234,19 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         Allows you to modify the description, inputs, or code fields
         of an item after it's been added to the bundle.
 
+        If the item's current version is pinned by a snapshot, the update is
+        applied copy-on-write: the snapshot keeps the metadata exactly as
+        recorded, and the working item gets a new version (sharing the same
+        payload file) carrying the edit.
+
+        Passing ``None`` for a field leaves it unchanged; passing an empty
+        value (``""`` for description/code, ``[]`` for inputs) removes it.
+
         Args:
             name: Name of the item to update
-            description: New description (if provided, replaces existing)
-            inputs: New list of input items (if provided, replaces existing)
-            code: New code snippet (if provided, replaces existing)
+            description: New description ("" removes it; None leaves unchanged)
+            inputs: New list of input items ([] removes it; None leaves unchanged)
+            code: New code snippet ("" removes it; None leaves unchanged)
 
         Returns:
             Self for method chaining
@@ -5203,8 +5270,8 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             ...     code='features = normalize(raw_data)'
             ... )
 
-            Clear a field by passing None:
-            >>> folio.update_item('temp', code=None)  # Removes code field
+            Clear a field by passing an empty string:
+            >>> folio.update_item('temp', code='')  # Removes code field
         """
         self._check_read_only()
 
@@ -5212,32 +5279,48 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         if name not in self._items:
             raise KeyError(f"Item '{name}' not found in DataFolio")
 
-        item = self._items[name]
+        with self._mutation_guard():
+            item = self._items[name]
 
-        # Update fields if provided
-        if description is not None:
-            if description == "":
-                # Empty string removes the field
-                item.pop("description", None)
-            else:
-                item["description"] = description
+            if self._is_in_snapshots(name):
+                # Copy-on-write: the snapshot must keep seeing the metadata it
+                # pinned. The new working version shares the payload file (the
+                # bytes didn't change); every payload-deletion path checks
+                # _payload_is_shared before removing a file.
+                import copy
 
-        if inputs is not None:
-            if not inputs:
-                # Empty list removes the field
-                item.pop("inputs", None)
-            else:
-                item["inputs"] = inputs
+                new_item = copy.deepcopy(dict(item))
+                self._handle_copy_on_write(name)
+                new_item["in_snapshots"] = []
+                new_item["is_current"] = True
+                new_item["version_id"] = self._next_version_id(name)
+                self._items[name] = new_item
+                item = new_item
 
-        if code is not None:
-            if code == "":
-                # Empty string removes the field
-                item.pop("code", None)
-            else:
-                item["code"] = code
+            # Update fields if provided
+            if description is not None:
+                if description == "":
+                    # Empty string removes the field
+                    item.pop("description", None)
+                else:
+                    item["description"] = description
 
-        # Save updated manifest
-        self._save_items()
+            if inputs is not None:
+                if not inputs:
+                    # Empty list removes the field
+                    item.pop("inputs", None)
+                else:
+                    item["inputs"] = inputs
+
+            if code is not None:
+                if code == "":
+                    # Empty string removes the field
+                    item.pop("code", None)
+                else:
+                    item["code"] = code
+
+            # Save updated manifest
+            self._save_items()
 
         return self
 
@@ -5280,38 +5363,39 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             if item_name not in self._items:
                 raise KeyError(f"Item '{item_name}' not found in DataFolio")
 
-        # Delete each item
-        for item_name in names_to_delete:
-            item = self._items[item_name]
-            item_type = item.get("item_type")
+        with self._mutation_guard():
+            for item_name in names_to_delete:
+                item = self._items[item_name]
 
-            # Check for dependents and warn if requested
-            if warn_dependents:
-                dependents = self.get_dependents(item_name)
-                if dependents:
-                    warnings.warn(
-                        f"Deleting '{item_name}' which is used by: {', '.join(dependents)}. "
-                        f"Those items may have broken lineage.",
-                        UserWarning,
-                        stacklevel=2,
-                    )
+                # Check for dependents and warn if requested
+                if warn_dependents:
+                    dependents = self.get_dependents(item_name)
+                    if dependents:
+                        warnings.warn(
+                            f"Deleting '{item_name}' which is used by: "
+                            f"{', '.join(dependents)}. "
+                            f"Those items may have broken lineage.",
+                            UserWarning,
+                            stacklevel=2,
+                        )
 
-            # Delete physical file using handler
-            from datafolio.base.registry import get_handler
+                if self._is_in_snapshots(item_name):
+                    # A snapshot pins this version: keep the payload and move
+                    # the descriptor to the snapshot versions — deleting the
+                    # bytes would silently corrupt every snapshot containing
+                    # it. The logical name disappears from the working set.
+                    self._handle_copy_on_write(item_name)
+                else:
+                    # No snapshot references this version — remove the payload
+                    # (unless a snapshotted descriptor still shares the file
+                    # after a metadata-only copy-on-write).
+                    self._delete_payload_if_unshared(item)
 
-            try:
-                handler = get_handler(item_type)
-                handler.delete(folio=self, name=item_name)
-            except KeyError:
-                # No handler for this type - skip file deletion
-                # (e.g., unknown/legacy item types)
-                pass
+                # Remove from items manifest
+                del self._items[item_name]
 
-            # Remove from items manifest
-            del self._items[item_name]
-
-        # Save updated manifest
-        self._save_items()
+            # Save updated manifest
+            self._save_items()
 
         return self
 
@@ -5683,42 +5767,7 @@ For more information, see the [datafolio documentation](https://github.com/ceese
                     dst_path = self._storage.join_paths(
                         new_folio._bundle_dir, storage_dir, item["filename"]
                     )
-
-                    # Convert local paths to file:// protocol for cloudfiles
-                    src_cf_path = (
-                        src_path if is_cloud_path(src_path) else f"file://{src_path}"
-                    )
-                    dst_cf_path = (
-                        dst_path if is_cloud_path(dst_path) else f"file://{dst_path}"
-                    )
-
-                    # Extract directory and filename from paths
-                    src_parts = src_cf_path.rsplit("/", 1)
-                    src_dir = src_parts[0] if len(src_parts) == 2 else ""
-                    src_filename = src_parts[-1]
-
-                    dst_parts = dst_cf_path.rsplit("/", 1)
-                    dst_dir = dst_parts[0] if len(dst_parts) == 2 else ""
-                    dst_filename = dst_parts[-1]
-
-                    # Use cloudfiles for all operations
-                    # Pass use_https for source (read) operations only
-                    src_cf = (
-                        cloudfiles.CloudFiles(src_dir, use_https=self._use_https)
-                        if src_dir
-                        else cloudfiles.CloudFiles(
-                            src_cf_path, use_https=self._use_https
-                        )
-                    )
-                    content = src_cf.get(src_filename)
-
-                    # Destination (write) operations don't use use_https
-                    dst_cf = (
-                        cloudfiles.CloudFiles(dst_dir)
-                        if dst_dir
-                        else cloudfiles.CloudFiles(dst_cf_path)
-                    )
-                    dst_cf.put(dst_filename, content)
+                    self._copy_payload_file(src_path, dst_path)
 
                     new_folio._items[item_name] = dict(item)
 
