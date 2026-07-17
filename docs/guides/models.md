@@ -464,4 +464,4 @@ print(folio._items['model_name']['filename'])  # ends in .joblib or .skops
 - [Getting Started Guide](getting-started.md) - Complete tutorial
 - [API Reference](../reference/datafolio-api.md) - Method documentation
 - [Snapshots](snapshots.md) - Version control for models
-- [GitHub Examples](https://github.com/ceesem/datafolio/tree/main/examples) - More examples
+- [GitHub Examples](https://github.com/caseysm/datafolio/tree/main/examples) - More examples

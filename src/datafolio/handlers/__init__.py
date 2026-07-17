@@ -39,7 +39,7 @@ from datafolio.handlers.timestamps import TimestampHandler
 
 # Auto-register all built-in handlers
 # Order matters: more specific handlers first, generic handlers last
-# This ensures correct auto-detection in add_data() since the first matching handler is used
+# This ensures correct auto-detection in add() since the first matching handler is used
 _dataframe_handler = DataframeHandler()
 _numpy_handler = NumpyHandler()
 _sklearn_handler = SklearnHandler()

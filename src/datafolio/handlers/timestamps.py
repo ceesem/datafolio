@@ -37,7 +37,7 @@ class TimestampHandler(BaseHandler):
     def can_handle(self, data: Any) -> bool:
         """Check if data is a datetime object.
 
-        Only auto-detects datetime objects for add_data().
+        Only auto-detects datetime objects for add().
         Unix timestamps (int/float) can still be stored via explicit add_timestamp() calls.
 
         Args:

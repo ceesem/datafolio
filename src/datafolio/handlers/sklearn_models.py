@@ -27,7 +27,7 @@ class SklearnHandler(BaseHandler):
         >>> # Handler is used automatically by DataFolio
         >>> from sklearn.ensemble import RandomForestClassifier
         >>> model = RandomForestClassifier()
-        >>> folio.add_sklearn('clf', model)
+        >>> folio.add('clf', model)
         >>>
         >>> # Also works with custom models
         >>> class CustomModel:

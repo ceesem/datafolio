@@ -1,7 +1,7 @@
 # DataFolio
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-816%20passing-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-859%20passing-brightgreen.svg)](tests/)
 
 **A lightweight, filesystem-based data versioning and experiment tracking library for Python.**
 
@@ -112,7 +112,7 @@ folio2.describe()  # Shows both 'results' and 'analysis'
 analysis = folio2.get('analysis')  # Works immediately ✅
 ```
 
-All read operations (`describe()`, `list_contents()`, `get()`/`get_model()`, and `folio.data` accessors) automatically refresh from disk when changes are detected, ensuring you always see the latest data without manual intervention.
+All read operations (`describe()`, `list_contents()`, `get()`/`get_model()`, and `folio.data` accessors) automatically refresh from disk when changes are detected. Datafolio supports many readers and one active writer. Local writers are serialized; a stale writer fails with `ConcurrentWriteError` and must `refresh()` and retry. Cloud folios should be treated as single-writer.
 
 ### Data Lineage
 
@@ -272,13 +272,13 @@ datafolio snapshot delete experimental-v5 --cleanup
 - **Owned data frozen**: A snapshot's owned items never change (external references preserve the link, not the bytes)
 - **Space-efficient**: Uses copy-on-write versioning—only changed items create new files
 - **Git integration**: Automatically captures commit hash, branch, and dirty status
-- **Environment tracking**: Records Python version and dependencies for full reproducibility
+- **Environment tracking**: Optionally records the Python version, platform, and uv.lock hash (never full dependency contents — git owns those)
 - **Metadata preservation**: Snapshots include complete metadata state at that moment
 - **Multiple snapshots**: Load different versions simultaneously for comparison
 
 ### Use Cases
 
-**Paper Submission**: Snapshot your exact code, data, and model state when submitting. Months later, you can reproduce those exact results.
+**Paper Submission**: Snapshot your owned data, models, and recorded reference descriptors when submitting (plus the git commit of your code). Months later, you can reload exactly what the folio owned — referenced external data is linked, not guaranteed.
 
 **A/B Testing**: Create snapshots for baseline and experimental versions, deploy both, and compare performance metrics.
 
@@ -354,7 +354,7 @@ trained_model = folio.data.classifier.content
 7. **Version control**: Commit your folio directories to git (data is stored efficiently)
 8. **Use references**: For large external datasets, use `reference_table()` to avoid copying
 9. **Check describe()**: Regularly review your folio with `folio.describe()` to see data and metadata
-10. **Share across notebooks**: Multiple DataFolio instances can safely access the same bundle - changes are automatically detected and synchronized
+10. **Share across notebooks**: many readers, one active writer — readers auto-refresh; a second writer fails safely with `ConcurrentWriteError` and should `refresh()` and retry
 11. **Snapshot before major changes**: Create snapshots before experimenting with new approaches—it's free insurance
 12. **Tag snapshots meaningfully**: Use tags like `baseline`, `production`, `paper` to organize versions
 

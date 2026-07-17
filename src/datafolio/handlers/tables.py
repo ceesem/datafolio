@@ -25,8 +25,8 @@ class DataframeHandler(BaseHandler):
         >>> handler = DataframeHandler()
         >>> register_handler(handler)
         >>>
-        >>> folio.add_table('data', polars_df)   # Polars DataFrame
-        >>> folio.add_table('data', pandas_df)   # pandas DataFrame
+        >>> folio.add('data', polars_df)   # Polars DataFrame
+        >>> folio.add('data', pandas_df)   # pandas DataFrame
     """
 
     @property

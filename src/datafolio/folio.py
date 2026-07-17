@@ -111,13 +111,13 @@ class DataFolio(SnapshotMixin, ContextCaptureMixin):
         ...     'experiments/my-exp',
         ...     metadata={'experiment': 'test_001'}
         ... )
-        >>> folio.add_table('results', df)  # Writes immediately
+        >>> folio.add('results', df)  # Writes immediately
         >>> folio.reference_table('raw_data', path='s3://bucket/data.parquet')
 
         Load an existing bundle:
         >>> folio = DataFolio('experiments/my-exp')
         >>> print(folio.metadata)
-        >>> df = folio.get_table('results')
+        >>> df = folio.get('results')
     """
 
     def __init__(
@@ -141,7 +141,7 @@ class DataFolio(SnapshotMixin, ContextCaptureMixin):
             read_only: If True, prevent all write operations (default: False)
             use_https: If True, use HTTPS URLs for CloudFiles (for read-only access to public buckets) (default: False)
             max_eager_bytes: Size ceiling (in bytes) for eager, full-table reads
-                via ``get_table``. A table whose recorded ``size_bytes`` exceeds
+                via ``get``. A table whose recorded ``size_bytes`` exceeds
                 this raises unless it is flagged ``allow_full_load`` — use
                 ``scan_table`` instead. Set to ``None`` to disable the guard
                 (default: 500 MB).
@@ -170,7 +170,7 @@ class DataFolio(SnapshotMixin, ContextCaptureMixin):
             Open existing bundle as read-only (for safe inspection):
             >>> folio = DataFolio('experiments/production-model', read_only=True)
             >>> model = folio.get_model('classifier')  # OK
-            >>> folio.add_table('new', df)  # Error: read-only
+            >>> folio.add('new', df)  # Error: read-only
         """
         # Read-only mode flag
         self._read_only = read_only
@@ -358,7 +358,7 @@ class DataFolio(SnapshotMixin, ContextCaptureMixin):
 
         readme_content = f"""# DataFolio Bundle
 
-This directory was created by [datafolio](https://github.com/ceesem/datafolio) version {__version__}.
+This directory was created by [datafolio](https://github.com/caseysm/datafolio) version {__version__}.
 
 It is designed to remain useful **without** the datafolio package: it is an
 ordinary directory of standard files plus a readable JSON manifest.
@@ -421,7 +421,7 @@ folio.inspect_table('big_reference')   # record its schema/size on demand
 
 ## Documentation
 
-For more information, see the [datafolio documentation](https://github.com/ceesem/datafolio).
+For more information, see the [datafolio documentation](https://github.com/caseysm/datafolio).
 """
 
         readme_path = self._storage.join_paths(self._bundle_dir, "README.md")
@@ -1197,12 +1197,12 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             Explicit refresh after external update:
             >>> folio1 = DataFolio('experiments/shared')
             >>> folio2 = DataFolio('experiments/shared')
-            >>> folio1.add_table('results', df)
+            >>> folio1.add('results', df)
             >>> folio2.refresh()  # Manually sync
             >>> assert 'results' in folio2.list_contents()['included_tables']
 
             Auto-refresh (happens automatically):
-            >>> folio1.add_table('results', df)
+            >>> folio1.add('results', df)
             >>> # folio2 auto-refreshes on next read operation
             >>> assert 'results' in folio2.list_contents()['included_tables']
         """
@@ -1253,7 +1253,7 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         Examples:
             >>> with folio.batch():
             ...     for i in range(100):
-            ...         folio.add_numpy(f'array_{i}', arr)
+            ...         folio.add(f'array_{i}', arr)
             # items.json saved once at end of block
         """
         if self._batch_mode:

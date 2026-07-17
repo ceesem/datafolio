@@ -360,11 +360,11 @@ class SnapshotMixin:
 
         Examples:
             >>> folio = DataFolio('experiments/my-exp')
-            >>> folio.add_table('results', df)
+            >>> folio.add('results', df)
             >>> folio.create_snapshot('v1.0-baseline', description='Initial results')
             >>>
             >>> # Later, overwriting will preserve the snapshot
-            >>> folio.add_table('results', new_df, overwrite=True)  # Creates v2
+            >>> folio.add('results', new_df, overwrite=True)  # Creates v2
         """
         self._check_read_only()
 
@@ -957,7 +957,7 @@ class SnapshotMixin:
             >>> paper = DataFolio.load_snapshot('research/exp', 'paper-v1')
             >>> model = paper.get_model('classifier')
             >>> print(paper.metadata['accuracy'])
-            >>> paper.add_table('new', df)  # Error: snapshots are always read-only
+            >>> paper.add('new', df)  # Error: snapshots are always read-only
 
             Compare multiple snapshots:
             >>> v1 = DataFolio.load_snapshot('path', 'v1.0')

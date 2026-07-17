@@ -74,4 +74,4 @@ Deep dive into DataFolio's snapshot system:
 
 - Check the [Getting Started FAQ](getting-started.md#common-questions)
 - See the [Snapshots FAQ](snapshots.md#faq)
-- Report issues on [GitHub](https://github.com/ceesem/datafolio/issues)
+- Report issues on [GitHub](https://github.com/caseysm/datafolio/issues)

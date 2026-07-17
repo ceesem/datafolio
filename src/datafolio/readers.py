@@ -278,7 +278,7 @@ def _lazy_scheme_error(path: str, fmt: str) -> ValueError:
         f"Cannot perform a genuine lazy {fmt} scan of '{path}' (scheme "
         f"'{scheme}'). Lazy scanning avoids full downloads and is only "
         f"supported for local paths and {', '.join(_NATIVE_SCAN_PREFIXES)}. "
-        f"Use get_table(...) for an eager read that downloads the object."
+        f"Use get(name, frame='polars') for an eager read that downloads the object."
     )
 
 
@@ -368,8 +368,9 @@ def scan_table(
     Args:
         path: Path to the table (local or cloud).
         table_format: Format of the table ('parquet', 'csv').
-        cf: Optional CloudFiles client for the byte-fallback path.
-        use_https: Whether to use HTTPS for the byte fallback.
+        cf: Unused; kept for signature compatibility (unsupported schemes
+            raise rather than falling back to a full download).
+        use_https: Unused; kept for signature compatibility.
         **kwargs: Additional arguments forwarded to the format-specific scanner.
 
     Returns:

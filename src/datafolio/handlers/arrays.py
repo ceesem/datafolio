@@ -25,7 +25,7 @@ class NumpyHandler(BaseHandler):
         >>>
         >>> # Handler is used automatically by DataFolio
         >>> import numpy as np
-        >>> folio.add_numpy('embeddings', np.random.randn(100, 128))
+        >>> folio.add('embeddings', np.random.randn(100, 128))
     """
 
     @property

@@ -64,7 +64,7 @@ This is the core DataFolio workflow: track your data, models, and results; snaps
 - **Snapshots** - Checkpoint owned data with copy-on-write versioning (no data duplication; external references preserve the link, not the bytes)
 - **Data Lineage** - Track inputs and dependencies between datasets and models
 - **Autocomplete Access** - IDE-friendly `folio.data.item_name.content` syntax with full autocomplete
-- **Multi-Instance Sync** - Multiple notebooks/processes can safely access the same bundle
+- **Multi-Instance Sync** - Many readers, one active writer: readers auto-refresh; concurrent writers fail safely
 - **Cloud Storage** - Works with local paths, S3, GCS, Azure, and more
 - **Git-Friendly** - All data stored as standard file formats in a simple directory structure
 - **CLI Tools** - Command-line interface for snapshot management and bundle operations
@@ -217,7 +217,7 @@ Ready to organize your experiments? Check out the [Getting Started Guide](guides
 
 ## Development
 
-See [CLAUDE.md](https://github.com/ceesem/datafolio/blob/main/CLAUDE.md) for development guidelines.
+See [CLAUDE.md](https://github.com/caseysm/datafolio/blob/main/CLAUDE.md) for development guidelines.
 
 ## License
 

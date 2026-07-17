@@ -526,7 +526,8 @@ Metadata (5):
 
 ## Multi-Instance Access
 
-Multiple notebooks or processes can safely access the same bundle:
+Multiple notebooks can share a bundle under a **many readers, one active
+writer** model:
 
 ```python
 # Notebook 1: Create bundle
@@ -545,7 +546,12 @@ folio2.describe()  # Now shows both 'results' and 'analysis'
 data = folio2.get('analysis')  # Works immediately ✅
 ```
 
-All read operations automatically refresh from disk, so you always see the latest state.
+All read operations automatically refresh from disk, so readers always see
+the latest committed state. Writing is single-writer: if another notebook has
+advanced the bundle since yours last loaded it, your write raises
+`ConcurrentWriteError` instead of clobbering their work — call `refresh()`
+and retry. Local writers are serialized with a lock file; cloud folios have
+no cross-machine lock and should be treated as single-writer.
 
 ## Taking a Cloud Folio Offline
 
@@ -945,5 +951,5 @@ A: Absolutely! DataFolio works great in notebooks. Multiple notebooks can even a
 ## Need Help?
 
 - **Documentation**: Check the [full docs](../index.md)
-- **Issues**: Report bugs on [GitHub](https://github.com/ceesem/datafolio/issues)
+- **Issues**: Report bugs on [GitHub](https://github.com/caseysm/datafolio/issues)
 - **Examples**: See the repository for example notebooks

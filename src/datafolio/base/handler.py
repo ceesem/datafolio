@@ -73,7 +73,7 @@ class BaseHandler(ABC):
     def can_handle(self, data: Any) -> bool:
         """Check if this handler can process the given data.
 
-        Used by add_data() for auto-detection. Return False if the handler
+        Used by add() for auto-detection. Return False if the handler
         should not participate in auto-detection (e.g., for reference tables
         or models that require explicit parameters).
 

@@ -105,7 +105,7 @@ When you create a snapshot, DataFolio automatically captures:
 - **Item versions** - Current state of all data, models, and files
 - **Metadata** - Complete folio metadata
 - **Git information** - Commit hash, branch, dirty status (if in a git repo)
-- **Environment** - Python version, dependencies
+- **Environment** (opt-in) - Python version, platform, uv.lock hash (never full dependency contents)
 - **Execution context** - Working directory, entry point
 - **Timestamp** - When the snapshot was created
 
@@ -347,8 +347,8 @@ datafolio snapshot create v1.0 \
   -d "Production model" \
   -t baseline -t production
 
-# Skip git/env capture
-datafolio snapshot create v1.0 --no-git --no-env
+# Skip git capture (environment capture is opt-in via --env)
+datafolio snapshot create v1.0 --no-git
 ```
 
 ### List and Show
@@ -681,10 +681,10 @@ A: No, snapshots capture the complete state. But only changed items create new f
 
 **Q: How do snapshots compare to git?**
 
-A: Snapshots are complementary to git. Git tracks code, snapshots track data/models/results. Use both together for full reproducibility!
+A: Snapshots are complementary to git. Git tracks code; a snapshot preserves folio-owned data and the recorded state of external references (not the referenced bytes). Use both together.
 
 ## Next Steps
 
 - See the [API Reference](../reference/api.md) for complete snapshot method documentation
 - Check out the [changelog](../changelog.md) for what's new
-- Read the [full design document](https://github.com/ceesem/datafolio/blob/main/snapshots.md) for implementation details
+- Read the [full design document](https://github.com/caseysm/datafolio/blob/main/snapshots.md) for implementation details
