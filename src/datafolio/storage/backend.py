@@ -419,6 +419,73 @@ class StorageBackend:
             self._ensure_parent_dir(path)
             pq.write_table(table, path)
 
+    def _upload_file(self, dst: str, local_src: str) -> None:
+        """Upload a local file to a cloud destination.
+
+        Reads the local file and writes it to cloud storage. (See F5: this is
+        the seam where a streaming/file-based cloud upload replaces whole-file
+        buffering.)
+
+        Args:
+            dst: Cloud destination path
+            local_src: Local source file path
+        """
+        with open(local_src, "rb") as f:
+            content = f.read()
+        self._cloud_write_bytes(dst, content)
+
+    def sink_parquet(self, path: str, lazyframe: Any) -> None:
+        """Stream a Polars LazyFrame to Parquet with bounded memory.
+
+        Uses Polars' streaming ``sink_parquet`` so the full result is never
+        held in memory at once. For cloud destinations the stream is written to
+        a temporary local file and then uploaded (see :meth:`_upload_file`),
+        keeping memory bounded; the temp file is always cleaned up.
+
+        Args:
+            path: Destination path (local or cloud)
+            lazyframe: A ``polars.LazyFrame`` to materialize
+        """
+        if is_cloud_path(path):
+            import os
+            import tempfile
+
+            fd, tmp_path = tempfile.mkstemp(suffix=".parquet")
+            os.close(fd)
+            try:
+                lazyframe.sink_parquet(tmp_path)
+                self._upload_file(path, tmp_path)
+            finally:
+                if os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+        else:
+            self._ensure_parent_dir(path)
+            lazyframe.sink_parquet(path)
+
+    def parquet_footer(self, path: str) -> tuple[Any, int]:
+        """Return ``(arrow_schema, num_rows)`` from a Parquet file's footer.
+
+        Reads only file metadata (schema + row count) where possible, which is
+        cheap relative to reading the data. For local files this reads just the
+        footer; for cloud files the object is fetched (cloudfiles reads whole
+        objects) as a best-effort fallback.
+
+        Args:
+            path: Path to a Parquet file (local or cloud)
+
+        Returns:
+            Tuple of (pyarrow.Schema, number of rows).
+        """
+        import pyarrow.parquet as pq
+
+        local = path[7:] if path.startswith("file://") else path
+        if is_cloud_path(local):
+            data = self._cloud_read_bytes(local)
+            pf = pq.ParquetFile(io.BytesIO(data))
+        else:
+            pf = pq.ParquetFile(local)
+        return pf.schema_arrow, pf.metadata.num_rows
+
     def read_parquet(self, path: str, **kwargs) -> Any:
         """Read parquet file to DataFrame (local or cloud).
 

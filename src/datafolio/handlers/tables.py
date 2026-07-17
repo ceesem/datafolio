@@ -54,9 +54,20 @@ class DataframeHandler(BaseHandler):
         except ImportError:
             return False
 
+    @staticmethod
+    def _is_polars_lazy(data: Any) -> bool:
+        try:
+            import polars as pl
+
+            return isinstance(data, pl.LazyFrame)
+        except ImportError:
+            return False
+
     def can_handle(self, data: Any) -> bool:
-        """Return True for pandas or Polars DataFrames."""
-        return self._is_pandas(data) or self._is_polars(data)
+        """Return True for pandas or Polars DataFrames (eager or lazy)."""
+        return (
+            self._is_pandas(data) or self._is_polars(data) or self._is_polars_lazy(data)
+        )
 
     # ── Arrow conversion ──────────────────────────────────────────────────────
 
@@ -99,15 +110,19 @@ class DataframeHandler(BaseHandler):
         table_format: str = "parquet",
         **kwargs,
     ) -> Dict[str, Any]:
-        """Add a DataFrame to the folio.
+        """Add a DataFrame (eager) or LazyFrame (streamed) to the folio.
 
-        Converts the DataFrame to a PyArrow Table and writes it to Parquet,
-        preserving exact column types (Int64, struct fields, etc.).
+        For pandas/Polars DataFrames the frame is converted to a PyArrow Table
+        and written to Parquet, preserving exact column types (Int64, struct
+        fields, etc.). For a Polars ``LazyFrame`` the query is materialized
+        with a streaming ``sink_parquet`` (bounded memory — the full result is
+        never held at once); schema and row count are then read back from the
+        written Parquet footer (cheap) rather than from an in-memory result.
 
         Args:
             folio: DataFolio instance.
             name: Item name.
-            data: pandas or Polars DataFrame to store.
+            data: pandas DataFrame, Polars DataFrame, or Polars LazyFrame.
             description: Optional description.
             inputs: Optional lineage inputs.
             table_format: Storage format (default: ``'parquet'``).
@@ -116,19 +131,25 @@ class DataframeHandler(BaseHandler):
             Metadata dict for this table.
 
         Raises:
-            TypeError: If data is not a supported DataFrame type.
+            TypeError: If data is not a supported frame type.
         """
-        arrow_table = self._to_arrow(data)
-
         extension = get_file_extension(table_format)
         filename = f"{name}{extension}"
         subdir = self.get_storage_subdir()
         filepath = folio._storage.join_paths(folio._bundle_dir, subdir, filename)
 
-        # Pass the original data so StorageBackend can use the native writer
-        # (e.g. Polars' own writer for Polars DataFrames, which produces parquet
-        # statistics that Polars' predicate-pushdown engine can parse correctly).
-        folio._storage.write_parquet(filepath, data)
+        if self._is_polars_lazy(data):
+            # Streaming, bounded-memory materialization.
+            folio._storage.sink_parquet(filepath, data)
+            arrow_schema, num_rows = folio._storage.parquet_footer(filepath)
+        else:
+            # Eager frame -> Arrow -> Parquet. Pass the original data so the
+            # backend can use the native writer (Polars' own writer emits
+            # parquet statistics its predicate-pushdown engine can parse).
+            arrow_table = self._to_arrow(data)
+            folio._storage.write_parquet(filepath, data)
+            arrow_schema = arrow_table.schema
+            num_rows = arrow_table.num_rows
 
         checksum = folio._storage.calculate_checksum(filepath)
         size_bytes = folio._storage.file_size(filepath)
@@ -140,10 +161,10 @@ class DataframeHandler(BaseHandler):
             "table_format": table_format,
             "is_directory": False,
             "checksum": checksum,
-            "num_rows": arrow_table.num_rows,
-            "num_cols": arrow_table.num_columns,
-            "columns": arrow_table.schema.names,
-            "dtypes": {field.name: str(field.type) for field in arrow_table.schema},
+            "num_rows": num_rows,
+            "num_cols": len(arrow_schema),
+            "columns": list(arrow_schema.names),
+            "dtypes": {field.name: str(field.type) for field in arrow_schema},
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
         if size_bytes is not None:

@@ -297,3 +297,48 @@ class TestLazyScanContract:
         out = folio.get_table("t", frame="polars")
         assert isinstance(out, pl.DataFrame)
         assert out["a"].to_list() == [1, 2, 3]
+
+
+# =============================================================================
+# Finding 4: add_table accepts a polars LazyFrame, materialized via a streaming
+# sink (bounded memory), with the same manifest/overwrite/snapshot behavior.
+# =============================================================================
+
+
+class TestLazyFrameInput:
+    def test_add_table_lazyframe_roundtrip(self, tmp_path):
+        folio = DataFolio(tmp_path / "b")
+        lf = pl.LazyFrame({"a": [1, 2, 3], "b": [4, 5, 6]}).filter(pl.col("a") > 1)
+        folio.add_table("t", lf)
+        out = folio.get_table("t")
+        assert out["a"].to_list() == [2, 3]
+        assert out["b"].to_list() == [5, 6]
+
+    def test_add_table_lazyframe_metadata(self, tmp_path):
+        folio = DataFolio(tmp_path / "b")
+        lf = pl.LazyFrame({"a": [1, 2, 3], "b": [4.0, 5.0, 6.0]})
+        folio.add_table("t", lf)
+        info = folio.get_table_info("t")
+        assert info["columns"] == ["a", "b"]
+        assert info["num_rows"] == 3
+        assert info["num_cols"] == 2
+        assert "checksum" in info
+        assert "size_bytes" in info
+
+    def test_add_table_lazyframe_overwrite_and_snapshot(self, tmp_path):
+        folio = DataFolio(tmp_path / "b")
+        folio.add_table("t", pl.LazyFrame({"a": [1, 2, 3]}))
+        folio.create_snapshot("snap")
+        folio.add_table("t", pl.LazyFrame({"a": [9]}), overwrite=True)
+        assert folio.get_table("t")["a"].to_list() == [9]
+        assert folio.snapshots["snap"].get_table("t")["a"].to_list() == [1, 2, 3]
+
+    def test_add_data_accepts_lazyframe(self, tmp_path):
+        folio = DataFolio(tmp_path / "b")
+        folio.add_data("t", pl.LazyFrame({"a": [1, 2, 3]}))
+        assert folio.get_table("t")["a"].to_list() == [1, 2, 3]
+
+    def test_add_table_lazyframe_scan_roundtrip(self, tmp_path):
+        folio = DataFolio(tmp_path / "b")
+        folio.add_table("t", pl.LazyFrame({"a": [1, 2, 3]}))
+        assert folio.scan_table("t").collect()["a"].to_list() == [1, 2, 3]
