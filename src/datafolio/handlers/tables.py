@@ -72,21 +72,20 @@ class DataframeHandler(BaseHandler):
     # ── Arrow conversion ──────────────────────────────────────────────────────
 
     @staticmethod
-    def _pandas_to_arrow(data: Any, preserve_index: bool = False) -> Any:
+    def _pandas_to_arrow(data: Any) -> Any:
         import pyarrow as pa
 
-        return pa.Table.from_pandas(data, preserve_index=preserve_index)
+        return pa.Table.from_pandas(data, preserve_index=False)
 
     @staticmethod
     def _polars_to_arrow(data: Any) -> Any:
         return data.to_arrow()
 
     @classmethod
-    def _to_arrow(cls, data: Any, preserve_index: bool = False) -> Any:
+    def _to_arrow(cls, data: Any) -> Any:
         """Convert a supported DataFrame to a PyArrow Table.
 
         Each library has its own conversion path to preserve exact column types.
-        ``preserve_index`` applies to pandas only (Polars has no index).
 
         Raises:
             TypeError: If data is not a supported DataFrame type.
@@ -94,7 +93,7 @@ class DataframeHandler(BaseHandler):
         if cls._is_polars(data):
             return cls._polars_to_arrow(data)
         if cls._is_pandas(data):
-            return cls._pandas_to_arrow(data, preserve_index=preserve_index)
+            return cls._pandas_to_arrow(data)
         raise TypeError(
             f"Expected a pandas or Polars DataFrame, got {type(data).__name__}"
         )
@@ -143,6 +142,7 @@ class DataframeHandler(BaseHandler):
         subdir = self.get_storage_subdir()
         filepath = folio._storage.join_paths(folio._bundle_dir, subdir, filename)
 
+        index_columns = []
         if self._is_polars_lazy(data):
             # Streaming, bounded-memory materialization. The footer is read from
             # the local staging file, so a cloud write never re-downloads the
@@ -155,15 +155,22 @@ class DataframeHandler(BaseHandler):
             # backend can use the native writer (Polars' own writer emits
             # parquet statistics its predicate-pushdown engine can parse).
             preserve_index = bool(kwargs.get("preserve_index", False))
-            if self._is_pandas(data) and not preserve_index:
-                # A non-default index is silently dropped by the parquet
-                # write; make that visible and offer the escape hatch.
+            if self._is_pandas(data):
                 import pandas as pd
 
                 default_index = isinstance(
                     data.index, pd.RangeIndex
                 ) and data.index.equals(pd.RangeIndex(len(data)))
-                if not default_index:
+                if preserve_index and not default_index:
+                    # Store the index as ordinary columns (any tool can read
+                    # them) and record which they were so the pandas read
+                    # path can set_index() them back.
+                    original = set(data.columns)
+                    data = data.reset_index()
+                    index_columns = [c for c in data.columns if c not in original]
+                elif not default_index:
+                    # A non-default index is silently dropped by the parquet
+                    # write; make that visible and offer the escape hatch.
                     import warnings
 
                     warnings.warn(
@@ -174,13 +181,8 @@ class DataframeHandler(BaseHandler):
                         UserWarning,
                         stacklevel=4,
                     )
-            arrow_table = self._to_arrow(data, preserve_index=preserve_index)
-            if preserve_index and self._is_pandas(data):
-                # Write the Arrow table (which carries the index columns);
-                # pandas restores the index on read via parquet metadata.
-                folio._storage.write_parquet(filepath, arrow_table)
-            else:
-                folio._storage.write_parquet(filepath, data)
+            arrow_table = self._to_arrow(data)
+            folio._storage.write_parquet(filepath, data)
             arrow_schema = arrow_table.schema
             num_rows = arrow_table.num_rows
 
@@ -202,8 +204,8 @@ class DataframeHandler(BaseHandler):
         }
         if size_bytes is not None:
             metadata["size_bytes"] = size_bytes
-        if kwargs.get("preserve_index"):
-            metadata["preserve_index"] = True
+        if index_columns:
+            metadata["index_columns"] = index_columns
 
         if description:
             metadata["description"] = description
@@ -232,7 +234,20 @@ class DataframeHandler(BaseHandler):
             folio._bundle_dir, subdir, item["filename"]
         )
 
-        return folio._storage.read_parquet(filepath, **kwargs)
+        df = folio._storage.read_parquet(filepath, **kwargs)
+        # Restore an index stored via add(..., preserve_index=True). The
+        # parquet file itself keeps these as plain columns (readable by any
+        # tool); only the pandas read path re-applies them as the index.
+        index_columns = item.get("index_columns")
+        if index_columns and all(c in df.columns for c in index_columns):
+            df = df.set_index(
+                index_columns if len(index_columns) > 1 else index_columns[0]
+            )
+            # An unnamed single index round-trips through reset_index() as a
+            # column literally named 'index'; restore it to unnamed.
+            if index_columns == ["index"]:
+                df.index.name = None
+        return df
 
     def get_lazy(self, folio: "DataFolio", name: str, **kwargs) -> Any:
         """Lazily scan the bundled table as a polars LazyFrame.

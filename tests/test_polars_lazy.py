@@ -304,7 +304,7 @@ class TestParity:
         folio = DataFolio(tmp_path / "b")
         folio.add("t", pd.DataFrame({"a": [1, 2, 3]}))
         assert isinstance(folio.data.t.lazy, pl.LazyFrame)
-        assert isinstance(folio.data.t.polars, pl.DataFrame)
+        assert isinstance(folio.get("t", frame="polars"), pl.DataFrame)
 
     def test_accessor_lazy_reference(self, tmp_path):
         df = pd.DataFrame({"a": [1, 2, 3]})
@@ -416,7 +416,7 @@ class TestShardedPolarsOnly:
             folio.data.big.content
         # but .lazy / .polars still work
         assert isinstance(folio.data.big.lazy, pl.LazyFrame)
-        assert isinstance(folio.data.big.polars, pl.DataFrame)
+        assert isinstance(folio.get("big", frame="polars"), pl.DataFrame)
 
     def test_explicit_polars_only_single_file(self, tmp_path):
         df = pd.DataFrame({"a": [1, 2, 3]})

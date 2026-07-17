@@ -72,15 +72,11 @@ class TestLineageFields:
         folio.add(
             "processed_data",
             df,
-            inputs=["raw_data"],
-            models=["preprocessor"],
-            code="df.transform(preprocessor)",
+            inputs=["raw_data", "preprocessor"],
         )
 
         item = folio._items["processed_data"]
-        assert item["inputs"] == ["raw_data"]
-        assert item["models"] == ["preprocessor"]
-        assert item["code"] == "df.transform(preprocessor)"
+        assert item["inputs"] == ["raw_data", "preprocessor"]
         assert "created_at" in item
 
     def test_reference_table_with_lineage(self, tmp_path):
@@ -96,12 +92,10 @@ class TestLineageFields:
             parquet_path,
             table_format="parquet",
             inputs=["upstream_table"],
-            code="spark.read.parquet(...)",
         )
 
         item = folio._items["external_data"]
         assert item["inputs"] == ["upstream_table"]
-        assert item["code"] == "spark.read.parquet(...)"
         assert "created_at" in item
 
     def test_add_model_with_lineage(self, tmp_path):
@@ -113,14 +107,10 @@ class TestLineageFields:
             "classifier",
             model,
             inputs=["training_data", "validation_data"],
-            hyperparameters={"learning_rate": 0.01, "epochs": 100},
-            code="model.fit(X_train, y_train)",
         )
 
         item = folio._items["classifier"]
         assert item["inputs"] == ["training_data", "validation_data"]
-        assert item["hyperparameters"] == {"learning_rate": 0.01, "epochs": 100}
-        assert item["code"] == "model.fit(X_train, y_train)"
         assert "created_at" in item
 
     def test_lineage_fields_optional(self, tmp_path):
@@ -155,7 +145,7 @@ class TestLineageQueries:
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
 
-        folio.add("processed", df, inputs=["raw_data"], models=["transformer"])
+        folio.add("processed", df, inputs=["raw_data", "transformer"])
 
         inputs = folio.get_inputs("processed")
         assert "raw_data" in inputs
@@ -197,7 +187,7 @@ class TestLineageQueries:
         model = DummyModel()
 
         folio.add_model("transformer", model)
-        folio.add("processed", df, models=["transformer"])
+        folio.add("processed", df, inputs=["transformer"])
 
         dependents = folio.get_dependents("transformer")
         assert "processed" in dependents
@@ -365,17 +355,16 @@ class TestDescribeWithLineage:
         # Should show lineage with arrow notation
         assert "↳" in description or "raw" in description
 
-    def test_describe_shows_model_hyperparameters(self, tmp_path):
-        """Test that describe shows hyperparameters for models."""
+    def test_describe_shows_model(self, tmp_path):
+        """Test that describe shows models (hyperparameters= was removed in
+        2.0 — sklearn's get_params() owns that data)."""
         folio = DataFolio(tmp_path / "test")
         model = DummyModel()
 
-        folio.add_model("clf", model, hyperparameters={"lr": 0.01, "epochs": 100})
+        folio.add_model("clf", model, description="a model")
 
         description = folio.describe(return_string=True)
-
-        # Should mention hyperparameters
-        assert "hyperparameters" in description.lower() or "lr" in description
+        assert "clf" in description
 
 
 class TestDescribeMetadataDisplay:

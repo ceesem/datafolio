@@ -27,6 +27,11 @@ open in 2.0 (and vice versa) with no migration step.
 | `get_table_info` / `get_model_info` / `get_artifact_info` | `item_info(name)` |
 | `cache_status` / `clear_cache` / `invalidate_cache` / `refresh_cache` | removed (caching subsystem cut) |
 | `DataFolio(..., cache_enabled=, cache_dir=, cache_ttl=)` | removed |
+| `code=` (on any add method / `update_item`) | removed — git owns code history |
+| `add_model(..., hyperparameters=)` | removed — `estimator.get_params()` owns this; store it as a JSON item if you want it in the folio |
+| `add(..., models=[...])` on tables | removed — put model names in `inputs` (old manifests' `models` fields still count as lineage on read) |
+| `reproduce_instructions()` / `datafolio snapshot reproduce` | removed — the captured git/env data is in `get_snapshot_info()` |
+| `folio.data.name.polars` | `get(name, frame='polars')` or `scan_table(name).collect()` |
 
 Unchanged: `reference_table`, `inspect_table`, `scan_table`, `describe`,
 `list_contents`, `delete`, `update_item`, `archive`/`unarchive`, `copy`,
@@ -73,7 +78,14 @@ succeeded and every read failed. Convert to a concrete dtype, or store via
 
 **A non-default pandas index warns.** Parquet stores columns; a non-default
 index is dropped. 2.0 warns when this happens and adds an escape hatch:
-`add(name, df, preserve_index=True)`.
+`add(name, df, preserve_index=True)` — this stores the index as ordinary
+columns (readable by any tool) and records them in the manifest as
+`index_columns`, so the pandas read path can `set_index()` them back.
+polars and direct file readers simply see the columns.
+
+**Snapshots no longer embed requirements.txt.** `capture_environment=True`
+records the Python version, platform, and uv.lock hash; the full dependency
+text belongs to git.
 
 **Item names are validated.** Names are segments of letters, digits, `.`,
 `_`, `-` (starting with a letter or digit), optionally namespaced with `/`

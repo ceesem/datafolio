@@ -386,7 +386,7 @@ class StorageBackend:
     # Parquet I/O
     # =========================================================================
 
-    def write_parquet(self, path: str, df: Any, preserve_index: bool = False) -> None:
+    def write_parquet(self, path: str, df: Any) -> None:
         """Write a DataFrame or PyArrow Table to parquet (local or cloud).
 
         Polars DataFrames are written with Polars' own writer so that the
@@ -410,18 +410,16 @@ class StorageBackend:
             fd, tmp = tempfile.mkstemp(suffix=".parquet")
             os.close(fd)
             try:
-                self._write_parquet_local(tmp, df, preserve_index=preserve_index)
+                self._write_parquet_local(tmp, df)
                 self._upload_file(path, tmp)
             finally:
                 if os.path.exists(tmp):
                     os.unlink(tmp)
         else:
             self._ensure_parent_dir(path)
-            self._write_parquet_local(path, df, preserve_index=preserve_index)
+            self._write_parquet_local(path, df)
 
-    def _write_parquet_local(
-        self, path: str, df: Any, preserve_index: bool = False
-    ) -> None:
+    def _write_parquet_local(self, path: str, df: Any) -> None:
         """Write a DataFrame / PyArrow Table to a local Parquet file.
 
         Polars DataFrames use Polars' own writer (so parquet statistics stay
@@ -447,7 +445,7 @@ class StorageBackend:
         table = (
             df
             if isinstance(df, pa.Table)
-            else pa.Table.from_pandas(df, preserve_index=preserve_index)
+            else pa.Table.from_pandas(df, preserve_index=False)
         )
         pq.write_table(table, path)
 

@@ -265,9 +265,6 @@ datafolio snapshot compare v1.0 v2.0
 
 # Delete old snapshots and cleanup
 datafolio snapshot delete experimental-v5 --cleanup
-
-# Show reproduction instructions
-datafolio snapshot reproduce v1.0
 ```
 
 ### Key Features

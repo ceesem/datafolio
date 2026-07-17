@@ -240,7 +240,6 @@ clf.fit(X_train, y_train)
 # Save model
 folio.add_model('classifier', clf,
     description='Random forest classifier',
-    hyperparameters={'n_estimators': 100, 'max_depth': 10},
     inputs=['training_data'])
 
 # Load model
@@ -516,7 +515,6 @@ Numpy Arrays (1):
 Models (1):
   • classifier: Random forest classifier
     ↳ inputs: features
-    ↳ hyperparameters: {'n_estimators': 100, 'max_depth': 10}
 
 Metadata (5):
   • experiment_name: baseline_v1
@@ -608,11 +606,6 @@ f1 = f1_score(y_test, y_pred)
 # 8. Save model and results
 folio.add_model('classifier', clf,
     description='Random forest fraud classifier',
-    hyperparameters={
-        'n_estimators': 100,
-        'max_depth': 10,
-        'random_state': 42
-    },
     inputs=['features'])
 
 folio.add('metrics', {

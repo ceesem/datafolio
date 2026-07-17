@@ -1273,7 +1273,6 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         description: Optional[str] = None,
         inputs: Optional[list[str]] = None,
         overwrite: bool = False,
-        code: Optional[str] = None,
         **type_opts: Any,
     ) -> Self:
         """Add an object to the folio (the single write entry point).
@@ -1310,11 +1309,10 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             inputs: Optional lineage — names of items this was derived from.
             overwrite: Must be True to replace an existing item. A prior
                 version pinned by a snapshot is preserved via copy-on-write.
-            code: Optional code snippet that created this item.
-            **type_opts: Type-specific options. Tables: ``models`` (model
-                lineage), ``preserve_index`` (keep a non-default pandas
-                index). Models: ``custom`` (skops format), ``hyperparameters``.
-                Files: ``category``. Unknown options raise ``TypeError``.
+            **type_opts: Type-specific options. Tables: ``preserve_index``
+                (store a non-default pandas index as a column and restore it
+                on read). Models: ``custom`` (skops format). Files:
+                ``category``. Unknown options raise ``TypeError``.
 
         Returns:
             Self for method chaining.
@@ -1362,7 +1360,6 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             description=description,
             inputs=inputs,
             overwrite=overwrite,
-            code=code,
             **type_opts,
         )
 
@@ -1375,7 +1372,6 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         description: Optional[str] = None,
         inputs: Optional[list[str]] = None,
         overwrite: bool = False,
-        code: Optional[str] = None,
         **type_opts: Any,
     ) -> Self:
         """Shared guarded commit for every owned item type.
@@ -1401,9 +1397,6 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             from datafolio.utils import get_file_extension
 
             extension = get_file_extension("parquet")
-            models = type_opts.pop("models", None)
-            if models is not None:
-                extras["models"] = models
             if type_opts.pop("preserve_index", False):
                 handler_kwargs["preserve_index"] = True
         elif item_type == "numpy_array":
@@ -1414,9 +1407,6 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             extension = ".json"
         elif item_type == "model":
             handler_kwargs["custom"] = bool(type_opts.pop("custom", False))
-            hyperparameters = type_opts.pop("hyperparameters", None)
-            if hyperparameters is not None:
-                extras["hyperparameters"] = hyperparameters
             extension = ".skops" if handler_kwargs["custom"] else ".joblib"
         elif item_type == "artifact":
             extension = Path(str(obj)).suffix
@@ -1447,8 +1437,6 @@ For more information, see the [datafolio documentation](https://github.com/ceese
                 )
             )
             metadata.update(extras)
-            if code is not None:
-                metadata["code"] = code
             return metadata
 
         self._commit_owned_item(name, item_type, extension, description, _build)
@@ -1607,9 +1595,7 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         description: Optional[str] = None,
         inputs: Optional[list[str]] = None,
         overwrite: bool = False,
-        code: Optional[str] = None,
         custom: bool = False,
-        hyperparameters: Optional[Dict[str, Any]] = None,
     ) -> Self:
         """Add a model-like object to the bundle (explicit verb).
 
@@ -1623,17 +1609,14 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             description: Optional description.
             inputs: Optional lineage (e.g. training data item names).
             overwrite: Must be True to replace an existing item.
-            code: Optional code snippet that trained this model.
             custom: If True, use the skops format (portable pipelines with
                 custom transformers; safer loading). Default joblib.
-            hyperparameters: Optional dict of hyperparameters to record.
 
         Returns:
             Self for method chaining.
 
         Examples:
-            >>> folio.add_model('classifier', clf,
-            ...     hyperparameters={'n_estimators': 100})
+            >>> folio.add_model('classifier', clf)
             >>> folio.add_model('pipeline', custom_pipeline, custom=True)
         """
         return self._add_item(
@@ -1643,9 +1626,7 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             description=description,
             inputs=inputs,
             overwrite=overwrite,
-            code=code,
             custom=custom,
-            hyperparameters=hyperparameters,
         )
 
     def add_file(
@@ -2113,7 +2094,6 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         version: Optional[int] = None,
         description: Optional[str] = None,
         inputs: Optional[list[str]] = None,
-        code: Optional[str] = None,
         overwrite: bool = False,
         allow_full_load: bool = False,
         polars_only: Optional[bool] = None,
@@ -2127,9 +2107,9 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         :meth:`inspect_table` to enrich the entry with schema/size/identity, and
         :meth:`validate` to check existence.
 
-        Writes immediately to items.json. Behaves like :meth:`add_table` with
+        Writes immediately to items.json. Behaves like :meth:`add` with
         respect to existing names: overwriting requires ``overwrite=True``, and
-        replacing a snapshotted name triggers copy-on-write.
+        a snapshotted prior version is preserved via copy-on-write.
 
         Args:
             name: Unique name for this table
@@ -2139,7 +2119,6 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             version: Optional source version number recorded in the manifest
             description: Optional description
             inputs: Optional list of items this was derived from
-            code: Optional code snippet that created this
             overwrite: If True, allow replacing an existing table (default: False)
             allow_full_load: If True, this reference bypasses the folio's
                 ``max_eager_bytes`` guard on eager ``get_table`` reads.
@@ -2204,8 +2183,6 @@ For more information, see the [datafolio documentation](https://github.com/ceese
                 metadata["num_rows"] = num_rows
             if version is not None:
                 metadata["version"] = version
-            if code is not None:
-                metadata["code"] = code
 
             metadata["version_id"] = self._next_version_id(name)
             self._apply_description(name, metadata, description)
@@ -2389,12 +2366,11 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         name: str,
         description: Optional[str] = None,
         inputs: Optional[list[str]] = None,
-        code: Optional[str] = None,
     ) -> Self:
         """Update metadata for an existing item.
 
-        Allows you to modify the description, inputs, or code fields
-        of an item after it's been added to the bundle.
+        Allows you to modify the description or inputs of an item after it
+        has been added to the bundle.
 
         If the item's current version is pinned by a snapshot, the update is
         applied copy-on-write: the snapshot keeps the metadata exactly as
@@ -2402,13 +2378,12 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         payload file) carrying the edit.
 
         Passing ``None`` for a field leaves it unchanged; passing an empty
-        value (``""`` for description/code, ``[]`` for inputs) removes it.
+        value (``""`` for description, ``[]`` for inputs) removes it.
 
         Args:
             name: Name of the item to update
             description: New description ("" removes it; None leaves unchanged)
             inputs: New list of input items ([] removes it; None leaves unchanged)
-            code: New code snippet ("" removes it; None leaves unchanged)
 
         Returns:
             Self for method chaining
@@ -2429,11 +2404,10 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             ...     'feature_matrix',
             ...     description='Normalized feature matrix',
             ...     inputs=['raw_data'],
-            ...     code='features = normalize(raw_data)'
             ... )
 
             Clear a field by passing an empty string:
-            >>> folio.update_item('temp', code='')  # Removes code field
+            >>> folio.update_item('temp', description='')
         """
         self._check_read_only()
 
@@ -2473,13 +2447,6 @@ For more information, see the [datafolio documentation](https://github.com/ceese
                     item.pop("inputs", None)
                 else:
                     item["inputs"] = inputs
-
-            if code is not None:
-                if code == "":
-                    # Empty string removes the field
-                    item.pop("code", None)
-                else:
-                    item["code"] = code
 
             # Save updated manifest
             self._save_items()
@@ -2695,7 +2662,9 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         item = self._items[item_name]
         inputs = item.get("inputs", [])
 
-        # For tables, also include models
+        # Legacy manifests (pre-2.0) recorded model lineage for tables in a
+        # separate 'models' field; fold it into inputs on read. 2.0 writes
+        # everything to 'inputs'.
         if item.get("item_type") == "included_table" and "models" in item:
             inputs = inputs + item.get("models", [])
 
@@ -2730,7 +2699,7 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             # Check inputs
             if item_name in item.get("inputs", []):
                 dependents.append(name)
-            # Check models (for tables)
+            # Legacy pre-2.0 'models' lineage field (read-side compat)
             if item.get("item_type") == "included_table":
                 if item_name in item.get("models", []):
                     dependents.append(name)

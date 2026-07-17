@@ -74,19 +74,6 @@ class ItemProxy:
         return self._folio.scan_table(self._name)
 
     @property
-    def polars(self) -> Any:
-        """Get this table as an eager polars DataFrame (tables only).
-
-        Returns:
-            polars DataFrame
-
-        Raises:
-            ValueError: If this item is not a table
-            ImportError: If polars is not installed
-        """
-        return self._folio.get(self._name, frame="polars")
-
-    @property
     def description(self) -> Optional[str]:
         """Get the description of this item.
 

@@ -45,12 +45,10 @@ class TestAddNumpy:
             "predictions",
             array,
             inputs=["test_data"],
-            code="predictions = model.predict(X)",
         )
 
         metadata = folio._items["predictions"]
         assert metadata["inputs"] == ["test_data"]
-        assert metadata["code"] == "predictions = model.predict(X)"
 
     def test_add_numpy_appears_in_list_contents(self, tmp_path):
         """Test numpy array appears in list_contents."""
@@ -166,12 +164,10 @@ class TestAddJson:
             "metrics",
             metrics,
             inputs=["test_data"],
-            code="metrics = evaluate(model, X_test)",
         )
 
         metadata = folio._items["metrics"]
         assert metadata["inputs"] == ["test_data"]
-        assert metadata["code"] == "metrics = evaluate(model, X_test)"
 
     def test_add_json_appears_in_list_contents(self, tmp_path):
         """Test JSON data appears in list_contents."""

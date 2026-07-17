@@ -40,7 +40,6 @@ class TableReference(TypedDict, total=False):
     description: Optional[str]
     # Lineage fields
     inputs: Optional[list[str]]  # Names of items this was derived from
-    code: Optional[str]  # Code snippet that created this
     created_at: Optional[str]  # ISO 8601 timestamp
     # Snapshot fields (using @snapshot naming scheme)
     in_snapshots: list[str]  # List of snapshot names referencing this version
@@ -64,9 +63,7 @@ class IncludedTable(TypedDict, total=False):
     dtypes: dict[str, str]
     description: Optional[str]
     # Lineage fields
-    inputs: Optional[list[str]]  # Names of tables used to create this
-    models: Optional[list[str]]  # Names of models used to create this
-    code: Optional[str]  # Code snippet that created this
+    inputs: Optional[list[str]]  # Names of items used to create this
     created_at: Optional[str]  # ISO 8601 timestamp
     # Snapshot fields (using @snapshot naming scheme)
     in_snapshots: list[str]  # List of snapshot names referencing this version
@@ -84,8 +81,6 @@ class IncludedItem(TypedDict, total=False):
     description: Optional[str]
     # Lineage fields (primarily for models)
     inputs: Optional[list[str]]  # Training data, etc.
-    hyperparameters: Optional[dict[str, Any]]  # Model hyperparameters
-    code: Optional[str]  # Training code snippet
     created_at: Optional[str]  # ISO 8601 timestamp
     # Snapshot fields (using @snapshot naming scheme)
     in_snapshots: list[str]  # List of snapshot names referencing this version
@@ -103,7 +98,6 @@ class TimestampItem(TypedDict, total=False):
     description: Optional[str]
     # Lineage fields
     inputs: Optional[list[str]]  # Names of items this was derived from
-    code: Optional[str]  # Code snippet that created this
     created_at: Optional[str]  # ISO 8601 timestamp of when item was added
     # Snapshot fields (using @snapshot naming scheme)
     in_snapshots: list[str]  # List of snapshot names referencing this version
@@ -127,7 +121,6 @@ class EnvironmentInfo(TypedDict, total=False):
     python_version: str  # Python version (e.g., '3.11.5')
     platform: str  # Platform string (e.g., 'Linux-5.15.0-x86_64')
     uv_lock_hash: Optional[str]  # Hash of uv.lock file if present
-    requirements: Optional[str]  # Contents of requirements.txt or similar
 
 
 class ExecutionInfo(TypedDict, total=False):

@@ -410,7 +410,8 @@ class TestGitUrlSanitizationIntegration:
         folio.create_snapshot("v1.0", capture_git=True)
 
         # Get reproduction instructions
-        instructions = folio.reproduce_instructions("v1.0")
+        info = folio.get_snapshot_info("v1.0")
+        instructions = str(info.get("git", {}))
 
         # Verify no credentials in output
         assert "secret_token" not in instructions

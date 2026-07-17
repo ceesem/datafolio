@@ -331,33 +331,6 @@ folio.create_snapshot('v2.0')
 # v2.0 references the new file
 ```
 
-## Reproduction Instructions
-
-Get human-readable instructions for reproducing a snapshot:
-
-```python
-instructions = folio.reproduce_instructions('v1.0')
-print(instructions)
-```
-
-Output:
-```
-To reproduce snapshot 'v1.0':
-
-1. Restore code:
-   git checkout abc123
-
-2. Restore environment:
-   Python version: 3.11.5
-   uv sync
-
-3. Load bundle:
-   folio = DataFolio.load_snapshot('experiments/exp', 'v1.0')
-
-4. Expected results:
-   accuracy: 0.89
-   f1_score: 0.87
-```
 
 ## CLI Tools
 
@@ -389,9 +362,6 @@ datafolio snapshot list --tag production
 
 # Show details
 datafolio snapshot show v1.0
-
-# Show reproduction instructions
-datafolio snapshot reproduce v1.0
 ```
 
 ### Compare and Manage

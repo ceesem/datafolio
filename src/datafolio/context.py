@@ -206,7 +206,9 @@ class ContextCaptureMixin:
         """Capture Python environment information.
 
         Returns:
-            Environment info dict with Python version, platform, packages
+            Environment info dict with Python version, platform, and the
+            uv.lock hash if present (never the full dependency text — git
+            owns that file's history).
         """
         import platform
         import sys
@@ -226,14 +228,6 @@ class ContextCaptureMixin:
                 with open(uv_lock, "rb") as f:
                     lock_hash = hashlib.md5(f.read()).hexdigest()
                 env_info["uv_lock_hash"] = lock_hash
-        except Exception:
-            pass
-
-        # Try to capture requirements
-        try:
-            requirements_file = Path.cwd() / "requirements.txt"
-            if requirements_file.exists():
-                env_info["requirements"] = requirements_file.read_text()
         except Exception:
             pass
 

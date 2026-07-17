@@ -553,32 +553,6 @@ def snapshot_gc(ctx, dry_run):
         sys.exit(1)
 
 
-@snapshot.command("reproduce")
-@click.argument("name")
-@click.pass_context
-def snapshot_reproduce(ctx, name):
-    """Show reproduction instructions for a snapshot.
-
-    Example:
-        datafolio snapshot reproduce v1.0
-    """
-    try:
-        bundle_path = find_folio_dir(ctx.obj.get("folio"))
-        validate_existing_folio(bundle_path)
-        folio = DataFolio(bundle_path)
-
-        instructions = folio.reproduce_instructions(name)
-
-        console.print(f"\n[bold cyan]{instructions}[/bold cyan]")
-
-    except KeyError:
-        console.print(f"[red]✗[/red] Snapshot '{name}' not found", style="red")
-        sys.exit(1)
-    except Exception as e:
-        console.print(f"[red]✗[/red] Error: {e}", style="red")
-        sys.exit(1)
-
-
 @snapshot.command("status")
 @click.pass_context
 def snapshot_status(ctx):

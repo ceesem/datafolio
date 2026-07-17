@@ -39,6 +39,19 @@
 
 - The caching subsystem (`cache_enabled`/`cache_dir`/`cache_ttl` and the
   four `cache_*` methods).
+- Shadow-API trims (datafolio stays lightweight and offloads to other
+  tools): `code=` kwargs (git owns code history),
+  `add_model(hyperparameters=)` (`estimator.get_params()` owns it),
+  `models=` table lineage (use `inputs`; legacy fields still read),
+  `reproduce_instructions()`/`snapshot reproduce` (data lives in
+  `get_snapshot_info()`), requirements.txt embedding in environment
+  capture (uv.lock hash kept), the `.polars` accessor property, and
+  reader kwargs on `get()` (use `scan_table()` or
+  `pd.read_parquet(folio.item_path(name), ...)`).
+- `add(..., preserve_index=True)` now stores the index as plain columns
+  recorded in the manifest (`index_columns`) and restores them on pandas
+  reads — the parquet file stays readable as ordinary columns by any
+  tool.
 
 ## 1.3.0
 

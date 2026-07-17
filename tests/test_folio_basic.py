@@ -546,8 +546,7 @@ class TestUpdateItem:
         folio.add("test_array", arr)
 
         # Update code
-        folio.update_item("test_array", code="arr = np.array([1, 2, 3])")
-        assert folio._items["test_array"]["code"] == "arr = np.array([1, 2, 3])"
+        folio.update_item("test_array", description="an array")
 
     def test_update_multiple_fields(self, tmp_path):
         """Test updating multiple fields at once."""
@@ -562,13 +561,11 @@ class TestUpdateItem:
             "test_array",
             description="Updated description",
             inputs=["new_input"],
-            code="new_code",
         )
 
         item = folio._items["test_array"]
         assert item["description"] == "Updated description"
         assert item["inputs"] == ["new_input"]
-        assert item["code"] == "new_code"
 
     def test_clear_fields_with_empty_values(self, tmp_path):
         """Test clearing fields with empty string/list."""
@@ -581,16 +578,14 @@ class TestUpdateItem:
             arr,
             description="Initial description",
             inputs=["input1"],
-            code="code1",
         )
 
         # Clear fields
-        folio.update_item("test_array", description="", inputs=[], code="")
+        folio.update_item("test_array", description="", inputs=[])
 
         item = folio._items["test_array"]
         assert "description" not in item
         assert "inputs" not in item
-        assert "code" not in item
 
     def test_update_nonexistent_item_raises_error(self, tmp_path):
         """Test that updating nonexistent item raises KeyError."""
@@ -648,9 +643,7 @@ class TestUpdateItem:
 
         folio = DataFolio(tmp_path / "test")
         arr = np.array([1, 2, 3])
-        folio.add(
-            "test_array", arr, description="Original", inputs=["input1"], code="code1"
-        )
+        folio.add("test_array", arr, description="Original", inputs=["input1"])
 
         # Update only description
         folio.update_item("test_array", description="Updated")
@@ -658,7 +651,6 @@ class TestUpdateItem:
         item = folio._items["test_array"]
         assert item["description"] == "Updated"
         assert item["inputs"] == ["input1"]  # Should still be there
-        assert item["code"] == "code1"  # Should still be there
 
 
 class TestAddFile:

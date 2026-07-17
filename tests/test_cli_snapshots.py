@@ -335,22 +335,6 @@ class TestSnapshotGC:
 class TestSnapshotReproduce:
     """Test snapshot reproduce command."""
 
-    def test_reproduce_instructions(self, tmp_path):
-        """Test showing reproduction instructions."""
-        folio = DataFolio(tmp_path / "test")
-        df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add("data", df)
-        folio.create_snapshot("v1.0")
-
-        runner = CliRunner()
-        result = runner.invoke(
-            cli,
-            ["--folio", str(tmp_path / "test"), "snapshot", "reproduce", "v1.0"],
-        )
-
-        assert result.exit_code == 0
-        assert "reproduce" in result.output.lower()
-
 
 class TestSnapshotStatus:
     """Test snapshot status command."""

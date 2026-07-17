@@ -149,7 +149,6 @@ class TestExportSnapshot:
             pd.DataFrame({"a": [1]}),
             description="cleaned",
             inputs=["raw"],
-            code="clean = raw.dropna()",
         )
         folio.create_snapshot("v1")
 
@@ -157,7 +156,6 @@ class TestExportSnapshot:
         assert out._items["raw"]["description"] == "raw rows"
         assert out._items["clean"]["description"] == "cleaned"
         assert out.get_inputs("clean") == ["raw"]
-        assert out._items["clean"]["code"] == "clean = raw.dropna()"
 
     def test_export_copies_bytes_exactly(self, tmp_path):
         folio = DataFolio(tmp_path / "b")
@@ -292,7 +290,7 @@ class TestUpdateItemCopyOnWrite:
 
     def test_empty_string_clears_field(self, tmp_path):
         folio = DataFolio(tmp_path / "b")
-        folio.add("cfg", 1, description="a", code="x = 1")
-        folio.update_item("cfg", description="", code="")
+        folio.add("cfg", 1, description="a")
+        folio.update_item("cfg", description="")
         assert "description" not in folio._items["cfg"]
         assert "code" not in folio._items["cfg"]

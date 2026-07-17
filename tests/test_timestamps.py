@@ -42,12 +42,10 @@ class TestAddTimestamp:
             "event_time",
             event_time,
             inputs=["event_log"],
-            code='timestamp = event_log.iloc[0]["timestamp"]',
         )
 
         item = folio._items["event_time"]
         assert item["inputs"] == ["event_log"]
-        assert item["code"] == 'timestamp = event_log.iloc[0]["timestamp"]'
 
     def test_add_timestamp_from_unix_int(self, tmp_path):
         """Unix timestamps enter as datetimes; bare ints store as JSON."""

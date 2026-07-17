@@ -299,11 +299,7 @@ folio = DataFolio('experiments/outlier_detection')
 folio.add_model('pipeline', pipeline,
     custom=True,  # Enable skops for custom transformer
     description='Logistic regression with IQR-based outlier clipping',
-    inputs=['training_data'],
-    hyperparameters={
-        'iqr_multiplier': 1.5,
-        'random_state': 42
-    })
+    inputs=['training_data'])
 
 # Later: Load and use (even without OutlierClipper class!)
 folio2 = DataFolio('experiments/outlier_detection')
@@ -325,22 +321,7 @@ Add rich metadata to track model provenance:
 ```python
 folio.add_model('classifier', model,
     description='Random forest with balanced class weights',
-    inputs=['processed_features', 'labels'],
-    hyperparameters={
-        'n_estimators': 100,
-        'max_depth': 10,
-        'class_weight': 'balanced',
-        'random_state': 42
-    },
-    code='''
-    clf = RandomForestClassifier(
-        n_estimators=100,
-        max_depth=10,
-        class_weight='balanced',
-        random_state=42
-    )
-    clf.fit(X_train, y_train)
-    ''')
+    inputs=['processed_features', 'labels'])
 ```
 
 ## Loading Models
@@ -431,7 +412,6 @@ for params in ParameterGrid(param_grid):
     # Save each model
     name = f"rf_n{params['n_estimators']}_d{params['max_depth']}"
     folio.add_model(name, model,
-        hyperparameters=params,
         description=f"RF with {params['n_estimators']} trees, depth {params['max_depth']}")
 
     # Track score in metadata
