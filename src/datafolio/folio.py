@@ -38,6 +38,15 @@ from datafolio.utils import (
 )
 
 
+def _polars_only_error(name: str) -> ValueError:
+    """Build the standard error for pandas access to a polars-only table."""
+    return ValueError(
+        f"Table '{name}' is a sharded/partitioned (polars-only) dataset and "
+        f"cannot be loaded as pandas. Use get_lazy('{name}') for a lazy scan, "
+        f"or get_table('{name}', frame='polars') to collect it eagerly."
+    )
+
+
 class SnapshotView:
     """Read-only view of a specific snapshot.
 
@@ -134,6 +143,8 @@ class SnapshotView:
             self._folio._items[name] = snapshot_item
             if frame == "polars":
                 return handler.get_lazy(self._folio, name).collect()
+            if snapshot_item.get("polars_only"):
+                raise _polars_only_error(name)
             return handler.get(self._folio, name)
         finally:
             # Restore original item
@@ -3043,6 +3054,7 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         overwrite: bool = False,
         infer_schema: bool = True,
         allow_full_load: bool = False,
+        polars_only: Optional[bool] = None,
     ) -> Self:
         """Add a reference to an external table (not copied to bundle).
 
@@ -3065,6 +3077,10 @@ For more information, see the [datafolio documentation](https://github.com/ceese
                 reference carries the same schema metadata as an included table.
             allow_full_load: If True, this reference bypasses the folio's
                 ``max_eager_bytes`` guard on eager ``get_table`` reads.
+            polars_only: If True, this reference is readable only lazily / via
+                polars (``get_lazy`` / ``frame='polars'``); eager pandas reads
+                raise a clear error. If None (default), inferred from the
+                layout: a sharded/partitioned directory dataset is polars-only.
 
         Returns:
             Self for method chaining
@@ -3114,6 +3130,7 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             table_format=table_format,
             infer_schema=infer_schema,
             allow_full_load=allow_full_load,
+            polars_only=polars_only,
         )
 
         # Add extra fields not handled by base handler
@@ -3320,6 +3337,10 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             # cache (it serializes to/from pandas parquet).
             return handler.get_lazy(self, name, **kwargs).collect()
         elif frame == "pandas":
+            # Sharded/partitioned (polars-only) tables can't be materialized as
+            # pandas — raise a clear, actionable error instead of a cryptic one.
+            if item.get("polars_only"):
+                raise _polars_only_error(name)
             # Eager pandas (with local caching if enabled)
             return self._get_with_cache(name, lambda: handler.get(self, name, **kwargs))
         else:

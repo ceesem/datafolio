@@ -334,6 +334,13 @@ class TestParity:
         folio.reference_table("ref", e2, overwrite=True)
         assert folio.get_table_info("ref")["num_rows"] == 5
 
+    def test_snapshot_get_table_pandas_still_works(self, tmp_path):
+        folio = DataFolio(tmp_path / "b")
+        folio.add_table("t", pd.DataFrame({"a": [1, 2, 3]}))
+        folio.create_snapshot("snap")
+        out = folio.snapshots["snap"].get_table("t")
+        assert isinstance(out, pd.DataFrame)
+
     def test_reference_copy_on_write(self, tmp_path):
         df1 = pd.DataFrame({"a": [1, 2, 3]})
         df2 = pd.DataFrame({"a": [9, 9]})
@@ -351,3 +358,74 @@ class TestParity:
         folio.reference_table("ref", e2, overwrite=True)
         assert folio.get_table("ref")["a"].to_list() == [9, 9]
         assert folio.snapshots["snap"].get_table("ref")["a"].to_list() == [1, 2, 3]
+
+
+# =============================================================================
+# sharded / partitioned polars-only tables (references to directories)
+# =============================================================================
+
+
+class TestShardedPolarsOnly:
+    def _hive_dir(self, tmp_path, name="hive"):
+        d = tmp_path / name
+        pl.DataFrame({"g": ["a", "a", "b", "c"], "x": [1, 2, 3, 4]}).write_parquet(
+            d, partition_by="g"
+        )
+        return d
+
+    def test_directory_reference_is_polars_only(self, tmp_path):
+        folio = DataFolio(tmp_path / "b")
+        folio.reference_table("big", path=self._hive_dir(tmp_path))
+        info = folio.get_table_info("big")
+        assert info["is_directory"] is True
+        assert info["polars_only"] is True
+
+    def test_directory_reference_schema_inferred(self, tmp_path):
+        folio = DataFolio(tmp_path / "b")
+        folio.reference_table("big", path=self._hive_dir(tmp_path))
+        info = folio.get_table_info("big")
+        # partition column 'g' is included in the scanned schema
+        assert set(info["columns"]) == {"g", "x"}
+        assert info["num_rows"] == 4
+        assert info["num_cols"] == 2
+
+    def test_directory_reference_lazy_and_polars_work(self, tmp_path):
+        folio = DataFolio(tmp_path / "b")
+        folio.reference_table("big", path=self._hive_dir(tmp_path))
+        assert folio.get_lazy("big").select(pl.len()).collect().item() == 4
+        assert folio.get_table("big", frame="polars").height == 4
+
+    def test_directory_reference_pandas_friendly_error(self, tmp_path):
+        folio = DataFolio(tmp_path / "b")
+        folio.reference_table("big", path=self._hive_dir(tmp_path))
+        with pytest.raises(ValueError, match="polars-only"):
+            folio.get_table("big")
+
+    def test_accessor_content_polars_only_errors(self, tmp_path):
+        folio = DataFolio(tmp_path / "b")
+        folio.reference_table("big", path=self._hive_dir(tmp_path))
+        with pytest.raises(ValueError, match="polars-only"):
+            folio.data.big.content
+        # but .lazy / .polars still work
+        assert isinstance(folio.data.big.lazy, pl.LazyFrame)
+        assert isinstance(folio.data.big.polars, pl.DataFrame)
+
+    def test_explicit_polars_only_single_file(self, tmp_path):
+        df = pd.DataFrame({"a": [1, 2, 3]})
+        p = tmp_path / "single.parquet"
+        df.to_parquet(p, index=False)
+        folio = DataFolio(tmp_path / "b")
+        folio.reference_table("forced", path=p, polars_only=True)
+        assert folio.get_table_info("forced")["polars_only"] is True
+        with pytest.raises(ValueError, match="polars-only"):
+            folio.get_table("forced")
+        assert folio.get_lazy("forced").collect().shape == (3, 1)
+
+    def test_single_file_reference_not_polars_only(self, tmp_path):
+        df = pd.DataFrame({"a": [1, 2, 3]})
+        p = tmp_path / "single.parquet"
+        df.to_parquet(p, index=False)
+        folio = DataFolio(tmp_path / "b")
+        folio.reference_table("ok", path=p)
+        assert "polars_only" not in folio.get_table_info("ok")
+        assert len(folio.get_table("ok")) == 3  # pandas works

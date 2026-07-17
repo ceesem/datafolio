@@ -32,6 +32,7 @@ class TableReference(TypedDict, total=False):
     dtypes: Optional[dict[str, str]]
     size_bytes: Optional[int]  # Size of the external file, if known
     allow_full_load: Optional[bool]  # Bypass the eager-load size guard
+    polars_only: Optional[bool]  # Readable only lazily / via polars (no pandas)
     version: Optional[int]  # For Delta tables
     description: Optional[str]
     # Lineage fields
@@ -53,6 +54,7 @@ class IncludedTable(TypedDict, total=False):
     is_directory: bool  # False for included tables (usually)
     checksum: str  # MD5 checksum
     size_bytes: Optional[int]  # Size of the bundled file, if known
+    polars_only: Optional[bool]  # Readable only lazily / via polars (no pandas)
     num_rows: int
     num_cols: int
     columns: list[str]

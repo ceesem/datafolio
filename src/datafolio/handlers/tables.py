@@ -241,6 +241,7 @@ class ReferenceTableHandler(BaseHandler):
         table_format: str = "parquet",
         infer_schema: bool = True,
         allow_full_load: bool = False,
+        polars_only: Optional[bool] = None,
         **kwargs,
     ) -> Dict[str, Any]:
         """Add reference to external table.
@@ -258,6 +259,11 @@ class ReferenceTableHandler(BaseHandler):
                 table. Best-effort: silently skipped on any failure.
             allow_full_load: If True, this reference bypasses the folio's
                 ``max_eager_bytes`` guard on eager ``get_table`` reads.
+            polars_only: If True, the reference can only be read lazily/via
+                polars (``get_lazy`` / ``frame='polars'``); eager pandas reads
+                raise a clear error. If None (default), this is inferred: a
+                sharded/partitioned directory dataset is polars-only, since
+                pandas mishandles such layouts.
             **kwargs: Additional arguments
 
         Returns:
@@ -300,14 +306,23 @@ class ReferenceTableHandler(BaseHandler):
         if allow_full_load:
             metadata["allow_full_load"] = True
 
+        # Sharded/partitioned directory datasets are polars-only by default:
+        # pandas mishandles hive-partitioned/typed layouts (cryptic errors), so
+        # eager pandas reads are refused in favor of get_lazy / frame='polars'.
+        is_polars_only = is_directory if polars_only is None else polars_only
+        if is_polars_only:
+            metadata["polars_only"] = True
+
         # Best-effort size (drives the eager-load guard). Unknown -> unset.
         size_bytes = folio._storage.file_size(resolved_path)
         if size_bytes is not None:
             metadata["size_bytes"] = size_bytes
 
-        # Cheap schema inference via the parquet footer, so references carry the
-        # same columns/dtypes/num_rows an included table would.
-        if infer_schema and not is_directory and table_format == "parquet":
+        # Cheap schema inference via a polars scan (footer-only for a single
+        # file; reads shard metadata for a directory dataset), so references
+        # carry the same columns/dtypes/num_rows an included table would.
+        # Works for both single parquet files and sharded/hive directories.
+        if infer_schema and table_format == "parquet":
             self._infer_schema(folio, resolved_path, metadata)
 
         # Add optional fields
