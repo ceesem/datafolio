@@ -78,16 +78,24 @@ must not look like "bundle absent."
 
 ## 3. The mutation protocol
 
-Every write path flows through the same machinery in `folio.py`:
+Every write path flows through the transaction spine in `folio.py` —
+one place that defines what a mutation means:
 
 ```
 _mutation_guard()                 reentrant per-folio lock (local lock file)
-  └─ stale-writer check           on-disk revision > loaded revision → raise
-       └─ [build payload/metadata FIRST — nothing mutated yet]
-            └─ [mutate in-memory state: copy-on-write, install descriptor]
-                 └─ _save_items()  atomic publish; revision += 1
-                      └─ [best-effort delete newly unreferenced payloads]
+  └─ verify committed revision    fail closed: unreadable/stale → raise
+       └─ snapshot in-memory state (one deep copy of the small collections)
+            └─ [build payload FIRST, then mutate state, then _save_items()]
+                 │                 atomic single-file publish; revision += 1
+                 ├─ on ANY exception: restore the state snapshot — no partial
+                 │                 mutation can leak into a later commit
+                 └─ [best-effort delete newly unreferenced payloads]
 ```
+
+Nested guards join the outer transaction (its snapshot and its rollback),
+so composed operations — and `batch()`, which is simply one long
+transaction with the publish at the end — abort as a unit. No individual
+method implements rollback.
 
 Ordering rules the protocol enforces:
 
@@ -98,9 +106,9 @@ Ordering rules the protocol enforces:
 - **Manifest before deletion**: `delete()`, `restore_snapshot()`, and orphan
   cleanup publish the manifest first, then best-effort delete what it no
   longer references. The committed manifest never points at deleted bytes.
-- **Publish failure → reload**: if `_save_items()` fails after in-memory
-  changes, `_reload_committed()` resets memory to the on-disk manifests so a
-  later mutation cannot persist partial state.
+- **Failure → restore**: any exception inside the guard (payload error,
+  mid-loop exception, failed publish) restores the entry-time state
+  snapshot — in memory, with no disk read required.
 - **Versioned payload filenames** (`name--r<revision><ext>`): every persisted
   version gets its own file, so overwriting never touches bytes an existing
   manifest or snapshot references, and snapshot operations are manifest
@@ -112,10 +120,10 @@ in-memory dict changes) and commits through `_save_items()`, so metadata-only
 writes advance the same bundle revision other notebooks check.
 
 **`batch()`** holds the guard for the whole block and publishes once at exit.
-An exception inside the block aborts the batch as a unit: staged items,
-metadata, and copy-on-write state are discarded via `_reload_committed()`,
-deferred deletions are dropped, and only orphan payload files remain. Nested
-batches raise; snapshot creation/deletion inside a batch raises.
+An exception inside the block aborts the batch as a unit — the guard's state
+snapshot restores everything (staged items, metadata, copy-on-write moves,
+deferred deletions), leaving only orphan payload files. Nested batches raise;
+snapshot creation/deletion and restore/cleanup inside a batch raise.
 
 ## 4. Snapshots
 

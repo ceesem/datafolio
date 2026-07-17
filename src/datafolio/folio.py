@@ -731,28 +731,42 @@ For more information, see the [datafolio documentation](https://github.com/casey
 
     @contextlib.contextmanager
     def _mutation_guard(self):
-        """Serialize a complete local mutation and reject a stale writer early.
+        """The transaction spine: one place that defines what a mutation means.
 
-        Wrapping an add/overwrite in this guard enforces the required ordering:
+        Every mutation — item writes, deletes, metadata edits, snapshot
+        registry changes, archives, batches — runs inside this guard, which
+        enforces the full transactional contract:
 
-            acquire local folio lock
-            → check the manifest revision (reject a stale writer)
-            → [caller writes the new payload]
-            → [caller atomically publishes the manifest via _save_items()]
+            acquire the local folio lock
+            → verify the committed manifest revision ONCE (fail closed)
+            → snapshot the committed in-memory state
+            → [caller mutates state and publishes via _save_items()]
+            → on ANY exception: restore the committed in-memory state
             → release the lock
 
-        Readers never enter this guard. The guard is reentrant (a public method
-        may delegate to another guarded method, or to ``_save_items`` which
-        re-acquires the same lock) and always releases on exception or normal
-        exit. Cloud object stores have no local lock; the stale check still runs
-        (best-effort — object stores lack conditional writes).
+        The state snapshot is taken at entry and restored on any failure —
+        payload errors, mid-loop exceptions, failed publishes — so no
+        partially applied mutation can ever leak into a later commit, and no
+        per-method rollback handling is needed. (Under the single-writer
+        contract this is equivalent to mutating a private working copy and
+        installing it after publication; restore-on-failure keeps intra-
+        mutation reads, e.g. lineage checks during delete, trivially
+        consistent.)
+
+        Readers never enter this guard; auto-refresh is suppressed while it
+        is held. The guard is reentrant — nested guards join the outer
+        transaction (its snapshot and its restore-on-failure) rather than
+        starting their own. Cloud object stores have no local lock; the
+        revision verification still runs (best-effort — object stores lack
+        conditional writes).
         """
         # Every mutation flows through this guard, so read-only enforcement
         # lives here as well as in the public methods (defense in depth).
         self._check_read_only()
 
-        # Reentrant: an outer guard (or batch) already holds the lock and has
-        # done the stale check. Just nest.
+        # Reentrant: an outer guard (or batch) owns the lock, the stale
+        # check, and the state snapshot. Just nest — an exception propagates
+        # to the outer guard, whose restore covers the whole transaction.
         if self._mutation_depth > 0:
             self._mutation_depth += 1
             try:
@@ -780,11 +794,51 @@ For more information, see the [datafolio documentation](https://github.com/casey
         try:
             # Reject a stale writer BEFORE any payload is written or replaced.
             self._raise_if_manifest_stale(path)
-            yield
+            backup = self._state_backup()
+            try:
+                yield
+            except BaseException:
+                self._restore_state(backup)
+                raise
         finally:
             self._mutation_depth = 0
             if lock is not None:
                 lock.release()
+
+    def _state_backup(self) -> tuple:
+        """Deep-copy the committed in-memory state (one copy call, so any
+        aliasing between structures is preserved through a restore)."""
+        import copy
+
+        md = getattr(self, "_metadata_dict", None)
+        return copy.deepcopy(
+            (
+                self._items,
+                self._snapshot_versions,
+                self._snapshots,
+                dict(md) if md is not None else dict(self._metadata_raw),
+                self._pending_obsolete_payloads,
+                self._manifest_revision,
+            )
+        )
+
+    def _restore_state(self, backup: tuple) -> None:
+        """Restore the state captured by :meth:`_state_backup` (no disk I/O)."""
+        (
+            self._items,
+            self._snapshot_versions,
+            self._snapshots,
+            metadata,
+            self._pending_obsolete_payloads,
+            self._manifest_revision,
+        ) = backup
+        md = getattr(self, "_metadata_dict", None)
+        if md is not None:
+            dict.clear(md)
+            dict.update(md, metadata)
+        else:
+            self._metadata_raw = metadata
+        self._sync_data_accessor()
 
     @contextlib.contextmanager
     def _metadata_mutation(self):
@@ -799,15 +853,10 @@ For more information, see the [datafolio documentation](https://github.com/casey
         the staged metadata along with everything else.
         """
         with self._mutation_guard():
-            try:
-                yield
-                self._save_items()
-            except BaseException:
-                # Discard partial in-memory metadata (e.g. update() fed an
-                # iterator that raised halfway) as well as a failed publish.
-                if not self._batch_mode:
-                    self._reload_committed()
-                raise
+            # The guard's transaction spine restores committed state on any
+            # failure (partial in-memory updates, failed publishes alike).
+            yield
+            self._save_items()
 
     def _save_items(self) -> None:
         """Publish the ONE authoritative manifest (versioned, atomic, stale-checked).
@@ -1236,14 +1285,7 @@ For more information, see the [datafolio documentation](https://github.com/casey
             if self._is_in_snapshots(name):
                 self._handle_copy_on_write(name)
             self._items[name] = metadata
-            try:
-                self._save_items()
-            except BaseException:
-                # Publication failed: abandon the in-memory changes so a later
-                # unrelated mutation can't persist partial state.
-                if not self._batch_mode:
-                    self._reload_committed()
-                raise
+            self._save_items()
             self._obsolete_payload_after_commit(prior)
 
     # ==================== Auto-Refresh Methods ====================
@@ -1386,21 +1428,15 @@ For more information, see the [datafolio documentation](https://github.com/casey
             try:
                 yield
             except BaseException:
-                # The batch aborts as a unit: discard every staged in-memory
-                # change and deferred deletion, restoring the committed state.
-                # Payload files already written stay behind as harmless
-                # unreferenced orphans; no committed payload was deleted.
+                # The guard's transaction spine restores the committed state
+                # (staged items, metadata, copy-on-write moves, and deferred
+                # deletions alike). Payload files already written stay behind
+                # as harmless unreferenced orphans; no committed payload was
+                # deleted (deletions were deferred, and are now discarded).
                 self._batch_mode = False
-                self._reload_committed()
                 raise
             self._batch_mode = False
-            try:
-                self._save_items()
-            except BaseException:
-                # Final publication failed: return to the state actually on
-                # disk rather than keeping unpublishable staged state.
-                self._reload_committed()
-                raise
+            self._save_items()
             # Flush payload deletions deferred during the batch (now that
             # the manifest pointing at the new payloads is published).
             pending, self._pending_obsolete_payloads = (
@@ -2436,12 +2472,7 @@ For more information, see the [datafolio documentation](https://github.com/casey
             if self._is_in_snapshots(name):
                 self._handle_copy_on_write(name)
             self._items[name] = metadata
-            try:
-                self._save_items()
-            except BaseException:
-                if not self._batch_mode:
-                    self._reload_committed()
-                raise
+            self._save_items()
 
         return self
 
@@ -2623,12 +2654,7 @@ For more information, see the [datafolio documentation](https://github.com/casey
                         f"discarded. Retry inspect_table()."
                     )
                 current.update(enrichment)
-                try:
-                    self._save_items()
-                except BaseException:
-                    if not self._batch_mode:
-                        self._reload_committed()
-                    raise
+                self._save_items()
 
         return self._items[name]
 
@@ -2721,12 +2747,7 @@ For more information, see the [datafolio documentation](https://github.com/casey
 
             # Save updated manifest; a failed publish must not leave the
             # edit (or its copy-on-write) to leak via a later mutation.
-            try:
-                self._save_items()
-            except BaseException:
-                if not self._batch_mode:
-                    self._reload_committed()
-                raise
+            self._save_items()
 
         return self
 
@@ -2771,20 +2792,14 @@ For more information, see the [datafolio documentation](https://github.com/casey
 
         with self._mutation_guard():
             newly_unreferenced: list = []
-            try:
-                for item_name in names_to_delete:
-                    self._delete_one(item_name, warn_dependents, newly_unreferenced)
+            for item_name in names_to_delete:
+                self._delete_one(item_name, warn_dependents, newly_unreferenced)
 
-                # Publish the manifest, then hand the payloads it no longer
-                # references to the deferred-deletion machinery. Inside a
-                # batch both the publish and the deletions defer to the
-                # batch's single commit — an aborted batch must never have
-                # deleted committed bytes.
-                self._save_items()
-            except BaseException:
-                if not self._batch_mode:
-                    self._reload_committed()
-                raise
+            # Publish the manifest, then hand the payloads it no longer
+            # references to the deferred-deletion machinery. Inside a batch
+            # both the publish and the deletions defer to the batch's single
+            # commit; any exception is rolled back by the guard's spine.
+            self._save_items()
             for item in newly_unreferenced:
                 self._obsolete_payload_after_commit(item)
 
@@ -2884,12 +2899,7 @@ For more information, see the [datafolio documentation](https://github.com/casey
         with self._mutation_guard():
             for n in names_to_archive:
                 self._items[n]["archived"] = True
-            try:
-                self._save_items()
-            except BaseException:
-                if not self._batch_mode:
-                    self._reload_committed()
-                raise
+            self._save_items()
         return self
 
     def unarchive(self, name: Union[str, list[str]]) -> Self:
@@ -2941,12 +2951,7 @@ For more information, see the [datafolio documentation](https://github.com/casey
         with self._mutation_guard():
             for n in names_to_unarchive:
                 self._items[n].pop("archived", None)
-            try:
-                self._save_items()
-            except BaseException:
-                if not self._batch_mode:
-                    self._reload_committed()
-                raise
+            self._save_items()
         return self
 
     # ==================== Lineage Methods ====================

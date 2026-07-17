@@ -533,8 +533,8 @@ git add .
 git commit -m "Implement baseline model"
 datafolio snapshot create v1.0 -d "Baseline"
 
-# Commit snapshot metadata
-git add snapshots.json items.json
+# Commit the catalog if it belongs in this repository
+git add items.json
 git commit -m "Snapshot v1.0"
 ```
 
@@ -582,47 +582,46 @@ folio.delete_snapshot('v1.0', cleanup_orphans=True)
 
 ### Snapshot Internals
 
-Snapshots are stored in `snapshots.json`:
+Snapshots live alongside metadata and item descriptors in the single
+authoritative `items.json` catalog. A snapshot maps each logical item name to
+the stable `version_id` of the descriptor it pins:
 
 ```json
 {
+  "schema_version": 2,
+  "revision": 7,
+  "metadata": {"project": "classifier"},
+  "items": [
+    {
+      "name": "model",
+      "filename": "model--r3.joblib",
+      "version_id": "model--r3",
+      "is_current": false
+    },
+    {
+      "name": "model",
+      "filename": "model--r6.joblib",
+      "version_id": "model--r6",
+      "is_current": true
+    }
+  ],
   "snapshots": {
     "v1.0": {
       "timestamp": "2025-01-20T15:00:00Z",
       "description": "Baseline model",
       "tags": ["baseline"],
       "item_versions": {
-        "model": 1,
-        "data": 1
+        "model": "model--r3"
       },
-      "metadata_snapshot": {...},
-      "git": {...},
-      "environment": {...}
+      "metadata_snapshot": {"project": "classifier"}
     }
   }
 }
 ```
 
-Item versions are tracked in `items.json`:
-
-```json
-{
-  "items": [
-    {
-      "name": "model",
-      "filename": "model.joblib",
-      "version": 1,
-      "in_snapshots": ["v1.0", "v1.1"]
-    },
-    {
-      "name": "model",
-      "filename": "model_v2.joblib",
-      "version": 2,
-      "in_snapshots": ["v2.0"]
-    }
-  ]
-}
-```
+Snapshot membership is derived from these pins; current manifests do not
+duplicate it as an `in_snapshots` field. Included payload filenames are
+versioned so a later overwrite never changes the bytes a snapshot owns.
 
 ### Programmatic Snapshot Analysis
 

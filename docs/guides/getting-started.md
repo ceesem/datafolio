@@ -1,16 +1,26 @@
 # Getting Started with DataFolio
 
-DataFolio is a lightweight, filesystem-based experiment tracking library that helps you organize data science experiments by storing datasets, models, and files in a simple, transparent directory structure.
+DataFolio is an annotated working directory for related data. It saves common
+Python objects in ordinary formats, records how to load them in one readable
+catalog, and lets you reopen the whole collection with one path.
 
-## Why DataFolio?
+Its purpose is deliberately narrow: remove repetitive save/load wiring and
+leave behind a directory that future you—or someone without DataFolio—can
+understand.
 
-Traditional experiment tracking solutions can be heavyweight, require servers, or lock you into specific platforms. DataFolio takes a different approach:
+## The mental model
 
-- **Filesystem-based** - Everything is just files on disk
-- **Transparent** - Standard formats (Parquet, JSON, pickle) you can inspect
-- **Portable** - Works locally, in notebooks, on clusters, or in the cloud
-- **Git-friendly** - Version control your entire experiment
-- **Simple** - Intuitive Python API with minimal boilerplate
+A folio consists of:
+
+1. **A directory** containing ordinary Parquet, JSON, NumPy, model, and
+   artifact files.
+2. **An `items.json` catalog** recording names, descriptions, formats,
+   relationships, references, and snapshots.
+3. **A dispatcher** that connects `add()` and `get()` to the appropriate
+   writer and reader.
+
+DataFolio organizes the boundary around your data. It does not replace pandas,
+Polars, PyArrow, object-store tools, or workflow systems.
 
 ## Installation
 
@@ -22,15 +32,17 @@ This installs both the Python library and the `datafolio` CLI tool.
 
 ## Quick Start
 
-### Your First Bundle
+### Your first folio
 
-A "bundle" is DataFolio's way of organizing an experiment. Think of it as a project folder:
+A folio is just a directory with a catalog. It can represent an experiment,
+an analysis, a prepared dataset, or any other small collection of related
+objects.
 
 ```python
 from datafolio import DataFolio
 import pandas as pd
 
-# Create a new bundle
+# Create a new folio (or open it if it already exists)
 folio = DataFolio('experiments/my_first_experiment')
 
 # Add some data
@@ -40,7 +52,11 @@ df = pd.DataFrame({
     'target': [0, 1, 0]
 })
 
-folio.add('training_data', df)
+folio.add(
+    'training_data',
+    df,
+    description='Three-row example table used by the introductory notebook',
+)
 
 # View what's in the bundle
 folio.describe()
@@ -52,48 +68,77 @@ DataFolio: experiments/my_first_experiment
 ==========================================
 
 Tables (1):
-  • training_data
+  • training_data: Three-row example table used by the introductory notebook
     ↳ shape: [3, 3]
 ```
 
 ### What Just Happened?
 
-DataFolio created a directory structure:
+DataFolio created an ordinary directory and recorded the table in its catalog:
 
 ```
 experiments/my_first_experiment/
-├── items.json            # The manifest: metadata, item catalog, snapshots
+├── items.json            # Metadata, item catalog, snapshots, revision
+├── CONTENTS.md           # Human-readable inventory
 └── tables/
-    └── training_data.parquet  # Your DataFrame
+    └── training_data--r2.parquet
 ```
 
-Everything is saved automatically. No need to call `save()` or `commit()`.
+The dataframe was dispatched to Parquet and its name, description, format, and
+loading information were written to `items.json`. There is no separate
+`save()` or `commit()` call.
 
 ## Core Concepts
 
-### Bundles
+### The folio path
 
-A bundle is a self-contained experiment with:
-
-- **Data items** (tables, arrays, JSON, models, files)
-- **Metadata** (custom key-value pairs about the experiment)
-- **Lineage** (relationships between data items)
+The path is the handle for the entire collection. You can pass it between
+notebooks or use the same analysis code with another similarly organized
+folio:
 
 ```python
-# Create or open a bundle
-folio = DataFolio('path/to/bundle')
+folio = DataFolio(FOLIO_PATH)
 
-# Add custom metadata
-folio.metadata['experiment_name'] = 'baseline_v1'
-folio.metadata['date'] = '2025-01-20'
-folio.metadata['tags'] = ['classification', 'baseline']
-
-# Metadata is automatically saved
+features = folio.get('features')
+labels = folio.get('labels')
+config = folio.get('config')
 ```
 
-### Data Items
+### Descriptions
 
-DataFolio supports multiple data types, each optimized for its use case:
+Descriptions are first-class catalog information. Add them while the meaning
+of an object is still obvious:
+
+```python
+folio.add(
+    'labels_reviewed',
+    labels,
+    description='Manual labels after the March review; ambiguous rows removed',
+)
+```
+
+Descriptions appear in `describe()` and `CONTENTS.md`. They are often the most
+useful part of the folio when returning to a project months later.
+
+### Included objects and references
+
+An included object is saved inside the folio and moves with the directory. An
+external reference stores an absolute link but does not copy or own the data:
+
+```python
+folio.reference_table(
+    'raw',
+    path='gs://bucket/releases/2026-07/raw.parquet',
+    description='Published source table; not owned by this folio',
+)
+```
+
+Snapshots preserve included data. For references, they preserve the recorded
+link rather than the bytes at the external location.
+
+### Supported objects
+
+DataFolio uses a small set of sensible storage conventions:
 
 | Type | Examples | Storage Format |
 |------|----------|---------------|
@@ -102,11 +147,11 @@ DataFolio supports multiple data types, each optimized for its use case:
 | **JSON** | Configs, metrics, lists | `.json` |
 | **Models** | sklearn | `.joblib`, `.skops` |
 | **Files** | Images, PDFs, any file | Original format |
-| **References** | External data (S3, etc.) | Metadata only |
+| **References** | External tables (local, GCS, S3, etc.) | Catalog entry only |
 
-### The Universal `add()` Method
+### Save and load dispatch
 
-For simplicity, use `add()` which automatically detects the type:
+`add()` detects common object types and selects the matching writer:
 
 ```python
 # Automatically handles different types
@@ -125,6 +170,9 @@ folio.add_model('clf', model, description='Random forest')      # any picklable 
 folio.add_file('path/to/plot.png', name='plot', description='Training curve')
 folio.reference_table('raw', path='s3://bucket/raw.parquet')    # external data, no copy
 ```
+
+`get()` consults the catalog and uses the corresponding reader. For tables,
+`scan_table()` hands off to Polars when lazy execution is the better tool.
 
 ## Working with Data
 
@@ -451,9 +499,9 @@ import pandas as pd
 df = pd.read_parquet(path)  # Reads directly from S3
 ```
 
-## Bundle Metadata
+## Folio Metadata
 
-Store experiment-level information in the bundle metadata:
+Store collection-level context alongside the item catalog:
 
 ```python
 # Add custom metadata
@@ -475,9 +523,9 @@ folio.describe()  # Shows metadata section
 
 The `describe()` method automatically formats and displays your custom metadata.
 
-## Describing Your Bundle
+## Describing Your Folio
 
-Get a comprehensive overview of your bundle:
+Get a comprehensive overview of the directory and its contents:
 
 ```python
 # Print to console (default)
@@ -525,11 +573,11 @@ Metadata (5):
 
 ## Multi-Instance Access
 
-Multiple notebooks can share a bundle under a **many readers, one active
+Multiple notebooks can share a folio under a **many readers, one active
 writer** model:
 
 ```python
-# Notebook 1: Create bundle
+# Notebook 1: Create a folio
 folio1 = DataFolio('experiments/shared')
 folio1.add('results', df1)
 
@@ -547,16 +595,16 @@ data = folio2.get('analysis')  # Works immediately ✅
 
 All read operations automatically refresh from disk, so readers always see
 the latest committed state. Writing is single-writer: if another notebook has
-advanced the bundle since yours last loaded it, your write raises
+advanced the folio since yours last loaded it, your write raises
 `ConcurrentWriteError` instead of clobbering their work — call `refresh()`
 and retry. Local writers are serialized with a lock file; cloud folios have
 no cross-machine lock and should be treated as single-writer.
 
 ## Taking a Cloud Folio Offline
 
-A folio is nothing but ordinary files plus a self-contained, relative-path
-manifest — so downloading one is a job for the tool that owns downloading,
-not for datafolio:
+A folio is ordinary files plus a self-contained, relative-path catalog—so
+downloading one is a job for the tool that owns downloading, not for
+DataFolio:
 
 ```bash
 gsutil -m rsync -r gs://bucket/experiments/my-exp ~/analysis/my-exp
@@ -569,8 +617,8 @@ folio = DataFolio('~/analysis/my-exp')   # a complete, normal local folio
 ```
 
 You get parallel, resumable, incremental transfer, and the copy is complete:
-all items, all snapshot versions, `snapshots.json` — everything. Re-running
-the sync later picks up only what changed. (One caution for two-way sync
+`items.json`, all included payloads, and every snapshot version. Re-running the
+sync later picks up only what changed. (One caution for two-way sync
 tools: exclude `items.json.lock` — it is the local write lock, and deleting
 it out from under a live writer breaks write serialization.)
 
@@ -674,27 +722,24 @@ predictions = model.predict(new_transactions)
 
 ## Directory Structure
 
-DataFolio creates an intuitive directory structure:
+DataFolio creates a small, inspectable directory structure:
 
 ```
 experiments/my_experiment/
-├── metadata.json              # Bundle metadata
-├── items.json                # Manifest of all items
-├── snapshots.json            # Snapshot registry (if using snapshots)
+├── items.json                 # Metadata, item catalog, snapshots, revision
+├── CONTENTS.md                # Human-readable inventory
 │
 ├── tables/
-│   └── features.parquet      # DataFrames
+│   └── features--r4.parquet   # DataFrames
 │
 ├── models/
-│   └── classifier.joblib     # Scikit-learn models
-│
-├── numpy/
-│   └── embeddings.npy       # Numpy arrays
+│   └── classifier--r6.joblib  # Scikit-learn models
 │
 └── artifacts/
-    ├── config.json          # JSON data
-    ├── plot.png            # Images
-    └── report.pdf          # Any file type
+    ├── embeddings--r3.npy    # Numpy arrays
+    ├── config--r5.json       # JSON data
+    ├── plot--r7.png          # Images
+    └── report--r8.pdf        # Any file type
 ```
 
 All files use standard formats:
@@ -781,15 +826,16 @@ config = folio.get('config')
 model = folio.get('classifier')
 ```
 
-### 8. Commit to Git
+### 8. Move and share with ordinary tools
 
-```python
-# Your bundle is git-friendly
-cd experiments/my_experiment
-git add .
-git commit -m "Baseline model - 89% accuracy"
-git push
+```bash
+# Use the storage tool that already fits your workflow
+gsutil -m rsync -r analysis/my_experiment gs://team-analysis/my_experiment
 ```
+
+The recipient does not need DataFolio to inspect `CONTENTS.md`, read
+`items.json`, or open the ordinary payload files. External references remain
+absolute and continue to point at their original locations.
 
 ### 9. Use Snapshots for Versions
 
@@ -917,13 +963,18 @@ print(f"Best: n_estimators={best[0]}, max_depth={best[1]}, acc={best[2]}")
 
 ## Common Questions
 
-**Q: How is this different from MLflow/Weights & Biases?**
+**Q: What is DataFolio actually for?**
 
-A: DataFolio is filesystem-based and self-contained. No servers, no databases, no accounts. Everything is just files you can inspect, version with git, and move around.
+A: It removes repetitive, format-specific save/load code while keeping a small
+collection of related objects and their descriptions together. It is a
+directory, a readable catalog, and a dispatcher—not a general experiment
+tracking platform.
 
-**Q: Can I use this in production?**
+**Q: Can someone use a folio without installing DataFolio?**
 
-A: Yes! DataFolio bundles are self-contained and can be deployed anywhere. Load a bundle, get your model, and run inference.
+A: Yes. Included data uses ordinary formats, `CONTENTS.md` provides a readable
+inventory, and `items.json` records the loading information. External
+references may still require access to their original locations.
 
 **Q: Does it work with cloud storage?**
 
@@ -933,13 +984,11 @@ A: Yes! DataFolio supports any storage backend via `cloud-files` (S3, GCS, Azure
 folio = DataFolio('s3://my-bucket/experiments/exp1')
 ```
 
-**Q: How do I share bundles with colleagues?**
+**Q: How do I share a folio with colleagues?**
 
-A: Just share the directory! Everything is self-contained. You can:
-- Commit to git
-- Copy to shared storage
-- Zip and email
-- Mount network drives
+A: Copy or sync the directory to shared storage. Included payloads and snapshot
+versions move with it; absolute external references do not move and may not be
+accessible to the recipient.
 
 **Q: What about versioning?**
 
@@ -947,7 +996,8 @@ A: Use [Snapshots](snapshots.md)! They checkpoint your owned data without duplic
 
 **Q: Can I use this with Jupyter notebooks?**
 
-A: Absolutely! DataFolio works great in notebooks. Multiple notebooks can even access the same bundle simultaneously.
+A: Absolutely. Notebooks are a primary use case. Multiple readers may open the
+same folio; writes follow the documented one-active-writer model.
 
 ## Need Help?
 

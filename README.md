@@ -1,30 +1,43 @@
 # DataFolio
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-859%20passing-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-912%20passing-brightgreen.svg)](tests/)
 
-**A lightweight, filesystem-based data versioning and experiment tracking library for Python.**
+**A small, human-readable home for the data associated with an analysis.**
 
-DataFolio helps you organize, version, and track your data science experiments by storing datasets, models, and files in a simple, transparent directory structure. Everything is saved as plain files (Parquet, JSON, etc) that you can inspect, version with git, or backup to any storage system.
+DataFolio saves common Python objects in ordinary formats, records what they
+are in one readable catalog, and lets you reopen the whole collection with one
+path. It is useful when you are tired of wiring a different writer, loader,
+filename, and cloud path for every object—and when you want future you to know
+which of several similar files is which.
 
-The design philosophy is to be **as lightweight as possible and offload to better tools as quickly as possible**: datafolio organizes and links your data, then hands you a plain file path, DataFrame, or `pl.LazyFrame` — querying, transforming, and scaling are polars/pandas/pyarrow's job, not datafolio's.
+A folio is intentionally just three things:
 
-Note: DataFolio has been an exercise in how extensively I can use Claude Code. Currently all work has been done via Mr Claude, but now that it's getting very useful for workflows I might transition over to more manual curation.
+1. **A directory** you can inspect, copy, upload, or share.
+2. **One `items.json` catalog** containing descriptions and loading information.
+3. **A dispatcher** connecting `add()` and `get()` to sensible ordinary formats.
 
-## Features
+DataFolio organizes and links your data, then gets out of the way. Querying,
+transforming, and scaling remain pandas, Polars, and PyArrow's job. Moving a
+directory remains your filesystem or object-store tool's job.
 
-- **Universal Data Management**: A unified `add()`/`get()` pair automatically handles DataFrames, numpy arrays, dicts, lists, scalars, and datetimes
-- **Model Support**: Save and load scikit-learn models with full metadata tracking
-- **Data Lineage**: Track inputs and dependencies between datasets and models
-- **External References**: Point to data stored externally (S3, local paths) without copying
-- **Multi-Instance Sync**: Automatic refresh when multiple notebooks/processes access the same bundle
-- **Autocomplete Access**: IDE-friendly `folio.data.item_name.content` syntax with full autocomplete support
-- **Smart Metadata Display**: Automatic metadata truncation and formatting in `describe()`
-- **Item Management**: Delete items with dependency tracking and warnings
-- **Git-Friendly**: All data stored as standard file formats in a simple directory structure
-- **Type-Safe**: Full type hints and comprehensive error handling
-- **Snapshots**: Checkpoint owned data with copy-on-write versioning (references preserve the link, not the bytes)
-- **CLI Tools**: Command-line interface for snapshot management and bundle operations
+## What it does
+
+- Saves DataFrames, arrays, JSON values, models, and files through a small,
+  consistent API
+- Loads each object by name with the appropriate reader
+- Keeps descriptions, relationships, and external references beside the data
+- Gives notebooks one folio path instead of a collection of unrelated paths
+- Produces a human-readable inventory for people who do not use DataFolio
+- Records snapshots of folio-owned state when useful
+- Works with local directories and supported object storage
+
+## Intentional limits
+
+DataFolio is not a database, dataframe engine, workflow orchestrator,
+distributed catalog, garbage collector, or multi-writer collaboration system.
+It is designed for one person—or a small team sharing mostly read-only work—
+managing a few to dozens of understandable objects.
 
 ## Quick Start
 
@@ -36,10 +49,13 @@ import numpy as np
 # Create a new folio
 folio = DataFolio('experiments/my_experiment')
 
-# Add any type of data with a single method
-folio.add('results', df)                          # DataFrame
-folio.add('embeddings', np.array([1, 2, 3]))      # Numpy array
-folio.add('config', {'lr': 0.01})                 # Dict/JSON
+# Add ordinary objects and record what they mean
+folio.add('results', df,
+    description='Reviewed results used in the final analysis')
+folio.add('embeddings', np.array([1, 2, 3]),
+    description='Three-dimensional demonstration embedding')
+folio.add('config', {'lr': 0.01},
+    description='Parameters used to produce results')
 folio.add('accuracy', 0.95)                       # Scalar
 
 # Retrieve data (automatically returns correct type)
@@ -52,7 +68,7 @@ df = folio.data.results.content          # Same as get()
 arr = folio.data.embeddings.content
 config = folio.data.config.content
 
-# View everything (including custom metadata)
+# View names, descriptions, formats, and relationships
 folio.describe()
 
 # Clean up temporary items
@@ -65,7 +81,8 @@ folio.delete('temp_data')
 pip install datafolio
 ```
 
-This includes the `datafolio` command-line tool for snapshot management and bundle operations.
+This includes the `datafolio` command-line tool for inspecting folios and
+managing snapshots.
 
 ## Core Concepts
 
@@ -94,14 +111,14 @@ Replacing an existing item always requires `overwrite=True` — snapshotted vers
 
 ### Multi-Instance Access
 
-DataFolio automatically keeps multiple instances synchronized when accessing the same bundle:
+DataFolio automatically refreshes readers that access the same folio:
 
 ```python
-# Notebook 1: Create and update bundle
+# Notebook 1: Create and update a folio
 folio1 = DataFolio('experiments/shared')
 folio1.add('results', df)
 
-# Notebook 2: Open same bundle
+# Notebook 2: Open the same folio
 folio2 = DataFolio('experiments/shared')
 
 # Notebook 1: Add more data
@@ -203,10 +220,11 @@ are not supported — convert to Parquet first.
 > may change; snapshots preserve the link, not the content. See
 > `folio.mutable_references()` and `folio.inspect_table()`.
 
-## Snapshots: Version Control for Experiments
+## Snapshots: Remembered Folio States
 
-Snapshots let you version your experiments — track different versions, compare
-results, and return to previous states without duplicating data.
+Snapshots record which owned files and catalog information constituted the
+folio at a useful moment. They let you compare or reopen earlier states while
+sharing unchanged payloads.
 
 > **What a snapshot preserves:** folio-owned data (included tables, models,
 > files, ...) and the *recorded state* of external references. It does **not**
@@ -350,7 +368,7 @@ trained_model = folio.data.classifier.content
 4. **Use custom metadata**: Store experiment context in `folio.metadata` for better tracking
 5. **Leverage autocomplete**: Use `folio.data.item_name.content` for cleaner, more discoverable code
 6. **Clean up regularly**: Use `delete()` to remove temporary or obsolete items
-7. **Version control**: Commit your folio directories to git (data is stored efficiently)
+7. **Use ordinary transfer tools**: Copy or sync folios with the filesystem or object-store tool that already fits your workflow
 8. **Use references**: For large external datasets, use `reference_table()` to avoid copying
 9. **Check describe()**: Regularly review your folio with `folio.describe()` to see data and metadata
 10. **Share across notebooks**: many readers, one active writer — readers auto-refresh; a second writer fails safely with `ConcurrentWriteError` and should `refresh()` and retry
@@ -419,4 +437,4 @@ See [CLAUDE.md](CLAUDE.md) for development guidelines.
 
 ---
 
-Made with ❤️ for data scientists who need simple, lightweight experiment tracking.
+Built for people who want less save/load wiring and more understandable data directories.

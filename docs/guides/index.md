@@ -1,8 +1,11 @@
-# Advanced Guides
+# Guides
 
-Welcome to the DataFolio advanced guides! These tutorials cover specialized topics and advanced features.
+These guides cover the parts of DataFolio that need more explanation than the
+central idea: save and load ordinary objects while maintaining one readable
+catalog for the directory.
 
-**New to DataFolio?** Start with the [Getting Started](getting-started.md) tutorial first, then come back here for advanced topics.
+**New to DataFolio?** Start with [Getting Started](getting-started.md), then
+choose only the focused guide your work needs.
 
 ## Available Guides
 
@@ -26,7 +29,7 @@ Complete guide to working with machine learning models in DataFolio:
 ---
 
 ### [Snapshots](snapshots.md)
-**Version control for your experiments**
+**Record and reopen useful folio states**
 
 Deep dive into DataFolio's snapshot system:
 - Why use snapshots (with real-world scenarios)
@@ -51,7 +54,8 @@ Deep dive into DataFolio's snapshot system:
 2. Then read [Snapshots](snapshots.md) to learn about versioning
 
 **For Specific Use Cases:**
-- **Experiment tracking** → [Getting Started](getting-started.md) + [CLI Reference](../reference/cli.md)
+- **Reducing notebook save/load wiring** → [Getting Started](getting-started.md)
+- **Inspecting a folio without DataFolio** → [Using a folio without DataFolio](format.md)
 - **Reproducible research** → [Snapshots](snapshots.md)
 - **Curating results for publication** → `archive()` / `copy(follow_lineage=True)` in the [API Reference](../reference/datafolio-api.md#archiving-items)
 - **Team collaboration** → [Getting Started](getting-started.md) (Multi-Instance Access section)

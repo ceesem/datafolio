@@ -27,7 +27,8 @@
   `get_model` (any picklable object; skops models need `trusted=True`),
   `add_file` (files never enter via string sniffing), and
   `reference_table`/`inspect_table`/`scan_table`.
-- **The on-disk format is unchanged** — 1.x folios open in 2.0 directly.
+- Existing 1.x folios open in 2.0 without a manual conversion step and migrate
+  to the unified manifest on their first write.
 
 ### Correctness
 

@@ -397,8 +397,8 @@ class SnapshotMixin:
         # snapshot pins the exact descriptor and reopening resolves it again.
         # Legacy items lacking a version_id get one assigned now (from their
         # checksum where available) and it is persisted with this snapshot.
-        # NOTE: this backfill mutates legacy descriptors in memory; on a failed
-        # publication below, _reload_committed() discards it.
+        # NOTE: this backfill mutates legacy descriptors in memory; on a
+        # failed publication the mutation guard's spine discards it.
         item_versions: Dict[str, str] = {}
         for item_name, item_meta in self._items.items():
             version_id = item_meta.get("version_id")
@@ -451,11 +451,7 @@ class SnapshotMixin:
         # write (membership is derived from the registry — no markers).
         with self._mutation_guard():
             self._snapshots[name] = snapshot_meta
-            try:
-                self._save_items()
-            except BaseException:
-                self._reload_committed()
-                raise
+            self._save_items()
 
         return self
 
@@ -547,11 +543,7 @@ class SnapshotMixin:
         # manifest write.
         with self._mutation_guard():
             del self._snapshots[name]
-            try:
-                self._save_items()
-            except BaseException:
-                self._reload_committed()
-                raise
+            self._save_items()
 
         # Optionally cleanup orphaned versions
         if cleanup_orphans:
@@ -800,11 +792,7 @@ class SnapshotMixin:
             removed = list(orphaned_versions)
             for item in removed:
                 self._snapshot_versions.remove(item)
-            try:
-                self._save_items()
-            except BaseException:
-                self._reload_committed()
-                raise
+            self._save_items()
             for item in removed:
                 self._delete_payload_if_unshared(item)
 
@@ -923,11 +911,7 @@ class SnapshotMixin:
 
             # Publish the manifest; only then best-effort delete the payloads
             # it no longer references.
-            try:
-                self._save_items()
-            except BaseException:
-                self._reload_committed()
-                raise
+            self._save_items()
             for item in newly_unreferenced:
                 self._delete_payload_if_unshared(item)
 
