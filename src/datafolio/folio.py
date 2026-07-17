@@ -3376,7 +3376,7 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         name: str,
         frame: str = "pandas",
         allow_full_load: bool = False,
-        **kwargs,
+        **kwargs: Any,
     ) -> Any:  # Returns pandas.DataFrame or polars.DataFrame
         """Get a table by name (works for both included and referenced).
 
@@ -3937,7 +3937,7 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         description: Optional[str] = None,
         overwrite: bool = False,
         custom: bool = False,
-        **kwargs,
+        **kwargs: Any,
     ) -> Self:
         """Add a scikit-learn style model to the bundle.
 
@@ -4010,7 +4010,7 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         handler = registry.get("model")
         return self._get_with_cache(name, lambda: handler.get(self, name))
 
-    def get_model(self, name: str, **kwargs) -> Any:
+    def get_model(self, name: str, **kwargs: Any) -> Any:
         """Get a scikit-learn style model by name.
 
         This is a convenience method that delegates to get_sklearn().
@@ -4774,7 +4774,7 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         data: Any = None,
         reference: Optional[Union[str, Path]] = None,
         description: Optional[str] = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> Self:
         """Generic data addition with automatic type detection.
 

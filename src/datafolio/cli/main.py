@@ -14,8 +14,10 @@ from rich.table import Table
 
 from datafolio import DataFolio
 
-# Global console for Rich output
-console = Console()
+# Global console for Rich output. Disable automatic syntax highlighting so
+# status messages render as plain text — otherwise Rich splits tokens like a
+# snapshot name "v1.0" with ANSI codes around the highlighted number.
+console = Console(highlight=False)
 
 
 def find_folio_dir(ctx_folio: Optional[str] = None) -> Path:
