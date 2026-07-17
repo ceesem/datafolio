@@ -139,7 +139,7 @@ class SnapshotMetadata(TypedDict, total=False):
     tags: list[str]  # Tags for organization
 
     # Item versions at snapshot time
-    item_versions: dict[str, int]  # Map of item_name → version_number
+    item_versions: dict[str, str]  # Map of item_name → version_id token
 
     # Metadata state at snapshot time
     metadata_snapshot: dict[str, Any]  # Full copy of metadata dict

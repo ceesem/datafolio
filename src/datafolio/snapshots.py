@@ -60,8 +60,10 @@ class SnapshotView:
 
     @property
     def metadata(self) -> Dict[str, Any]:
-        """Get metadata as it existed at snapshot time."""
-        return self._snapshot_meta.get("metadata_snapshot", {})
+        """Get metadata as it existed at snapshot time (defensive copy)."""
+        import copy
+
+        return copy.deepcopy(self._snapshot_meta.get("metadata_snapshot", {}))
 
     @property
     def timestamp(self) -> str:
@@ -75,13 +77,13 @@ class SnapshotView:
 
     @property
     def tags(self) -> list[str]:
-        """Get snapshot tags."""
-        return self._snapshot_meta.get("tags", [])
+        """Get snapshot tags (defensive copy)."""
+        return list(self._snapshot_meta.get("tags", []))
 
     @property
-    def item_versions(self) -> Dict[str, int]:
-        """Get item versions in this snapshot."""
-        return self._snapshot_meta.get("item_versions", {})
+    def item_versions(self) -> Dict[str, str]:
+        """Get pinned item version tokens in this snapshot (defensive copy)."""
+        return dict(self._snapshot_meta.get("item_versions", {}))
 
     def get(self, name: str, frame: str = "pandas") -> Any:
         """Get a table from this snapshot (alias of :meth:`get_table`).
@@ -1080,13 +1082,21 @@ class SnapshotMixin:
             ...     include_snapshot_metadata=False
             ... )
         """
-        from pathlib import Path
+        from datafolio.utils import is_cloud_path
 
-        target_path = Path(target_path)
-
-        # Check target doesn't exist
-        if target_path.exists():
-            raise ValueError(f"Target path already exists: {target_path}")
+        # Cloud URIs must stay strings: Path() would mangle 'gs://bucket/x'
+        # into a local-looking 'gs:/bucket/x'. Filesystem Path checks apply
+        # to local targets only.
+        target_str = str(target_path)
+        if is_cloud_path(target_str):
+            target: Union[str, Path] = target_str.rstrip("/")
+            if self._storage.exists(target):
+                raise ValueError(f"Target path already exists: {target}")
+        else:
+            target = Path(target_str)
+            if target.exists():
+                raise ValueError(f"Target path already exists: {target}")
+        target_path = target
 
         # Verify snapshot exists
         if snapshot not in self._snapshots:
@@ -1108,9 +1118,16 @@ class SnapshotMixin:
         # Add snapshot metadata to new bundle
         if include_snapshot_metadata:
             snapshot_info = self.get_snapshot_info(snapshot)
+            # Cloud source URIs are preserved verbatim; only local sources
+            # are resolved to absolute filesystem paths.
+            source_bundle = (
+                self._bundle_dir
+                if is_cloud_path(self._bundle_dir)
+                else str(Path(self._bundle_dir).resolve())
+            )
             snapshot_metadata["_source_snapshot"] = {
                 "name": snapshot,
-                "source_bundle": str(Path(self._bundle_dir).resolve()),
+                "source_bundle": source_bundle,
                 "timestamp": snapshot_info["timestamp"],
                 "description": snapshot_info.get("description"),
                 "tags": snapshot_info.get("tags"),
@@ -1209,10 +1226,13 @@ class SnapshotMixin:
         if snapshot not in self._snapshots:
             raise KeyError(f"Snapshot '{snapshot}' not found")
 
-        # Return a copy of the snapshot metadata, surfacing any mutable external
-        # references it contains (their bytes are not owned/frozen — see
-        # mutable_references()).
-        info = dict(self._snapshots[snapshot])
+        # Return a DEEP copy of the snapshot metadata (mutating the result
+        # must never corrupt the live registry), surfacing any mutable
+        # external references it contains (their bytes are not owned/frozen
+        # — see mutable_references()).
+        import copy
+
+        info = copy.deepcopy(dict(self._snapshots[snapshot]))
         versions = info.get("item_versions", {}) or {}
         type_map = {
             it.get("name"): it.get("item_type")
