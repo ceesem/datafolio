@@ -210,3 +210,90 @@ class TestRelativeReferences:
         folio = DataFolio(tmp_path / "proj")
         folio.reference_table("ref", path="s3://bucket/data.parquet")
         assert folio.get_table_info("ref")["path"] == "s3://bucket/data.parquet"
+
+
+# =============================================================================
+# Finding 3: characterize lazy scan semantics and enforce a truthful contract.
+# scan_table()/get_lazy() are genuinely lazy or raise; they never silently
+# perform an unguarded full download.
+# =============================================================================
+
+
+class TestLazyScanContract:
+    def test_local_parquet_is_lazy(self, tmp_path):
+        folio = DataFolio(tmp_path / "b")
+        folio.add_table("t", pd.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6]}))
+        lf = folio.scan_table("t")
+        assert isinstance(lf, pl.LazyFrame)
+        # pushdown: only matching rows/cols materialize
+        assert lf.filter(pl.col("a") > 1).select("b").collect()["b"].to_list() == [5, 6]
+
+    def test_partitioned_parquet_is_lazy(self, tmp_path):
+        d = tmp_path / "hive"
+        pl.DataFrame({"g": ["a", "a", "b"], "x": [1, 2, 3]}).write_parquet(
+            d, partition_by="g"
+        )
+        folio = DataFolio(tmp_path / "b")
+        folio.reference_table("big", path=d)
+        lf = folio.scan_table("big")
+        assert isinstance(lf, pl.LazyFrame)
+        assert lf.select(pl.len()).collect().item() == 3
+
+    def test_get_lazy_is_alias_for_scan_table(self, tmp_path):
+        folio = DataFolio(tmp_path / "b")
+        folio.add_table("t", pd.DataFrame({"a": [1, 2, 3]}))
+        assert isinstance(folio.get_lazy("t"), pl.LazyFrame)
+
+    def test_native_scheme_classification(self):
+        from datafolio.readers import _natively_scannable
+
+        for p in [
+            "/local/x.parquet",
+            "file:///x.parquet",
+            "s3://b/x.parquet",
+            "gs://b/x.parquet",
+            "az://b/x.parquet",
+            "https://h/x.parquet",
+            "http://h/x.parquet",
+        ]:
+            assert _natively_scannable(p), p
+
+    def test_non_scannable_scheme_raises_not_downloads(self, tmp_path, monkeypatch):
+        import datafolio.readers as readers
+
+        df = pd.DataFrame({"a": [1, 2, 3]})
+        p = tmp_path / "t.parquet"
+        df.to_parquet(p, index=False)
+        monkeypatch.setattr(readers, "_natively_scannable", lambda path: False)
+        with pytest.raises(ValueError, match="genuine lazy"):
+            readers.scan_parquet(str(p))
+
+    def test_credential_forwarding(self, tmp_path, monkeypatch):
+        """storage_options must be forwarded to the native polars scanner."""
+        import datafolio.readers as readers
+
+        captured = {}
+
+        def fake_scan(path, storage_options=None, **kwargs):
+            captured["storage_options"] = storage_options
+            return "LF"
+
+        monkeypatch.setattr(readers._require_polars(), "scan_parquet", fake_scan)
+        readers.scan_parquet(
+            "s3://bucket/x.parquet", storage_options={"aws_region": "us-east-1"}
+        )
+        assert captured["storage_options"] == {"aws_region": "us-east-1"}
+
+    def test_unsupported_lazy_format_raises(self, tmp_path):
+        from datafolio.readers import scan_table
+
+        with pytest.raises(NotImplementedError, match="Lazy scan"):
+            scan_table("s3://b/data", "delta")
+
+    def test_eager_polars_download_path_still_works(self, tmp_path):
+        """get_table(frame='polars') is the explicit eager op."""
+        folio = DataFolio(tmp_path / "b")
+        folio.add_table("t", pd.DataFrame({"a": [1, 2, 3]}))
+        out = folio.get_table("t", frame="polars")
+        assert isinstance(out, pl.DataFrame)
+        assert out["a"].to_list() == [1, 2, 3]

@@ -58,22 +58,19 @@ class TestScanReaders:
         lf = scan_parquet(f"file://{p}")
         assert lf.collect()["a"].to_list() == [1, 2, 3]
 
-    def test_scan_parquet_byte_fallback(self, tmp_path, monkeypatch):
-        """Force the non-native branch and confirm equivalent data."""
+    def test_scan_parquet_non_scannable_raises(self, tmp_path, monkeypatch):
+        """A non-scannable scheme must RAISE, not silently download (truthful)."""
         import datafolio.readers as readers
 
-        df = pd.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6]})
+        df = pd.DataFrame({"a": [1, 2, 3]})
         p = tmp_path / "t.parquet"
         df.to_parquet(p, index=False)
 
-        # Pretend nothing is natively scannable -> exercise byte fallback.
+        # Pretend nothing is natively scannable -> lazy API must refuse.
         monkeypatch.setattr(readers, "_natively_scannable", lambda path: False)
 
-        lf = readers.scan_parquet(str(p))
-        assert isinstance(lf, pl.LazyFrame)
-        out = lf.collect()
-        assert out["a"].to_list() == [1, 2, 3]
-        assert out["b"].to_list() == [4, 5, 6]
+        with pytest.raises(ValueError, match="genuine lazy"):
+            readers.scan_parquet(str(p))
 
     def test_scan_csv_local(self, tmp_path):
         from datafolio.readers import scan_csv
@@ -107,7 +104,10 @@ class TestScanReaders:
         assert _natively_scannable("file:///local/path.parquet")
         assert _natively_scannable("s3://bucket/x.parquet")
         assert _natively_scannable("gs://bucket/x.parquet")
-        assert not _natively_scannable("https://host/x.parquet")
+        # http(s) is genuinely scannable by polars (range requests), not a
+        # download-and-wrap fake-lazy path.
+        assert _natively_scannable("https://host/x.parquet")
+        assert _natively_scannable("http://host/x.parquet")
 
     def test_polars_scan_path_normalization(self):
         from datafolio.readers import _polars_scan_path

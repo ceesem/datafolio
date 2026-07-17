@@ -218,9 +218,20 @@ def read_table(
 # Lazy / polars scanning
 # =============================================================================
 
-# Cloud schemes polars' object-store can scan natively (true lazy pushdown).
-# Anything else (http(s)://, cloudfiles-specific schemes) uses the byte fallback.
-_NATIVE_SCAN_PREFIXES = ("s3://", "gs://", "gcs://", "az://", "azure://")
+# Schemes polars can scan natively (a genuine lazy scan with predicate/
+# projection pushdown — no full download up front). Includes the object stores
+# and http(s) (polars range-requests the footer where the server supports it).
+# A scheme NOT listed here is refused by the lazy API rather than being silently
+# downloaded and wrapped as a fake LazyFrame.
+_NATIVE_SCAN_PREFIXES = (
+    "s3://",
+    "gs://",
+    "gcs://",
+    "az://",
+    "azure://",
+    "http://",
+    "https://",
+)
 
 
 def _polars_scan_path(path: str) -> str:
@@ -243,10 +254,11 @@ def _polars_scan_path(path: str) -> str:
 
 
 def _natively_scannable(path: str) -> bool:
-    """Whether polars can scan this path natively (lazily), without downloading.
+    """Whether polars can perform a genuine lazy scan of this path.
 
-    Local paths and the object-store cloud schemes are natively scannable;
-    ``http(s)://`` and any other scheme fall back to a full byte read.
+    Local paths and the schemes in ``_NATIVE_SCAN_PREFIXES`` (object stores and
+    http(s)) are genuinely scannable. Any other scheme is not, and the lazy API
+    refuses it rather than downloading the whole object.
 
     Args:
         path: Resolved datafolio path.
@@ -259,6 +271,17 @@ def _natively_scannable(path: str) -> bool:
     return path.startswith(_NATIVE_SCAN_PREFIXES)
 
 
+def _lazy_scheme_error(path: str, fmt: str) -> ValueError:
+    """Error raised when a lazy scan of ``path`` isn't genuinely possible."""
+    scheme = path.split("://", 1)[0] if "://" in path else "<local>"
+    return ValueError(
+        f"Cannot perform a genuine lazy {fmt} scan of '{path}' (scheme "
+        f"'{scheme}'). Lazy scanning avoids full downloads and is only "
+        f"supported for local paths and {', '.join(_NATIVE_SCAN_PREFIXES)}. "
+        f"Use get_table(...) for an eager read that downloads the object."
+    )
+
+
 def scan_parquet(
     path: str,
     cf: cloudfiles.CloudFiles = None,
@@ -266,30 +289,34 @@ def scan_parquet(
     storage_options: Optional[dict] = None,
     **kwargs: Any,
 ) -> "pl.LazyFrame":
-    """Lazily scan a Parquet file as a polars LazyFrame.
+    """Genuinely lazily scan a Parquet file as a polars LazyFrame.
 
     Uses polars' native ``scan_parquet`` (true lazy, predicate/projection
-    pushdown, footer-only reads) for local and object-store cloud paths. For
-    schemes polars can't scan natively (e.g. ``http(s)://``), falls back to a
-    cloudfiles byte read wrapped as a LazyFrame (whole file pulled, same API).
+    pushdown, footer-only reads) for local paths and the object-store/http(s)
+    schemes. This never downloads the whole object up front: for a scheme polars
+    cannot scan lazily it raises rather than silently downloading and wrapping
+    the eager result as a fake LazyFrame. (http laziness depends on the server
+    supporting range requests.)
 
     Args:
         path: Path to the Parquet file (local or cloud).
-        cf: Optional CloudFiles client for the byte-fallback path.
-        use_https: Whether to use HTTPS for the byte fallback.
+        cf: Unused; kept for signature compatibility with the eager readers.
+        use_https: Unused; kept for signature compatibility.
         storage_options: Optional credentials/config forwarded to native scan.
         **kwargs: Additional arguments forwarded to ``pl.scan_parquet``.
 
     Returns:
         polars LazyFrame.
+
+    Raises:
+        ValueError: If the path's scheme cannot be scanned lazily.
     """
     pl = _require_polars()
-    if _natively_scannable(path):
-        return pl.scan_parquet(
-            _polars_scan_path(path), storage_options=storage_options, **kwargs
-        )
-    fbin = _read_file(path, cf, use_https=use_https)
-    return pl.read_parquet(io.BytesIO(fbin)).lazy()
+    if not _natively_scannable(path):
+        raise _lazy_scheme_error(path, "parquet")
+    return pl.scan_parquet(
+        _polars_scan_path(path), storage_options=storage_options, **kwargs
+    )
 
 
 def scan_csv(
@@ -299,27 +326,30 @@ def scan_csv(
     storage_options: Optional[dict] = None,
     **kwargs: Any,
 ) -> "pl.LazyFrame":
-    """Lazily scan a CSV file as a polars LazyFrame.
+    """Genuinely lazily scan a CSV file as a polars LazyFrame.
 
-    Native ``pl.scan_csv`` for local/object-store paths, byte fallback otherwise.
+    Native ``pl.scan_csv`` for local paths and the object-store/http(s) schemes.
+    Raises for schemes polars cannot scan lazily rather than downloading.
 
     Args:
         path: Path to the CSV file (local or cloud).
-        cf: Optional CloudFiles client for the byte-fallback path.
-        use_https: Whether to use HTTPS for the byte fallback.
+        cf: Unused; kept for signature compatibility with the eager readers.
+        use_https: Unused; kept for signature compatibility.
         storage_options: Optional credentials/config forwarded to native scan.
         **kwargs: Additional arguments forwarded to ``pl.scan_csv``.
 
     Returns:
         polars LazyFrame.
+
+    Raises:
+        ValueError: If the path's scheme cannot be scanned lazily.
     """
     pl = _require_polars()
-    if _natively_scannable(path):
-        return pl.scan_csv(
-            _polars_scan_path(path), storage_options=storage_options, **kwargs
-        )
-    fbin = _read_file(path, cf, use_https=use_https)
-    return pl.read_csv(io.BytesIO(fbin)).lazy()
+    if not _natively_scannable(path):
+        raise _lazy_scheme_error(path, "csv")
+    return pl.scan_csv(
+        _polars_scan_path(path), storage_options=storage_options, **kwargs
+    )
 
 
 def scan_table(

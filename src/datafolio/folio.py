@@ -3390,13 +3390,19 @@ For more information, see the [datafolio documentation](https://github.com/ceese
                 f"(or set max_eager_bytes=None to disable this guard)."
             )
 
-    def get_lazy(self, name: str, **kwargs) -> Any:  # Returns polars.LazyFrame
-        """Get a table as a polars LazyFrame (works for included and referenced).
+    def scan_table(self, name: str, **kwargs) -> Any:  # Returns polars.LazyFrame
+        """Scan a table as a **genuinely lazy** polars LazyFrame.
 
-        Returns a lazy scan with predicate/projection pushdown — for referenced
-        tables this reads from the external path without copying or fully
-        downloading it. Not subject to the ``max_eager_bytes`` guard and does
-        not use the local file cache (the whole point is to avoid a full read).
+        Returns a lazy scan with predicate/projection pushdown that does not
+        download or materialize the whole table up front — for referenced
+        tables this reads from the external path without copying it. Not subject
+        to the ``max_eager_bytes`` guard and does not use the local file cache
+        (the whole point is to avoid a full read).
+
+        This is guaranteed lazy: if the table's location cannot be scanned
+        lazily (an unsupported scheme, or a non-scannable format), it raises a
+        clear error rather than silently downloading the object. For an eager
+        read that does download, use ``get_table(name, frame='polars')``.
 
         Args:
             name: Name of the table
@@ -3408,14 +3414,15 @@ For more information, see the [datafolio documentation](https://github.com/ceese
 
         Raises:
             KeyError: If table name doesn't exist
-            ValueError: If the named item is not a table
+            ValueError: If the named item is not a table, or its location/format
+                cannot be scanned lazily.
             ImportError: If polars is not installed
             NotImplementedError: If the table's format has no lazy scanner
 
         Examples:
             >>> import polars as pl
             >>> folio.reference_table('big', path='s3://bucket/huge.parquet')
-            >>> lf = folio.get_lazy('big')
+            >>> lf = folio.scan_table('big')
             >>> lf.filter(pl.col('x') > 0).select('y').collect()  # pushdown
         """
         # Auto-refresh if bundle was updated externally
@@ -3433,6 +3440,14 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         registry = get_registry()
         handler = registry.get(item_type)
         return handler.get_lazy(self, name, **kwargs)
+
+    def get_lazy(self, name: str, **kwargs) -> Any:  # Returns polars.LazyFrame
+        """Alias for :meth:`scan_table` (a genuinely lazy polars scan).
+
+        Kept for backward compatibility; prefer :meth:`scan_table`, whose name
+        makes the lazy contract explicit.
+        """
+        return self.scan_table(name, **kwargs)
 
     def get_data_path(self, name: str) -> str:
         """Get the path to any stored item, delegating to the appropriate type-specific method.
