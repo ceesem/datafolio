@@ -485,8 +485,9 @@ class TestInit:
             print(f"Error output: {result.output}")
         assert result.exit_code == 0
         assert "Initialized DataFolio bundle" in result.output
+        # v2: one authoritative manifest, no metadata.json sidecar
         assert (bundle_path / "items.json").exists()
-        assert (bundle_path / "metadata.json").exists()
+        assert not (bundle_path / "metadata.json").exists()
 
     def test_init_with_description(self, tmp_path):
         """Test initializing bundle with description."""

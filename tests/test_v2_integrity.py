@@ -46,7 +46,7 @@ class TestP1SnapshotRegistryGuarded:
             assert "stale-snap" not in on_disk.get("snapshots", {})
         items = json.loads((path / "items.json").read_text())
         for item in items["items"]:
-            assert "stale-snap" not in item.get("in_snapshots", [])
+            assert "in_snapshots" not in item  # markers no longer persisted
 
         # In-memory state is restored: retry after refresh succeeds cleanly
         assert "stale-snap" not in stale._snapshots
@@ -79,7 +79,7 @@ class TestP1SnapshotRegistryGuarded:
         folio.create_snapshot("v1")
         reopened = DataFolio(tmp_path / "b")
         assert "v1" in reopened._snapshots
-        assert reopened._items["x"]["in_snapshots"] == ["v1"]
+        assert reopened._snapshot_pins(reopened._items["x"]) == ["v1"]
 
     def test_delete_snapshot_in_batch_raises(self, tmp_path):
         folio = DataFolio(tmp_path / "b")
@@ -97,8 +97,8 @@ class TestP1SnapshotRegistryGuarded:
         folio.add("t", pd.DataFrame({"v": [1]}))
         folio.create_snapshot("s")
         folio.add("t", pd.DataFrame({"v": [2]}), overwrite=True)
-        # Corrupt a marker: pretend the current version claims membership
-        folio._items["t"]["in_snapshots"] = ["s"]
+        # Membership is derived from the registry, so the view must serve
+        # the pinned version even though the CURRENT version's tokens differ
         assert folio.snapshots["s"].get("t")["v"].tolist() == [1]
 
 
@@ -445,13 +445,14 @@ class TestP7CopyHygiene:
         folio.create_snapshot("src-snap")
         copied = folio.copy(tmp_path / "dst")
 
-        assert copied._items["x"]["in_snapshots"] == []
+        assert copied._snapshot_pins(copied._items["x"]) == []
         assert copied._items["x"]["is_current"] is True
         assert copied._snapshots == {}
         assert copied._items["x"]["description"] == "a thing"
-        # And a clean reopen agrees
+        # And a clean reopen agrees (no membership, no legacy markers)
         reopened = DataFolio(tmp_path / "dst")
-        assert reopened._items["x"]["in_snapshots"] == []
+        assert reopened._snapshot_pins(reopened._items["x"]) == []
+        assert "in_snapshots" not in reopened._items["x"]
         # Deleting in the copy must not think a snapshot pins it
         reopened.delete("x")
         assert reopened._snapshot_versions == []

@@ -13,10 +13,13 @@ design. For the on-disk format itself (usable without datafolio), see
    no bespoke formats. Big-table work belongs to polars/pyarrow, reached via
    `scan_table()` (a plain `pl.LazyFrame`) or `item_path()` (a plain path).
    Downloading belongs to file-sync tools. Code history belongs to git.
-2. **Ordinary files, readable manifests.** A folio must remain usable without
-   datafolio: standard formats (Parquet, JSON, `.npy`, joblib/skops), a
-   self-contained `items.json` catalog with relative payload paths, and a
-   generated README explaining how to read it all by hand.
+2. **Ordinary files, one readable manifest.** A folio must remain usable
+   without datafolio: standard formats (Parquet, JSON, `.npy`, joblib/skops)
+   plus a single self-contained `items.json` —
+   ``{schema_version, revision, metadata, items, snapshots}`` — with relative
+   payload paths and a generated README explaining how to read it by hand.
+   (Legacy v0/v1 folios with `metadata.json`/`snapshots.json` sidecars load
+   transparently and migrate on the next write.)
 3. **Descriptions are primary data.** Descriptions, lineage, and item metadata
    live in the manifest and are never discarded implicitly.
 4. **References are links, not copies.** External references are absolute,
@@ -125,12 +128,12 @@ preserve or guarantee the contents of referenced data.**
   descriptor to the snapshot-versions list (payload retained); the working
   set moves on. Metadata-only edits (`update_item`) copy the descriptor and
   share the payload file; all deletion paths check `_payload_is_shared` first.
-- **Cross-file write ordering:** `items.json` and `snapshots.json` are
-  separate files, so registry operations order their writes to fail safe.
-  Creating a snapshot commits the pinned descriptors in `items.json` *before*
-  exposing the snapshot in `snapshots.json`; deleting retracts
-  `snapshots.json` *before* unmarking items. A failure can leave harmless
-  membership markers, never a visible snapshot with missing descriptors.
+- **One-file commits:** since manifest v2, the registry lives inside the one
+  manifest, so a snapshot create/delete is a single atomic publish — there is
+  no cross-file ordering and no partially visible registry state. Snapshot
+  membership is DERIVED from the registry's pinned `version_id`s (the old
+  denormalized `in_snapshots` markers are gone; legacy ones are stripped on
+  load).
 - **Fail closed:** `load_snapshot()`, `SnapshotView`, and
   `restore_snapshot()` resolve every pinned `version_id` (legacy snapshots
   recorded checksums; both tokens resolve) before changing any state, and

@@ -59,13 +59,13 @@ class TestCopyOnWrite:
 
         # Current item should be the new data
         assert folio._items["data"]["is_current"] is True
-        assert folio._items["data"]["in_snapshots"] == []
+        assert folio._snapshot_pins(folio._items["data"]) == []
 
         # Snapshot version should be the old data, non-current, in its own file.
         snapshot_item = folio._snapshot_versions[0]
         assert snapshot_item["name"] == "data"
         assert snapshot_item["is_current"] is False
-        assert snapshot_item["in_snapshots"] == ["v1.0"]
+        assert folio._snapshot_pins(snapshot_item) == ["v1.0"]
         # No rename: the preserved version keeps its own distinct payload file.
         assert snapshot_item["filename"] != folio._items["data"]["filename"]
         assert snapshot_item.get("version_id")
@@ -128,7 +128,7 @@ class TestCopyOnWrite:
 
         snapshot_items = [item for item in items if not item.get("is_current")]
         assert len(snapshot_items) == 1
-        assert "v1.0" in snapshot_items[0]["in_snapshots"]
+        assert "v1.0" in folio._snapshot_pins(snapshot_items[0])
         assert snapshot_items[0]["filename"] != current_items[0]["filename"]
 
     def test_reload_after_copy_on_write(self, tmp_path):
@@ -150,7 +150,7 @@ class TestCopyOnWrite:
         loaded_df = folio2.get("data")
         pd.testing.assert_frame_equal(loaded_df, df2)
 
-        assert folio2._snapshot_versions[0]["in_snapshots"] == ["v1.0"]
+        assert folio2._snapshot_pins(folio2._snapshot_versions[0]) == ["v1.0"]
         assert folio2._snapshot_versions[0]["filename"] == preserved_filename
 
     def test_multiple_overwrites(self, tmp_path):
@@ -182,7 +182,7 @@ class TestCopyOnWrite:
         assert all(version_ids)
         assert len(set(version_ids)) == 2
         # v1.0 and v2.0 are each represented among the preserved versions.
-        snaps = [set(item["in_snapshots"]) for item in folio._snapshot_versions]
+        snaps = [set(folio._snapshot_pins(item)) for item in folio._snapshot_versions]
         assert {"v1.0"} in snaps
         assert {"v2.0"} in snaps
 

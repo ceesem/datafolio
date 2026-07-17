@@ -2,6 +2,19 @@
 
 ## 2.0.0
 
+### Unified manifest (format v2)
+
+- `items.json` is now the SINGLE authoritative manifest:
+  `{schema_version: 2, revision, metadata, items, snapshots}`. The
+  `metadata.json`/`snapshots.json` sidecars are gone (their content is
+  embedded), so every commit — items, metadata, snapshots — is one atomic
+  file replace with one revision. v0/v1 folios load transparently and
+  migrate on the first write (sidecars are removed then); 1.x writers
+  refuse v2 folios cleanly via the schema_version gate.
+- Snapshot membership is derived from the snapshot registry's pinned
+  version ids; the denormalized `in_snapshots` markers are no longer
+  persisted (legacy markers are ignored and stripped).
+
 ### Unified item API (breaking)
 
 - **One write, one read**: `add(name, obj)` and `get(name)` replace the

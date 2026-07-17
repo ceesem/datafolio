@@ -1,73 +1,236 @@
 # DataFolio
 
-**A lightweight, filesystem-based data versioning and experiment tracking library for Python.**
+**A small, human-readable home for the data associated with an analysis.**
 
-DataFolio helps you organize, version, and track your data science experiments by storing datasets, models, and files in a simple, transparent directory structure. Everything is saved as plain files (Parquet, JSON, pickle) that you can inspect, version with git, or backup to any storage system.
+Give DataFolio a dataframe, array, model, JSON value, file, or external table
+reference. It saves the object in an ordinary format, records what it is, and
+adds it to a readable catalog. Later, open the directory with one path and load
+the object by name.
 
-## Why DataFolio?
+DataFolio is intentionally not a database or data platform. It removes the
+repetitive save/load wiring around small collections of related data—and helps
+you remember what every file was for.
 
-Ever trained a model with great results, then lost it while experimenting? Or struggled to remember which dataset produced which model? Or needed to reproduce results from months ago?
+## The whole idea
 
-DataFolio solves these problems with a simple, filesystem-based approach—no servers, no databases, just files you can inspect and version control.
+A folio is three small things:
 
-## Quick Example: The Story of a Good Model
+1. **A directory** you can inspect, copy, upload, or share.
+2. **One readable catalog** describing the directory and its contents.
+3. **A save/load dispatcher** that chooses a sensible format and the matching
+   loader for each object.
 
 ```python
 from datafolio import DataFolio
-from sklearn.ensemble import RandomForestClassifier
 
-# You've been working on a classification problem
-folio = DataFolio('experiments/fraud_detection')
+folio = DataFolio("analysis/experiment-12")
 
-# Process your data
-folio.add('training_data', processed_df,
-    description='Cleaned transaction data with engineered features')
-
-# Train a model - it gets 89% accuracy! 🎉
-model = RandomForestClassifier(n_estimators=100, max_depth=10)
-model.fit(X_train, y_train)
-
-# Save it with metadata
-folio.add_model('classifier', model,
-    description='Random forest classifier',
-    inputs=['training_data'])
-folio.metadata['accuracy'] = 0.89
-folio.metadata['status'] = 'promising'
-
-# View everything
-folio.describe()
-
-# Create a snapshot before experimenting - it's free insurance!
-folio.create_snapshot('v1-baseline',
-    description='89% accuracy baseline model',
-    tags=['baseline', 'validated'])
-
-# Now experiment freely - try a neural network
-new_model = train_experimental_model()
-folio.add_model('classifier', new_model, overwrite=True)
-folio.metadata['accuracy'] = 0.85  # Worse! 😞
-
-# No problem - load the good version back
-baseline = DataFolio.load_snapshot('experiments/fraud_detection', 'v1-baseline')
-good_model = baseline.get_model('classifier')  # Your 89% model is safe!
-
-# Deploy the good one to production
-deploy_to_production(good_model)
+folio.add(
+    "features",
+    features,
+    description="One row per neuron; normalized morphology features",
+)
+folio.add(
+    "labels",
+    labels,
+    description="Manual labels after the March review",
+)
+folio.reference_table(
+    "raw_measurements",
+    "gs://lab-data/run-12/measurements.parquet",
+    description="Source measurements for this analysis",
+)
 ```
 
-This is the core DataFolio workflow: track your data, models, and results; snapshot before experimenting; never lose good work.
+Six months later—or from another project notebook—the directory explains
+itself:
 
-## Key Features
+```python
+folio = DataFolio("analysis/experiment-12")
 
-- **Universal Data Management** - A unified `add()`/`get()` pair handles DataFrames, numpy arrays, dicts, lists, scalars, and datetimes
-- **Model Support** - Save and load scikit-learn models with full metadata
-- **Snapshots** - Checkpoint owned data with copy-on-write versioning (no data duplication; external references preserve the link, not the bytes)
-- **Data Lineage** - Track inputs and dependencies between datasets and models
-- **Autocomplete Access** - IDE-friendly `folio.data.item_name.content` syntax with full autocomplete
-- **Multi-Instance Sync** - Many readers, one active writer: readers auto-refresh; concurrent writers fail safely
-- **Cloud Storage** - Works with local paths, S3, GCS, Azure, and more
-- **Git-Friendly** - All data stored as standard file formats in a simple directory structure
-- **CLI Tools** - Command-line interface for snapshot management and bundle operations
+folio.describe()
+features = folio.get("features")
+labels = folio.get("labels")
+```
+
+You do not need to remember which loader, cloud client, or nearly identical
+filename produced each object. The folio remembers that information next to
+the data.
+
+## Descriptions are part of the point
+
+Often the most valuable metadata is simply a sentence explaining which of
+several similar files this one is.
+
+```python
+folio.add(
+    "features_reviewed",
+    reviewed_features,
+    description=(
+        "Feature table after the March review; excludes failed segmentations "
+        "and retains the original cell IDs"
+    ),
+)
+```
+
+Descriptions appear in `folio.describe()` and the generated `CONTENTS.md`.
+They are stored in the catalog, so future you—or a collaborator without
+DataFolio—can understand the directory without reconstructing the notebook
+that created it.
+
+## Ordinary files, not a proprietary container
+
+A folio remains an understandable directory:
+
+```text
+experiment-12/
+├── items.json                 # Metadata, item catalog, snapshots, revision
+├── CONTENTS.md                # Human-readable inventory
+├── tables/
+│   ├── features--r4.parquet
+│   └── labels--r5.parquet
+├── models/
+└── artifacts/
+    ├── parameters--r2.json
+    └── diagnostic-plot--r6.png
+```
+
+Tables are Parquet, arrays are `.npy`, JSON remains JSON, and files keep their
+original formats. Someone who does not use DataFolio can read `CONTENTS.md`,
+inspect `items.json`, and open the payloads directly with standard tools.
+
+## Save once; reopen by name
+
+`add()` dispatches common Python objects to their ordinary storage formats:
+
+```python
+folio.add("table", dataframe)                 # pandas, Polars, or LazyFrame → Parquet
+folio.add("embeddings", numpy_array)          # → .npy
+folio.add("parameters", {"alpha": 0.1})      # → JSON
+folio.add("score", 0.94)                      # → JSON
+folio.add_model("classifier", model)          # → joblib or skops
+folio.add_file("plots/qc.png", name="qc")    # → original file format
+```
+
+`get()` consults the catalog and chooses the corresponding loader:
+
+```python
+table = folio.get("table")
+embeddings = folio.get("embeddings")
+parameters = folio.get("parameters")
+
+# Tables can also stay lazy when that is the better tool for the job.
+query = folio.scan_table("table")
+```
+
+DataFolio stops at that boundary. Querying and transforming data remain the
+job of pandas, Polars, PyArrow, and the rest of the Python data ecosystem.
+
+## One path can scope an analysis
+
+A notebook can depend on names rather than a collection of format-specific
+paths:
+
+```python
+folio = DataFolio(FOLIO_PATH)
+
+features = folio.get("features")
+labels = folio.get("labels")
+parameters = folio.get("parameters")
+```
+
+Point the same analysis at a similarly organized folio and often the only
+thing that changes is `FOLIO_PATH`. The same path can also be passed between
+notebooks instead of passing a growing collection of individual filenames.
+
+## Included data and external references
+
+DataFolio distinguishes between data the folio owns and data it only points
+to:
+
+- **Included objects** are saved inside the directory and move with it.
+- **External references** store an absolute, static link. The external data is
+  not copied and may require separate access permissions.
+
+```python
+folio.reference_table(
+    "raw",
+    "gs://lab-data/releases/2026-07/raw.parquet",
+    description="Published source table; not owned by this folio",
+)
+```
+
+This keeps small working outputs together without pretending that every large
+source dataset belongs in the same directory.
+
+## Snapshots remember folio state
+
+A snapshot records which owned files and catalog information constituted the
+folio at a useful moment:
+
+```python
+folio.create_snapshot(
+    "reviewed-analysis",
+    description="Tables and labels used for the final review",
+)
+
+reviewed = DataFolio.load_snapshot(
+    "analysis/experiment-12",
+    "reviewed-analysis",
+)
+```
+
+Snapshots preserve folio-owned files. For an external reference, they preserve
+the recorded link—not the bytes at that external location.
+
+## Local, cloud, and sharing
+
+The folio path can be local or on supported object storage such as GCS or S3:
+
+```python
+local = DataFolio("analysis/experiment-12")
+cloud = DataFolio("gs://team-analysis/experiment-12")
+```
+
+Use ordinary file-copy and sync tools to move a complete folio. Included files
+and snapshots move with the directory; absolute external references continue
+to point at their original locations.
+
+Multiple readers can open the same folio. Local writes are serialized and a
+stale notebook fails safely instead of silently overwriting a newer commit.
+Cloud folios should be treated as single-writer because object stores do not
+provide the same cross-machine lock.
+
+## Intentional limits
+
+DataFolio stays useful by declining to become a general data system. It is not:
+
+- a database or dataframe engine
+- a distributed data catalog
+- a workflow orchestrator
+- a garbage collector or repair service
+- a multi-writer collaboration system
+- a replacement for object-store versioning
+- a proprietary storage format
+
+It is designed for one person—or a small team sharing mostly read-only work—
+managing a few to dozens of understandable objects. Keeping that scope narrow
+is what makes a folio easy to inspect, move, and trust.
+
+## When it fits
+
+DataFolio is a good fit when you want to:
+
+- stop rewriting format- and destination-specific save/load code in notebooks
+- keep related feature tables, labels, models, metadata, and artifacts together
+- reopen an analysis later and understand which file is which
+- pass one path between notebooks or projects
+- share ordinary files with someone who does not use the library
+- keep large source data external while cataloging how it relates to local work
+
+If you need concurrent cloud writers, database queries, automated workflow
+execution, or management of thousands of objects, use the tool built for that
+job and let DataFolio remain small.
 
 ## Installation
 
@@ -75,150 +238,11 @@ This is the core DataFolio workflow: track your data, models, and results; snaps
 pip install datafolio
 ```
 
-## Learn More
+## Continue
 
-**New to DataFolio?** Start with the [Getting Started Guide](guides/getting-started.md) for a comprehensive tutorial.
-
-**Specific Topics:**
-- [Snapshots Guide](guides/snapshots.md) - Version control for experiments
-- [DataFolio API Reference](reference/datafolio-api.md) - All methods and properties
-- [CLI Reference](reference/cli.md) - Command-line tools
-- [Complete API](reference/api.md) - Full API documentation
-
-## Common Use Cases
-
-### Experiment Tracking
-
-```python
-# Track everything about your experiment
-folio = DataFolio('experiments/model_v2')
-folio.metadata['experiment'] = 'hyperparameter_tuning'
-folio.metadata['date'] = '2025-01-20'
-
-# Save data, models, and results
-folio.add('features', feature_df)
-folio.add_model('model', trained_model)
-folio.add('metrics', {'accuracy': 0.92, 'f1': 0.89})
-
-# Create snapshot at milestones
-folio.create_snapshot('v2.0-production', tags=['production'])
-```
-
-### Reproducible Research
-
-```python
-# Paper submission: snapshot your exact results
-folio.create_snapshot('neurips-2025-submission',
-    description='Results in paper Table 3',
-    tags=['paper', 'published'])
-
-# Six months later: reviewers ask for clarification
-paper_version = DataFolio.load_snapshot('research/exp', 'neurips-2025-submission')
-exact_model = paper_version.get_model('classifier')
-exact_data = paper_version.get('test_data')
-```
-
-### Team Collaboration
-
-```python
-# Use cloud storage for team access
-folio = DataFolio('s3://team-bucket/shared-experiment')
-
-# Everyone sees the same data
-df = folio.get('results')
-model = folio.get_model('classifier')
-
-# Compare different team members' approaches
-baseline = DataFolio.load_snapshot('s3://team-bucket/shared', 'alice-baseline')
-variant = DataFolio.load_snapshot('s3://team-bucket/shared', 'bob-neural-net')
-```
-
-## What Makes DataFolio Different?
-
-| | DataFolio | MLflow | Weights & Biases |
-|---|---|---|---|
-| **Setup** | Zero - just a directory | Requires server | Requires account |
-| **Storage** | Files on disk/cloud | Database + artifacts | Cloud service |
-| **Inspection** | Direct file access | Via API | Via web UI |
-| **Versioning** | Snapshots (copy-on-write) | Runs (separate copies) | Versions (cloud) |
-| **Sharing** | Copy directory/git | Share server access | Share workspace |
-| **Cost** | Free | Free (self-hosted) | Free tier + paid |
-
-DataFolio is perfect when you want:
-- Full control over your data
-- Simple filesystem-based storage
-- Git-friendly versioning
-- No external dependencies
-- Cloud storage without cloud services
-
-## Directory Structure
-
-DataFolio creates an intuitive, inspectable directory structure:
-
-```
-experiments/my_experiment/
-├── items.json                # Manifest of all items
-├── metadata.json             # Bundle metadata
-├── snapshots.json            # Snapshot registry
-│
-├── tables/
-│   └── features--r2.parquet  # DataFrames as Parquet (versioned filenames)
-│
-├── models/
-│   └── classifier--r3.joblib # Scikit-learn models
-│
-└── artifacts/
-    ├── embeddings--r1.npy    # Numpy arrays
-    ├── config--r4.json       # JSON data
-    ├── plot--r1.png          # Images
-    └── report--r1.pdf        # Any file type
-```
-
-All files use standard formats you can open with any tool!
-
-## Quick CLI Reference
-
-```bash
-# Initialize a new bundle
-datafolio init my_experiment
-
-# Describe bundle contents
-datafolio describe
-
-# Create a snapshot
-datafolio snapshot create v1.0 -d "Baseline model" --tags baseline,production
-
-# List snapshots
-datafolio snapshot list
-
-# Compare two snapshots
-datafolio snapshot compare v1.0 v2.0
-
-# Show current status vs last snapshot
-datafolio snapshot status
-```
-
-See the [CLI Reference](reference/cli.md) for complete documentation.
-
-## Best Practices
-
-1. **Use descriptive names** - `'training_features'` not `'data1'`
-2. **Track lineage** - Always specify `inputs` parameter
-3. **Add descriptions** - Help future you understand your work
-4. **Snapshot before major changes** - It's free insurance
-5. **Use tags** - Organize snapshots with `baseline`, `production`, `paper`
-6. **Leverage autocomplete** - Use `folio.data.item_name.content`
-7. **Clean up regularly** - Delete temporary items with `folio.delete()`
-8. **Version control** - Commit bundles to git for team collaboration
-
-## Get Started
-
-Ready to organize your experiments? Check out the [Getting Started Guide](guides/getting-started.md) for a step-by-step tutorial.
-
-## Development
-
-See [CLAUDE.md](https://github.com/caseysm/datafolio/blob/main/CLAUDE.md) for development guidelines.
-
-## License
-
-MIT License - see LICENSE file for details.
+- [Getting Started](guides/getting-started.md) — create and use your first folio
+- [Using a folio without DataFolio](guides/format.md) — understand the files directly
+- [Polars & References](guides/polars.md) — lazy tables and external data
+- [Snapshots](guides/snapshots.md) — record and reopen folio states
+- [API Reference](reference/datafolio-api.md) — complete method documentation
+- [Migrating to 2.0](guides/migrating-to-2.0.md) — update older code

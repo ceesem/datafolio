@@ -154,9 +154,8 @@ DataFolio creates a transparent directory structure:
 
 ```text
 experiments/my_experiment/
-├── metadata.json              # Folio metadata
-├── items.json                 # Unified manifest with versioning
-├── snapshots.json             # Snapshot registry (when using snapshots)
+├── items.json                 # The single manifest: metadata, item catalog,
+│                              # snapshots, and revision, in one JSON document
 ├── tables/
 │   └── results--r2.parquet   # DataFrame storage (versioned filenames)
 ├── models/

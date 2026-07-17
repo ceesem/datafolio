@@ -65,7 +65,7 @@ class TestBackwardCompatibility:
 
         # Verify snapshot fields were added
         assert folio._items["test_table"]["is_current"] is True
-        assert folio._items["test_table"]["in_snapshots"] == []
+        assert folio._snapshot_pins(folio._items["test_table"]) == []
 
         # Verify snapshots initialized as empty
         assert folio._snapshots == {}
@@ -112,9 +112,8 @@ class TestNewItemsFormat:
         assert len(items_data["items"]) == 1
         item = items_data["items"][0]
         assert "is_current" in item
-        assert "in_snapshots" in item
         assert item["is_current"] is True
-        assert item["in_snapshots"] == []
+        assert folio._snapshot_pins(item) == []
 
     def test_reload_new_format_bundle(self, tmp_path):
         """Test that bundles with new format reload correctly."""
@@ -128,7 +127,7 @@ class TestNewItemsFormat:
 
         # Verify snapshot fields loaded
         assert folio2._items["data"]["is_current"] is True
-        assert folio2._items["data"]["in_snapshots"] == []
+        assert folio2._snapshot_pins(folio2._items["data"]) == []
 
 
 class TestSnapshotsManifest:
@@ -258,8 +257,8 @@ class TestMultipleItems:
         assert folio._items["table2"]["is_current"] is True
 
         # Both should have empty in_snapshots
-        assert folio._items["table1"]["in_snapshots"] == []
-        assert folio._items["table2"]["in_snapshots"] == []
+        assert folio._snapshot_pins(folio._items["table1"]) == []
+        assert folio._snapshot_pins(folio._items["table2"]) == []
 
     def test_reload_multiple_items(self, tmp_path):
         """Test reloading bundle with multiple items."""

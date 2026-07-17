@@ -2,8 +2,14 @@
 
 DataFolio 2.0 consolidates the item API: one `add()` and one `get()` replace
 the per-type method families, plus a handful of explicit verbs where being
-explicit matters. **The on-disk format is unchanged** — folios written by 1.x
-open in 2.0 (and vice versa) with no migration step.
+explicit matters.
+
+**The on-disk format is upgraded to manifest v2**: `items.json` becomes the
+single authoritative file (metadata and snapshots embedded, one revision, one
+atomic commit). Folios written by 1.x open in 2.0 with no manual step and
+migrate on your first write (the old `metadata.json`/`snapshots.json`
+sidecars are then removed). A folio written by 2.0 cannot be *written* by
+1.x — old versions refuse it cleanly rather than corrupting it.
 
 ## Method mapping
 

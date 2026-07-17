@@ -11,60 +11,83 @@ from datafolio import DataFolio
 
 
 class TestGhostMarkers:
-    """in_snapshots markers naming snapshots absent from the registry (a
-    crash between the two snapshot-file writes) must not leak payloads or
-    block deletion forever."""
+    """Manifest v2 derives snapshot membership from the registry, so ghost
+    markers are structurally impossible in new writes. Legacy v1 manifests
+    may still carry in_snapshots markers — they must be inert on load."""
 
-    def _folio_with_ghost(self, tmp_path, monkeypatch):
+    def _legacy_v1_folio_with_ghost(self, tmp_path):
+        """Craft a v1-format folio whose item carries a marker for a
+        snapshot that does not exist in any registry."""
+        import json
+
         path = tmp_path / "b"
         folio = DataFolio(path)
         folio.add("x", pd.DataFrame({"v": [1]}))
-        monkeypatch.setattr(
-            type(folio),
-            "_save_snapshots",
-            lambda self: (_ for _ in ()).throw(OSError("crash")),
-        )
-        with pytest.raises(OSError):
-            folio.create_snapshot("ghost")
-        monkeypatch.undo()
-        return path, folio
+        items = json.loads((path / "items.json").read_text())
+        # Downgrade to v1 shape: separate files, marker present
+        legacy = {
+            "schema_version": 1,
+            "revision": items["revision"],
+            "items": items["items"],
+        }
+        legacy["items"][0]["in_snapshots"] = ["ghost"]
+        (path / "items.json").write_text(json.dumps(legacy))
+        (path / "metadata.json").write_text(json.dumps(items["metadata"]))
+        return path
 
-    def test_ghost_marker_does_not_trigger_cow_leak(self, tmp_path, monkeypatch):
-        path, folio = self._folio_with_ghost(tmp_path, monkeypatch)
-        folio = DataFolio(path)  # reopen: marker committed on disk
-        assert folio._items["x"].get("in_snapshots") == ["ghost"]
-
+    def test_legacy_ghost_marker_is_inert_on_overwrite(self, tmp_path):
+        path = self._legacy_v1_folio_with_ghost(tmp_path)
+        folio = DataFolio(path)
         folio.add("x", pd.DataFrame({"v": [2]}), overwrite=True)
         # No version preserved for a snapshot that doesn't exist
         assert folio._snapshot_versions == []
-        parquet_files = list((path / "tables").glob("*.parquet"))
-        assert len(parquet_files) == 1  # old payload actually reclaimed
+        assert len(list((path / "tables").glob("*.parquet"))) == 1
 
-    def test_ghost_marked_item_is_deletable(self, tmp_path, monkeypatch):
-        path, folio = self._folio_with_ghost(tmp_path, monkeypatch)
+    def test_legacy_ghost_marked_item_is_deletable(self, tmp_path):
+        path = self._legacy_v1_folio_with_ghost(tmp_path)
         folio = DataFolio(path)
         folio.delete("x")
         assert folio._snapshot_versions == []
         assert list((path / "tables").glob("*.parquet")) == []
 
-    def test_snapshot_retry_does_not_duplicate_marker(self, tmp_path, monkeypatch):
-        path, folio = self._folio_with_ghost(tmp_path, monkeypatch)
-        folio = DataFolio(path)
-        folio.create_snapshot("ghost")  # retry same name succeeds
-        assert folio._items["x"]["in_snapshots"] == ["ghost"]
+    def test_markers_never_written_in_v2(self, tmp_path):
+        import json
 
-    def test_delete_snapshot_removes_all_marker_occurrences(self, tmp_path):
         path = tmp_path / "b"
         folio = DataFolio(path)
         folio.add("x", 1)
         folio.create_snapshot("s")
-        # Simulate a legacy manifest with a duplicated marker
-        folio._items["x"]["in_snapshots"] = ["s", "s"]
-        folio._save_items()
-        folio.delete_snapshot("s")
-        assert folio._items["x"]["in_snapshots"] == []
+        on_disk = json.loads((path / "items.json").read_text())
+        assert all("in_snapshots" not in item for item in on_disk["items"])
+        # Membership is fully derived
+        assert folio._snapshot_pins(folio._items["x"]) == ["s"]
 
-    def test_cleanup_reclaims_ghost_pinned_versions(self, tmp_path):
+    def test_failed_snapshot_publish_leaves_nothing(self, tmp_path, monkeypatch):
+        """Single-file manifest: a failed snapshot publish leaves NO trace —
+        no registry entry, no markers, nothing partial to reconcile."""
+        import json
+
+        import datafolio.storage.backend as B
+
+        path = tmp_path / "b"
+        folio = DataFolio(path)
+        folio.add("x", 1)
+        monkeypatch.setattr(
+            B.StorageBackend,
+            "write_json",
+            lambda *a, **k: (_ for _ in ()).throw(OSError("crash")),
+        )
+        with pytest.raises(OSError):
+            folio.create_snapshot("doomed")
+        monkeypatch.undo()
+        assert "doomed" not in folio._snapshots
+        on_disk = json.loads((path / "items.json").read_text())
+        assert "doomed" not in on_disk.get("snapshots", {})
+        # Retrying the same name just works
+        folio.create_snapshot("doomed")
+        assert "doomed" in DataFolio(path)._snapshots
+
+    def test_cleanup_reclaims_registry_less_pinned_versions(self, tmp_path):
         path = tmp_path / "b"
         folio = DataFolio(path)
         folio.add("x", pd.DataFrame({"v": [1]}))
@@ -74,7 +97,7 @@ class TestGhostMarkers:
         del folio._snapshots["s"]
         folio._save_snapshots()
         deleted = folio.cleanup_orphaned_versions()
-        assert deleted  # the ghost-pinned version was reclaimed
+        assert deleted  # the orphaned version was reclaimed
         assert folio._snapshot_versions == []
 
 
@@ -339,3 +362,97 @@ class TestWaveCLowSeverity:
         assert "ok" not in folio.metadata
         folio.add("y", 1)
         assert "ok" not in DataFolio(path).metadata
+
+
+class TestManifestV2Migration:
+    """v0/v1 folios load transparently and migrate to the single-file v2
+    manifest on the first write; sidecars are removed after embedding."""
+
+    def _make_v1_folio(self, tmp_path):
+        """Craft a legacy v1 layout: items.json (v1) + metadata.json +
+        snapshots.json, with a snapshotted and an overwritten item."""
+        import json
+
+        path = tmp_path / "legacy"
+        folio = DataFolio(path)
+        folio.metadata["project"] = "legacy-proj"
+        folio.add("t", pd.DataFrame({"v": [1]}))
+        folio.create_snapshot("v1.0")
+        folio.add("t", pd.DataFrame({"v": [2]}), overwrite=True)
+
+        # Downgrade on disk to v1 shape
+        manifest = json.loads((path / "items.json").read_text())
+        for item in manifest["items"]:
+            # v1 carried denormalized markers
+            item["in_snapshots"] = ["v1.0"] if not item.get("is_current") else []
+        (path / "items.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "revision": manifest["revision"],
+                    "items": manifest["items"],
+                }
+            )
+        )
+        (path / "metadata.json").write_text(json.dumps(manifest["metadata"]))
+        (path / "snapshots.json").write_text(
+            json.dumps({"snapshots": manifest["snapshots"]})
+        )
+        return path
+
+    def test_v1_folio_loads_completely(self, tmp_path):
+        path = self._make_v1_folio(tmp_path)
+        folio = DataFolio(path)
+        assert folio.metadata["project"] == "legacy-proj"
+        assert folio.get("t")["v"].tolist() == [2]
+        assert folio.snapshots["v1.0"].get("t")["v"].tolist() == [1]
+        assert folio._snapshot_pins(folio._snapshot_versions[0]) == ["v1.0"]
+
+    def test_first_write_migrates_to_v2_and_drops_sidecars(self, tmp_path):
+        import json
+
+        path = self._make_v1_folio(tmp_path)
+        folio = DataFolio(path)
+        folio.add("new_item", 1)
+
+        manifest = json.loads((path / "items.json").read_text())
+        assert manifest["schema_version"] == 2
+        assert manifest["metadata"]["project"] == "legacy-proj"
+        assert "v1.0" in manifest["snapshots"]
+        assert all("in_snapshots" not in i for i in manifest["items"])
+        assert not (path / "metadata.json").exists()
+        assert not (path / "snapshots.json").exists()
+
+        # Everything still works after migration + reopen
+        reopened = DataFolio(path)
+        assert reopened.metadata["project"] == "legacy-proj"
+        assert reopened.snapshots["v1.0"].get("t")["v"].tolist() == [1]
+        assert reopened.get("new_item") == 1
+
+    def test_v0_bare_list_manifest_loads(self, tmp_path):
+        import json
+
+        path = tmp_path / "ancient"
+        folio = DataFolio(path)
+        folio.add("x", 1)
+        manifest = json.loads((path / "items.json").read_text())
+        (path / "items.json").write_text(json.dumps(manifest["items"]))
+        (path / "metadata.json").write_text(json.dumps(manifest["metadata"]))
+
+        reopened = DataFolio(path)
+        assert reopened.get("x") == 1
+        reopened.add("y", 2)  # migrates forward
+        migrated = json.loads((path / "items.json").read_text())
+        assert migrated["schema_version"] == 2
+
+    def test_snapshot_changes_bump_the_revision(self, tmp_path):
+        """Registry changes commit through the manifest, so readers detect
+        snapshot creation/deletion via the same revision signal."""
+        path = tmp_path / "b"
+        a = DataFolio(path)
+        a.add("x", 1)
+        b = DataFolio(path)
+        a.create_snapshot("s")
+        assert "s" in b.snapshots  # reader auto-refreshed
+        a.delete_snapshot("s")
+        assert "s" not in b.snapshots

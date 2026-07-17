@@ -11,9 +11,7 @@ format libraries.
 
 ```
 my-folio/
-├── items.json       # AUTHORITATIVE catalog of every item version
-├── metadata.json    # user metadata + timestamps
-├── snapshots.json   # named snapshots (if any)
+├── items.json       # THE authoritative manifest: metadata + items + snapshots
 ├── README.md        # human-readable orientation
 ├── CONTENTS.md      # DERIVED inventory (never authoritative)
 ├── tables/          # Parquet files for included (owned) tables
@@ -21,27 +19,37 @@ my-folio/
 └── artifacts/       # numpy (.npy), JSON (.json), images, text, other files
 ```
 
-`items.json` is the single source of truth. `CONTENTS.md` is a convenience view
-regenerated from it — never parse `CONTENTS.md`; read `items.json`.
+`items.json` is the single source of truth for everything — the item catalog,
+user metadata, and named snapshots all live in this one document, so the
+entire committed state changes in one atomic file replace. `CONTENTS.md` is a
+convenience view regenerated from it — never parse `CONTENTS.md`; read
+`items.json`.
 
 ## The manifest: `items.json`
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "revision": 7,
-  "items": [ { ...item... }, ... ]
+  "metadata": { "created_at": "...", "updated_at": "...", "...": "..." },
+  "items": [ { ...item version... }, ... ],
+  "snapshots": { "v1.0": { "item_versions": {"features": "features--r3"}, ... } }
 }
 ```
 
 - **`schema_version`** — the manifest format version. A reader that only knows
   older versions should refuse a *newer* `schema_version` rather than guess.
-  Very old folios may be a bare JSON list (`[ {...}, ... ]`) with no wrapper —
-  treat that as `schema_version` 0.
-- **`revision`** — a monotonically increasing integer bumped on every write.
-  Used for stale-writer detection (see [Concurrency](#concurrency)).
+  Legacy layouts still load: v1 folios keep `metadata` and `snapshots` in
+  separate `metadata.json`/`snapshots.json` sidecar files, and very old folios
+  may be a bare JSON list (`[ {...}, ... ]`) — treat that as `schema_version`
+  0. Both migrate to v2 on their next write (the sidecars are then removed).
+- **`revision`** — a monotonically increasing integer bumped on every commit
+  (item, metadata, or snapshot changes alike). Used for stale-writer detection
+  and reader refresh (see [Concurrency](#concurrency)).
+- **`metadata`** — the user's bundle-level metadata plus timestamps.
 - **`items`** — a flat list of item *versions*. A logical item may appear more
   than once: the current version plus any prior versions retained by a snapshot.
+- **`snapshots`** — named snapshots (see below).
 
 ### Identifying the current items
 
@@ -122,16 +130,15 @@ instead of a `filename`, and its data is **not stored in the bundle**.
 New references must be absolute; legacy folios may contain a relative `path`,
 which older tooling resolved against the bundle directory.
 
-## Snapshots: `snapshots.json`
+## Snapshots
 
-```json
-{ "snapshots": { "v1.0": { "item_versions": {"features": "features--r3"}, ... } } }
-```
-
-Each snapshot maps item names to a `version_id`. To read an item as of a
-snapshot, find the manifest entry whose `version_id` matches, and resolve its
-`filename`/`path` exactly as above. A snapshot preserves owned data and the
-*recorded* reference descriptors — not the referenced bytes.
+The manifest's `snapshots` object maps snapshot names to their metadata; each
+snapshot's `item_versions` maps item names to a pinned `version_id`. To read
+an item as of a snapshot, find the manifest entry whose `version_id` matches,
+and resolve its `filename`/`path` exactly as above. Snapshot *membership* is
+derived from these pins — there is no separate marker field on items (legacy
+v1 manifests carried an `in_snapshots` field; ignore it). A snapshot preserves
+owned data and the *recorded* reference descriptors — not the referenced bytes.
 
 ## Concurrency
 

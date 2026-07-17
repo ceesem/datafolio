@@ -252,6 +252,7 @@ class SnapshotAccessor:
         Raises:
             KeyError: If snapshot not found
         """
+        self._folio._refresh_if_needed()
         if name not in self._folio._snapshots:
             raise KeyError(f"Snapshot '{name}' not found")
 
@@ -266,18 +267,22 @@ class SnapshotAccessor:
         Returns:
             True if snapshot exists
         """
+        self._folio._refresh_if_needed()
         return name in self._folio._snapshots
 
     def __iter__(self):
         """Iterate over snapshot names."""
-        return iter(self._folio._snapshots.keys())
+        self._folio._refresh_if_needed()
+        return iter(list(self._folio._snapshots.keys()))
 
     def __len__(self) -> int:
         """Get number of snapshots."""
+        self._folio._refresh_if_needed()
         return len(self._folio._snapshots)
 
     def keys(self):
         """Get snapshot names."""
+        self._folio._refresh_if_needed()
         return self._folio._snapshots.keys()
 
     def values(self):
@@ -299,14 +304,13 @@ class SnapshotMixin:
     """
 
     def _save_snapshots(self) -> None:
-        """Save snapshots.json manifest."""
+        """Publish the manifest (snapshots are embedded in it since v2).
 
-        if self._batch_mode:
-            return
-
-        path = self._storage.join_paths(self._bundle_dir, SNAPSHOTS_FILE)
-        snapshots_data = {"snapshots": self._snapshots}
-        self._storage.write_json(path, snapshots_data)
+        Kept as a thin alias so call sites and tests that mutate
+        ``_snapshots`` directly still commit through the single authoritative
+        manifest.
+        """
+        self._save_items()
 
     def create_snapshot(
         self,
@@ -442,26 +446,13 @@ class SnapshotMixin:
             snapshot_meta["execution"] = self._capture_execution_info()
 
         # Publish under the mutation guard: a stale notebook fails here,
-        # BEFORE any in-memory state or either manifest is touched.
+        # BEFORE any in-memory state or the manifest is touched. The registry
+        # entry and any backfilled version_ids commit in ONE atomic manifest
+        # write (membership is derived from the registry — no markers).
         with self._mutation_guard():
-            # Mark all current items as members of this snapshot
-            for item_name in self._items:
-                item = self._items[item_name]
-                if "in_snapshots" not in item:
-                    item["in_snapshots"] = []
-                if name not in item["in_snapshots"]:
-                    item["in_snapshots"].append(name)
             self._snapshots[name] = snapshot_meta
-
-            # Cross-file ordering: commit the pinned item descriptors
-            # (items.json) BEFORE exposing the snapshot in snapshots.json —
-            # a visible snapshot must never point at uncommitted state. If
-            # either write fails, restore the committed in-memory state; at
-            # worst items.json retains harmless membership markers for a
-            # snapshot that never became visible.
             try:
                 self._save_items()
-                self._save_snapshots()
             except BaseException:
                 self._reload_committed()
                 raise
@@ -520,7 +511,8 @@ class SnapshotMixin:
     def delete_snapshot(self, name: str, cleanup_orphans: bool = False) -> Self:
         """Delete a snapshot.
 
-        Removes the snapshot from the registry and updates items' in_snapshots lists.
+        Removes the snapshot from the registry (membership is derived, so
+        that single removal is the whole deletion).
         Optionally cleans up orphaned item versions that are no longer referenced.
 
         Args:
@@ -550,29 +542,12 @@ class SnapshotMixin:
             raise KeyError(f"Snapshot '{name}' not found")
 
         # Mutate and publish under the guard: a stale notebook fails BEFORE
-        # any in-memory or on-disk change.
+        # any in-memory or on-disk change. Removing the registry entry IS the
+        # deletion (membership is derived from the registry) — one atomic
+        # manifest write.
         with self._mutation_guard():
             del self._snapshots[name]
-
-            for item in self._items.values():
-                if "in_snapshots" in item and name in item["in_snapshots"]:
-                    item["in_snapshots"] = [
-                        s for s in item["in_snapshots"] if s != name
-                    ]
-            for item in self._snapshot_versions:
-                if "in_snapshots" in item and name in item["in_snapshots"]:
-                    item["in_snapshots"] = [
-                        s for s in item["in_snapshots"] if s != name
-                    ]
-
-            # Cross-file ordering for deletion: retract the snapshot from
-            # snapshots.json FIRST, then unmark items.json. If the second
-            # write fails, harmless retained markers point at a snapshot
-            # that no longer exists — preferable to a visible snapshot whose
-            # descriptors are gone. Either failure restores committed
-            # in-memory state.
             try:
-                self._save_snapshots()
                 self._save_items()
             except BaseException:
                 self._reload_committed()
@@ -795,7 +770,7 @@ class SnapshotMixin:
         # naming snapshots absent from the registry — don't count).
         orphaned_versions = []
         for item in self._snapshot_versions:
-            if not self._live_snapshot_markers(item):
+            if not self._snapshot_pins(item):
                 orphaned_versions.append(item)
 
         for item in orphaned_versions:
@@ -917,7 +892,7 @@ class SnapshotMixin:
             newly_unreferenced: list = []
             for item_name in set(self._items) - set(snap_items):
                 item = self._items[item_name]
-                if item.get("in_snapshots"):
+                if self._snapshot_pins(item):
                     self._handle_copy_on_write(item_name)
                 else:
                     newly_unreferenced.append(item)
@@ -933,7 +908,7 @@ class SnapshotMixin:
                 # snapshot pins it, otherwise drop it (payload deleted only
                 # after the publish).
                 if current is not None:
-                    if current.get("in_snapshots"):
+                    if self._snapshot_pins(current):
                         self._handle_copy_on_write(item_name)
                     else:
                         newly_unreferenced.append(current)
@@ -1176,7 +1151,7 @@ class SnapshotMixin:
 
         for item_name, item_meta in snapshot_folio._items.items():
             new_item = _copy.deepcopy(dict(item_meta))
-            new_item["in_snapshots"] = []
+            new_item.pop("in_snapshots", None)  # legacy field, not persisted
             new_item["is_current"] = True
 
             filename = item_meta.get("filename")
@@ -1298,17 +1273,24 @@ class SnapshotMixin:
             if item.get("item_type") == "referenced_table"
         ]
 
-    def _live_snapshot_markers(self, item: Dict[str, Any]) -> list[str]:
-        """The item's snapshot markers that name snapshots that actually exist.
+    def _snapshot_pins(self, item: Dict[str, Any]) -> list[str]:
+        """Snapshot names that pin this descriptor's exact version.
 
-        A crash between the two snapshot-file writes can commit
-        ``in_snapshots`` markers for a snapshot that never became visible in
-        the registry ("ghost markers", harmless by design). Preservation
-        decisions must ignore them — otherwise every overwrite of a
-        ghost-marked item leaks a payload pinned by nothing, forever.
+        Membership is DERIVED from the snapshot registry's ``item_versions``
+        (matching the descriptor's ``version_id``, or its checksum for legacy
+        snapshots) — never from persisted markers. Denormalized
+        ``in_snapshots`` markers were dropped in manifest v2; they were a
+        cache of exactly this computation and a standing source of
+        consistency bugs (ghost markers, duplicates, partial removal).
         """
+        name = item.get("name")
+        tokens = {item.get("version_id"), item.get("checksum")} - {None}
+        if not name or not tokens:
+            return []
         return [
-            snap for snap in item.get("in_snapshots", []) if snap in self._snapshots
+            snap_name
+            for snap_name, meta in self._snapshots.items()
+            if meta.get("item_versions", {}).get(name) in tokens
         ]
 
     def _is_in_snapshots(self, name: str) -> bool:
@@ -1324,7 +1306,7 @@ class SnapshotMixin:
             return False
 
         item = self._items[name]
-        return bool(self._live_snapshot_markers(item))
+        return bool(self._snapshot_pins(item))
 
     def _handle_copy_on_write(self, name: str) -> None:
         """Preserve a snapshotted item's version before it is overwritten.

@@ -44,16 +44,18 @@ from datafolio.utils import (
     validate_table_format,
 )
 
-# Current on-disk layout version of items.json. Bump when the manifest's shape
-# changes in a way that needs migration on load.
-MANIFEST_SCHEMA_VERSION = 1
+# Current on-disk layout version of items.json. Since v2 the manifest is the
+# SINGLE authoritative file: {schema_version, revision, metadata, items,
+# snapshots}. v0 (bare list) and v1 (dict + metadata.json/snapshots.json
+# sidecars) load transparently and migrate on the next write.
+MANIFEST_SCHEMA_VERSION = 2
 
 # Manifest schema versions this build can read. A bare-list manifest and a dict
 # manifest without an explicit ``schema_version`` are both treated as the
 # pre-versioning format (0) and migrated forward on the next write. A manifest
 # whose ``schema_version`` is newer than anything here is refused rather than
 # silently reinterpreted (see :meth:`DataFolio._load_manifests`).
-SUPPORTED_MANIFEST_VERSIONS = frozenset({0, 1})
+SUPPORTED_MANIFEST_VERSIONS = frozenset({0, 1, 2})
 
 # Bounded wait (seconds) for the per-folio local write lock before giving up.
 DEFAULT_LOCK_TIMEOUT = 30.0
@@ -416,10 +418,9 @@ ordinary directory of standard files plus a readable JSON manifest.
 
 ## Structure
 
-- `items.json` - **The authoritative catalog** of every data item. Read this to
-  learn what the folio contains and where each item lives.
-- `metadata.json` - User metadata and timestamps.
-- `snapshots.json` - Named snapshots (if any), pinning item versions.
+- `items.json` - **The single authoritative manifest**: user metadata, the
+  catalog of every data item, and named snapshots, all in one JSON document.
+  Read this to learn everything the folio contains and where each item lives.
 - `CONTENTS.md` - A **derived**, human-readable inventory (regenerated from
   `items.json`; never authoritative — do not parse it, read `items.json`).
 - `tables/` - Parquet files for included (owned) tables.
@@ -429,9 +430,12 @@ ordinary directory of standard files plus a readable JSON manifest.
 
 ## Reading a folio without datafolio
 
-`items.json` is a JSON object: `{{"schema_version", "revision", "items": [...]}}`
-(very old folios may be a bare `[...]` list). Each entry in `items` describes
-one item version.
+`items.json` is a JSON object:
+`{{"schema_version": 2, "revision", "metadata", "items": [...], "snapshots"}}`.
+Older folios may instead have a v1 layout (separate `metadata.json` /
+`snapshots.json` files) or a bare `[...]` list; current datafolio reads those
+and migrates them on the next write. Each entry in `items` describes one item
+version.
 
 1. **Find the current items.** Use only entries where `is_current` is `true`
    (or absent, in old folios). Entries with `is_current: false` are prior
@@ -625,31 +629,30 @@ For more information, see the [datafolio documentation](https://github.com/casey
         self._storage.mkdir(self._storage.join_paths(self._bundle_dir, MODELS_DIR))
         self._storage.mkdir(self._storage.join_paths(self._bundle_dir, ARTIFACTS_DIR))
 
-        # Write initial manifests and README
-        self._save_metadata()
+        # Write the initial manifest (metadata embedded) and README
         self._save_items()
         self._write_readme()
 
     def _load_manifests(self) -> None:
-        """Load all manifest files from existing bundle."""
+        """Load the committed folio state.
 
-        # Read metadata.json
-        metadata_path = self._storage.join_paths(self._bundle_dir, METADATA_FILE)
-        if self._storage.exists(metadata_path):
-            self._metadata_raw = self._storage.read_json(metadata_path)
-        else:
-            self._metadata_raw = {}
+        v2 folios keep everything in ONE authoritative ``items.json``:
+        ``{schema_version, revision, metadata, items, snapshots}``. Legacy
+        v0 (bare list) and v1 (dict + ``metadata.json``/``snapshots.json``
+        sidecars) load transparently and migrate to v2 on the next write.
+        """
+        schema_version = 0
+        items_list: list = []
+        embedded_metadata = None
+        embedded_snapshots = None
 
-        # Read unified items.json
         items_path = self._storage.join_paths(self._bundle_dir, ITEMS_FILE)
         if self._storage.exists(items_path):
             items_data = self._storage.read_json(items_path)
 
-            # Handle both old format (list) and new format (dict with items).
             # The manifest's ``schema_version`` gates compatibility: known
-            # versions (including the pre-versioning formats, treated as 0) are
-            # read and migrated forward on the next write; an unknown *newer*
-            # version is refused rather than silently reinterpreted.
+            # versions are read (and migrated forward on the next write); an
+            # unknown *newer* version is refused rather than reinterpreted.
             if isinstance(items_data, list):
                 # Oldest format: a bare list of items (backward compatibility).
                 items_list = items_data
@@ -664,49 +667,50 @@ For more information, see the [datafolio documentation](https://github.com/casey
                         f"{MANIFEST_SCHEMA_VERSION}). Upgrade the datafolio "
                         f"package to open this folio."
                     )
-                # Dict format: {schema_version?, revision?, items}. Missing
-                # revision (pre-versioning manifests) is treated as 0 and
-                # migrated forward on the next write.
                 items_list = items_data.get("items", [])
                 self._manifest_revision = int(items_data.get("revision", 0) or 0)
-
-            # Separate current versions from snapshot versions
-            self._items = {}
-            self._snapshot_versions = []
-
-            for item in items_list:
-                # Initialize snapshot fields for backward compatibility
-                if "in_snapshots" not in item:
-                    item["in_snapshots"] = []
-                if "is_current" not in item:
-                    item["is_current"] = True
-
-                # Separate based on is_current flag
-                if item.get("is_current", True):
-                    self._items[item["name"]] = item
-                else:
-                    self._snapshot_versions.append(item)
+                if schema_version >= 2:
+                    embedded_metadata = items_data.get("metadata", {})
+                    embedded_snapshots = items_data.get("snapshots", {})
         else:
-            self._items = {}
-            self._snapshot_versions = []
+            self._manifest_revision = self._manifest_revision or None
 
-        # Read snapshots.json (if it exists)
-        snapshots_path = self._storage.join_paths(self._bundle_dir, SNAPSHOTS_FILE)
-        if self._storage.exists(snapshots_path):
-            snapshots_data = self._storage.read_json(snapshots_path)
-            self._snapshots = snapshots_data.get("snapshots", {})
+        # Metadata: embedded in v2, sidecar file in v0/v1
+        if embedded_metadata is not None:
+            self._metadata_raw = embedded_metadata
         else:
-            self._snapshots = {}
+            metadata_path = self._storage.join_paths(self._bundle_dir, METADATA_FILE)
+            if self._storage.exists(metadata_path):
+                self._metadata_raw = self._storage.read_json(metadata_path)
+            else:
+                self._metadata_raw = {}
+
+        # Snapshots: embedded in v2, sidecar file in v0/v1
+        if embedded_snapshots is not None:
+            self._snapshots = embedded_snapshots
+        else:
+            snapshots_path = self._storage.join_paths(self._bundle_dir, SNAPSHOTS_FILE)
+            if self._storage.exists(snapshots_path):
+                snapshots_data = self._storage.read_json(snapshots_path)
+                self._snapshots = snapshots_data.get("snapshots", {})
+            else:
+                self._snapshots = {}
+
+        # Separate current versions from snapshot versions. Legacy
+        # ``in_snapshots`` markers are denormalized state (dropped in v2 —
+        # membership is derived from the snapshot registry) and are stripped.
+        self._items = {}
+        self._snapshot_versions = []
+        for item in items_list:
+            item.pop("in_snapshots", None)
+            if "is_current" not in item:
+                item["is_current"] = True
+            if item.get("is_current", True):
+                self._items[item["name"]] = item
+            else:
+                self._snapshot_versions.append(item)
 
     # ==================== Manifest Save Methods ====================
-
-    def _save_metadata(self) -> None:
-        """Save metadata.json."""
-        path = self._storage.join_paths(self._bundle_dir, METADATA_FILE)
-        # Convert MetadataDict to regular dict for serialization
-        md = getattr(self, "_metadata_dict", None)
-        data = dict(md) if md is not None else self._metadata_raw
-        self._storage.write_json(path, data)
 
     def _local_lock(self) -> Any:
         """Return this instance's reentrant local write lock (lazy).
@@ -806,22 +810,21 @@ For more information, see the [datafolio documentation](https://github.com/casey
                 raise
 
     def _save_items(self) -> None:
-        """Save unified items.json manifest (versioned, atomic, stale-checked).
+        """Publish the ONE authoritative manifest (versioned, atomic, stale-checked).
 
-        Writes ``{schema_version, revision, items}``. Local writes are atomic
-        (temp + os.replace) and serialized by the per-folio reentrant lockfile;
-        before overwriting, the on-disk revision is checked so a stale writer
-        can't silently clobber a newer manifest (raises
-        :class:`ConcurrentWriteError`). This supports the "many readers, one
-        writer" model — see the class docstring. Cloud object stores lack
-        conditional writes, so cross-writer safety there is best-effort (the
-        revision advances but two simultaneous cloud writers can still race).
+        Writes ``{schema_version, revision, metadata, items, snapshots}`` to
+        ``items.json`` in a single atomic replace (temp + os.replace locally)
+        — the entire committed state changes at once, so there is no
+        cross-file publication ordering and no partially visible commit.
+        Local writers are serialized by the per-folio reentrant lockfile;
+        before overwriting, the on-disk revision is verified fail-closed
+        (:class:`ManifestReadError` / :class:`ConcurrentWriteError`). Cloud
+        object stores lack conditional writes, so cross-writer safety there
+        is best-effort.
 
-        Normally this runs inside a :meth:`_mutation_guard` (which already holds
-        the lock and did the stale check); the reentrant lock makes the
-        re-acquisition here a no-op counter bump. When called on its own (e.g.
-        manifest-only operations like snapshotting or archiving) it still
-        acquires the lock and checks staleness itself.
+        On the first write to a legacy (v0/v1) folio, the now-embedded
+        ``metadata.json``/``snapshots.json`` sidecar files are removed so the
+        directory has exactly one source of truth.
         """
         if self._batch_mode:
             return
@@ -841,26 +844,40 @@ For more information, see the [datafolio documentation](https://github.com/casey
             with lock_ctx:
                 self._raise_if_manifest_stale(path)
 
+                # Bump the metadata timestamp as part of the commit
+                md = getattr(self, "_metadata_dict", None)
+                if md is not None:
+                    from datetime import datetime, timezone
+
+                    dict.__setitem__(
+                        md, "updated_at", datetime.now(timezone.utc).isoformat()
+                    )
+                    metadata_payload = dict(md)
+                else:
+                    metadata_payload = dict(self._metadata_raw)
+
                 all_items = list(self._items.values()) + self._snapshot_versions
                 next_revision = (self._manifest_revision or 0) + 1
                 items_data = {
                     "schema_version": MANIFEST_SCHEMA_VERSION,
                     "revision": next_revision,
+                    "metadata": metadata_payload,
                     "items": all_items,
+                    "snapshots": self._snapshots,
                 }
                 self._storage.write_json(path, items_data)
                 self._manifest_revision = next_revision
 
-            # Update metadata timestamp when items change
-            md = getattr(self, "_metadata_dict", None)
-            if md is not None:
-                from datetime import datetime, timezone
-
-                # Use dict methods to update without triggering another save
-                dict.__setitem__(
-                    md, "updated_at", datetime.now(timezone.utc).isoformat()
-                )
-                self._save_metadata()
+            # Migration: drop legacy sidecars now embedded in the manifest
+            # (best-effort; a leftover sidecar is stale but harmless because
+            # v2 readers never consult it).
+            for legacy in (METADATA_FILE, SNAPSHOTS_FILE):
+                legacy_path = self._storage.join_paths(self._bundle_dir, legacy)
+                try:
+                    if self._storage.exists(legacy_path):
+                        self._storage.delete_file(legacy_path)
+                except Exception:
+                    pass
 
             # Refresh the derived, human-facing inventory (best-effort; never
             # authoritative — items.json remains the catalog).
@@ -1038,8 +1055,8 @@ For more information, see the [datafolio documentation](https://github.com/casey
         """
         if not old_item:
             return
-        if self._live_snapshot_markers(old_item):
-            return  # preserved by a live snapshot — never delete
+        if self._snapshot_pins(old_item):
+            return  # pinned by a snapshot — never delete
         filename = old_item.get("filename")
         if not filename:
             return  # references own no payload
@@ -1158,7 +1175,7 @@ For more information, see the [datafolio documentation](https://github.com/casey
         import copy
 
         fresh = copy.deepcopy(dict(item))
-        fresh["in_snapshots"] = []
+        fresh.pop("in_snapshots", None)  # legacy field, not persisted
         fresh["is_current"] = True
         return fresh
 
@@ -1212,7 +1229,6 @@ For more information, see the [datafolio documentation](https://github.com/casey
             metadata = build_metadata(filename, version_id)
             metadata["version_id"] = version_id
             self._apply_description(name, metadata, description)
-            metadata.setdefault("in_snapshots", [])
             metadata.setdefault("is_current", True)
 
             # Payload and metadata are complete — now demote a snapshotted
@@ -2415,7 +2431,6 @@ For more information, see the [datafolio documentation](https://github.com/casey
 
             metadata["version_id"] = self._next_version_id(name)
             self._apply_description(name, metadata, description)
-            metadata.setdefault("in_snapshots", [])
             metadata.setdefault("is_current", True)
 
             if self._is_in_snapshots(name):
@@ -2683,7 +2698,7 @@ For more information, see the [datafolio documentation](https://github.com/casey
 
                 new_item = copy.deepcopy(dict(item))
                 self._handle_copy_on_write(name)
-                new_item["in_snapshots"] = []
+                new_item.pop("in_snapshots", None)  # legacy field
                 new_item["is_current"] = True
                 new_item["version_id"] = self._next_version_id(name)
                 self._items[name] = new_item

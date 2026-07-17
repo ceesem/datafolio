@@ -49,8 +49,8 @@ class TestSnapshotCreation:
         folio.create_snapshot("v1.0")
 
         # Both items should be marked as in snapshot
-        assert "v1.0" in folio._items["data1"]["in_snapshots"]
-        assert "v1.0" in folio._items["data2"]["in_snapshots"]
+        assert "v1.0" in folio._snapshot_pins(folio._items["data1"])
+        assert "v1.0" in folio._snapshot_pins(folio._items["data2"])
 
     def test_snapshot_with_tags(self, tmp_path):
         """Test creating snapshot with tags."""
@@ -104,25 +104,19 @@ class TestSnapshotCreation:
         assert snapshot["metadata_snapshot"]["value"] == 42
 
     def test_snapshots_saved_to_file(self, tmp_path):
-        """Test that snapshots are persisted to snapshots.json."""
+        """Snapshots persist inside the single authoritative items.json."""
+        import json
+
         folio = DataFolio(tmp_path / "test-bundle")
-        df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add("data", df)
+        folio.add("data", pd.DataFrame({"a": [1]}))
+        folio.create_snapshot("v1.0", description="First")
 
-        # Create snapshot
-        folio.create_snapshot("v1.0", description="Test snapshot")
-
-        # Check snapshots.json exists
-        snapshots_path = Path(folio._bundle_dir) / "snapshots.json"
-        assert snapshots_path.exists()
-
-        # Check contents
-        with open(snapshots_path) as f:
-            snapshots_data = json.load(f)
-
-        assert "snapshots" in snapshots_data
-        assert "v1.0" in snapshots_data["snapshots"]
-        assert snapshots_data["snapshots"]["v1.0"]["description"] == "Test snapshot"
+        manifest = json.loads((Path(folio._bundle_dir) / "items.json").read_text())
+        assert manifest["schema_version"] == 2
+        assert "v1.0" in manifest["snapshots"]
+        assert manifest["snapshots"]["v1.0"]["description"] == "First"
+        # No sidecar file — one source of truth
+        assert not (Path(folio._bundle_dir) / "snapshots.json").exists()
 
     def test_snapshot_updates_items_json(self, tmp_path):
         """Test that creating snapshot updates items.json with in_snapshots."""
@@ -140,7 +134,7 @@ class TestSnapshotCreation:
 
         # Item should have v1.0 in in_snapshots
         item = items_data["items"][0]
-        assert "v1.0" in item["in_snapshots"]
+        assert "v1.0" in folio._snapshot_pins(item)
 
 
 class TestSnapshotValidation:
@@ -265,7 +259,7 @@ class TestSnapshotReloading:
         assert folio2._snapshots["v1.0"]["description"] == "Test snapshot"
 
         # Item should still be marked as in snapshot
-        assert "v1.0" in folio2._items["data"]["in_snapshots"]
+        assert "v1.0" in folio2._snapshot_pins(folio2._items["data"])
 
 
 class TestSnapshotIntegrationWithCopyOnWrite:
@@ -291,7 +285,7 @@ class TestSnapshotIntegrationWithCopyOnWrite:
         # Snapshot version should be preserved in its own distinct payload file
         # (no rename with versioned filenames).
         snapshot_item = folio._snapshot_versions[0]
-        assert "v1.0" in snapshot_item["in_snapshots"]
+        assert "v1.0" in folio._snapshot_pins(snapshot_item)
         assert snapshot_item["filename"] != folio._items["data"]["filename"]
         assert snapshot_item.get("version_id")
 
@@ -313,16 +307,16 @@ class TestSnapshotIntegrationWithCopyOnWrite:
         folio.create_snapshot("v1.1")  # Same data, different snapshot
 
         # Item should be in both snapshots
-        assert "v1.0" in folio._items["data"]["in_snapshots"]
-        assert "v1.1" in folio._items["data"]["in_snapshots"]
+        assert "v1.0" in folio._snapshot_pins(folio._items["data"])
+        assert "v1.1" in folio._snapshot_pins(folio._items["data"])
 
         # Overwrite - should preserve for both snapshots
         folio.add("data", df2, overwrite=True)
 
         # Should have snapshot version with both snapshots referenced
         snapshot_item = folio._snapshot_versions[0]
-        assert "v1.0" in snapshot_item["in_snapshots"]
-        assert "v1.1" in snapshot_item["in_snapshots"]
+        assert "v1.0" in folio._snapshot_pins(snapshot_item)
+        assert "v1.1" in folio._snapshot_pins(snapshot_item)
 
         # Preserved version keeps its own distinct, stable payload file.
         assert snapshot_item["filename"] != folio._items["data"]["filename"]

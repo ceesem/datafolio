@@ -62,8 +62,7 @@ DataFolio created a directory structure:
 
 ```
 experiments/my_first_experiment/
-├── metadata.json          # Bundle metadata
-├── items.json            # Manifest of all items
+├── items.json            # The manifest: metadata, item catalog, snapshots
 └── tables/
     └── training_data.parquet  # Your DataFrame
 ```

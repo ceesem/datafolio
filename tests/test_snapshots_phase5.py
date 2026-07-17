@@ -39,16 +39,16 @@ class TestDeleteSnapshot:
 
         # Check item has both snapshots
         item = folio._items["data"]
-        assert "v1.0" in item["in_snapshots"]
-        assert "v2.0" in item["in_snapshots"]
+        assert "v1.0" in folio._snapshot_pins(item)
+        assert "v2.0" in folio._snapshot_pins(item)
 
         # Delete v1.0
         folio.delete_snapshot("v1.0")
 
         # Item should only have v2.0
         item = folio._items["data"]
-        assert "v1.0" not in item["in_snapshots"]
-        assert "v2.0" in item["in_snapshots"]
+        assert "v1.0" not in folio._snapshot_pins(item)
+        assert "v2.0" in folio._snapshot_pins(item)
 
     def test_delete_nonexistent_snapshot(self, tmp_path):
         """Test deleting nonexistent snapshot raises KeyError."""

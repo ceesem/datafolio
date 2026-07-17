@@ -194,7 +194,7 @@ class TestSnapshotInBatch:
         reloaded = DataFolio(tmp_path / "b")
         assert reloaded.get("a") == 1
         assert list(reloaded._snapshots) == []
-        assert reloaded._items["a"].get("in_snapshots") == []
+        assert reloaded._snapshot_pins(reloaded._items["a"]) == []
 
         # And snapshotting right after the batch works
         folio.create_snapshot("after-batch")
