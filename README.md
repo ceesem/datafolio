@@ -1,18 +1,17 @@
 # DataFolio
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-423%20passing-brightgreen.svg)](tests/)
-[![Coverage](https://img.shields.io/badge/coverage-79%25-green.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-816%20passing-brightgreen.svg)](tests/)
 
 **A lightweight, filesystem-based data versioning and experiment tracking library for Python.**
 
-DataFolio helps you organize, version, and track your data science experiments by storing datasets, models, and artifacts in a simple, transparent directory structure. Everything is saved as plain files (Parquet, JSON, etc) that you can inspect, version with git, or backup to any storage system.
+DataFolio helps you organize, version, and track your data science experiments by storing datasets, models, and files in a simple, transparent directory structure. Everything is saved as plain files (Parquet, JSON, etc) that you can inspect, version with git, or backup to any storage system.
 
 Note: DataFolio has been an exercise in how extensively I can use Claude Code. Currently all work has been done via Mr Claude, but now that it's getting very useful for workflows I might transition over to more manual curation.
 
 ## Features
 
-- **Universal Data Management**: Single `add_data()` method automatically handles DataFrames, numpy arrays, dicts, lists, and scalars
+- **Universal Data Management**: A unified `add()`/`get()` pair automatically handles DataFrames, numpy arrays, dicts, lists, scalars, and datetimes
 - **Model Support**: Save and load scikit-learn models with full metadata tracking
 - **Data Lineage**: Track inputs and dependencies between datasets and models
 - **External References**: Point to data stored externally (S3, local paths) without copying
@@ -36,18 +35,18 @@ import numpy as np
 folio = DataFolio('experiments/my_experiment')
 
 # Add any type of data with a single method
-folio.add_data('results', df)                          # DataFrame
-folio.add_data('embeddings', np.array([1, 2, 3]))    # Numpy array
-folio.add_data('config', {'lr': 0.01})                # Dict/JSON
-folio.add_data('accuracy', 0.95)                      # Scalar
+folio.add('results', df)                          # DataFrame
+folio.add('embeddings', np.array([1, 2, 3]))      # Numpy array
+folio.add('config', {'lr': 0.01})                 # Dict/JSON
+folio.add('accuracy', 0.95)                       # Scalar
 
 # Retrieve data (automatically returns correct type)
-df = folio.get_data('results')           # Returns DataFrame
-arr = folio.get_data('embeddings')       # Returns numpy array
-config = folio.get_data('config')        # Returns dict
+df = folio.get('results')           # Returns DataFrame
+arr = folio.get('embeddings')       # Returns numpy array
+config = folio.get('config')        # Returns dict
 
 # Or use autocomplete-friendly access
-df = folio.data.results.content          # Same as get_data()
+df = folio.data.results.content          # Same as get()
 arr = folio.data.embeddings.content
 config = folio.data.config.content
 
@@ -70,22 +69,26 @@ This includes the `datafolio` command-line tool for snapshot management and bund
 
 ### Generic Data Methods
 
-The `add_data()` and `get_data()` methods provide a unified interface for all data types:
+The `add()` and `get()` methods provide a unified interface for all data types:
 
 ```python
-# add_data() automatically detects type and uses the appropriate method
-folio.add_data('my_data', data)  # Works with DataFrame, array, dict, list, scalar
+# add() automatically detects type and uses the appropriate handler
+folio.add('my_data', data)  # Works with DataFrame, array, dict, list, scalar
 
-# get_data() automatically detects stored type and returns correct format
-data = folio.get_data('my_data')  # Returns original type
+# get() automatically detects stored type and returns correct format
+data = folio.get('my_data')  # Returns original type
 ```
 
 Supported data types:
 
-- **DataFrames** (`pd.DataFrame`) → stored as Parquet
+- **DataFrames** (`pd.DataFrame`, `pl.DataFrame`, `pl.LazyFrame`) → stored as Parquet
 - **Numpy arrays** (`np.ndarray`) → stored as `.npy`
-- **JSON data** (`dict`, `list`, `int`, `float`, `str`, `bool`, `None`) → stored as JSON
-- **External references** → metadata only, data stays in original location
+- **JSON data** (`dict`, `list`, `int`, `float`, `str`, `bool`, `None`) → stored as JSON (strings are always stored as JSON, never treated as file paths)
+- **Timezone-aware datetimes** (`datetime`) → stored as timestamps. For Unix numbers, convert first: `folio.add('run_at', datetime.fromtimestamp(x, tz=timezone.utc))` (a bare number like `1705318200` is stored as JSON)
+- **Sklearn-family estimators** (scikit-learn, XGBoost, LightGBM, CatBoost) → auto-detected; use `add_model()` for any other picklable object
+- **External references** → use `reference_table(name, path='s3://...')`; metadata only, data stays in original location
+
+Replacing an existing item always requires `overwrite=True` — snapshotted versions are preserved via copy-on-write.
 
 ### Multi-Instance Access
 
@@ -94,20 +97,20 @@ DataFolio automatically keeps multiple instances synchronized when accessing the
 ```python
 # Notebook 1: Create and update bundle
 folio1 = DataFolio('experiments/shared')
-folio1.add_data('results', df)
+folio1.add('results', df)
 
 # Notebook 2: Open same bundle
 folio2 = DataFolio('experiments/shared')
 
 # Notebook 1: Add more data
-folio1.add_data('analysis', new_df)
+folio1.add('analysis', new_df)
 
 # Notebook 2: Automatically sees new data!
 folio2.describe()  # Shows both 'results' and 'analysis'
-analysis = folio2.get_data('analysis')  # Works immediately ✅
+analysis = folio2.get('analysis')  # Works immediately ✅
 ```
 
-All read operations (`describe()`, `list_contents()`, `get_*()` methods, and `folio.data` accessors) automatically refresh from disk when changes are detected, ensuring you always see the latest data without manual intervention.
+All read operations (`describe()`, `list_contents()`, `get()`/`get_model()`, and `folio.data` accessors) automatically refresh from disk when changes are detected, ensuring you always see the latest data without manual intervention.
 
 ### Data Lineage
 
@@ -116,8 +119,8 @@ Track dependencies between datasets and models:
 ```python
 # Create dependency chain
 folio.reference_table('raw', path='s3://bucket/raw.parquet')
-folio.add_table('clean', cleaned_df, inputs=['raw'])
-folio.add_table('features', feature_df, inputs=['clean'])
+folio.add('clean', cleaned_df, inputs=['raw'])
+folio.add('features', feature_df, inputs=['clean'])
 folio.add_model('model', clf, inputs=['features'])
 
 # Lineage is preserved in metadata and shown in describe()
@@ -133,6 +136,7 @@ df = folio.data.results.content          # Get DataFrame
 desc = folio.data.results.description    # Get description
 type_str = folio.data.results.type       # Get item type
 inputs = folio.data.results.inputs       # Get lineage inputs
+path = folio.data.results.path           # Payload path (works for every type)
 
 # Works for all data types
 arr = folio.data.embeddings.content      # numpy array
@@ -152,14 +156,13 @@ experiments/my_experiment/
 ├── items.json                 # Unified manifest with versioning
 ├── snapshots.json             # Snapshot registry (when using snapshots)
 ├── tables/
-│   └── results.parquet       # DataFrame storage
+│   └── results--r2.parquet   # DataFrame storage (versioned filenames)
 ├── models/
-│   ├── classifier.joblib     # Sklearn model (v1)
-│   └── classifier_v2.joblib  # Version 2 (when snapshot exists)
+│   └── classifier--r3.joblib # Model storage
 └── artifacts/
-    ├── embeddings.npy        # Numpy arrays
-    ├── config.json           # JSON data
-    └── plot.png              # Any file type
+    ├── embeddings--r1.npy    # Numpy arrays
+    ├── config--r4.json       # JSON data
+    └── plot--r1.png          # Any file type
 ```
 
 ## Polars, Lazy Scans & External References
@@ -170,12 +173,12 @@ Parquet is the canonical table format. Tables come back as **pandas** by default
 ```python
 import polars as pl
 
-folio.add_table('t', df)                       # pandas or polars DataFrame
-folio.add_table('big', lazyframe)              # LazyFrame → streamed to parquet (bounded memory)
+folio.add('t', df)                             # pandas or polars DataFrame
+folio.add('big', lazyframe)                    # LazyFrame → streamed to parquet (bounded memory)
 
-folio.get_table('t')                           # pandas DataFrame (default)
-folio.get_table('t', frame='polars')           # eager polars DataFrame
-folio.scan_table('t')                          # genuinely lazy pl.LazyFrame (get_lazy is an alias)
+folio.get('t')                                 # pandas DataFrame (default)
+folio.get('t', frame='polars')                 # eager polars DataFrame
+folio.scan_table('t')                          # genuinely lazy pl.LazyFrame
 folio.scan_table('t').filter(pl.col('a') > 0).select('b').collect()  # pushdown
 ```
 
@@ -189,13 +192,13 @@ folio.inspect_table('raw')         # opt-in: reads schema/size/identity now
 ```
 
 Sharded / hive-partitioned directory references are read lazily via polars; a
-plain pandas `get_table` on one raises a clear "polars-only" error. `scan_table`
+plain pandas `get` on one raises a clear "polars-only" error. `scan_table`
 is genuinely lazy (local, `s3://`, `gs://`, `az://`, `http(s)://`) and raises
 rather than silently downloading a scheme it can't scan lazily. Delta/Iceberg
 are not supported — convert to Parquet first.
 
 > **Snapshots & references:** snapshots freeze *owned* items (included tables,
-> models, artifacts). A referenced table's external bytes are **not** owned and
+> models, files). A referenced table's external bytes are **not** owned and
 > may change; snapshots preserve the link, not the content. See
 > `folio.mutable_references()` and `folio.inspect_table()`.
 
@@ -205,7 +208,7 @@ Snapshots let you version your experiments — track different versions, compare
 results, and return to previous states without duplicating data.
 
 > **What a snapshot preserves:** folio-owned data (included tables, models,
-> artifacts, ...) and the *recorded state* of external references. It does **not**
+> files, ...) and the *recorded state* of external references. It does **not**
 > preserve or guarantee the contents of referenced data — datafolio never copies
 > or freezes external bytes, so the data behind a `reference_table` can change
 > after a snapshot is taken.
@@ -223,7 +226,7 @@ from datafolio import DataFolio
 
 # Create your experiment
 folio = DataFolio('experiments/classifier')
-folio.add_data('train_data', train_df)
+folio.add('train_data', train_df)
 folio.add_model('model', baseline_model)
 folio.metadata['accuracy'] = 0.89
 
@@ -300,16 +303,16 @@ from sklearn.ensemble import RandomForestClassifier
 folio = DataFolio('experiments/classifier_v1')
 
 # Reference external data
-folio.add_data('raw', reference='s3://bucket/raw.csv',
+folio.reference_table('raw', path='s3://bucket/raw.parquet',
     description='Raw training data from database')
 
 # Add processed data
-folio.add_data('clean', cleaned_df,
+folio.add('clean', cleaned_df,
     description='Cleaned and preprocessed data',
     inputs=['raw'])
 
 # Add features
-folio.add_data('features', feature_df,
+folio.add('features', feature_df,
     description='Engineered features',
     inputs=['clean'])
 
@@ -322,7 +325,7 @@ folio.add_model('classifier', clf,
     inputs=['features'])
 
 # Save metrics
-folio.add_data('metrics', {
+folio.add('metrics', {
     'accuracy': 0.95,
     'f1': 0.92,
     'precision': 0.94
@@ -343,14 +346,14 @@ trained_model = folio.data.classifier.content
 
 ## Best Practices
 
-1. **Use descriptive names**: `add_data('training_features', ...)` not `add_data('data1', ...)`
+1. **Use descriptive names**: `add('training_features', ...)` not `add('data1', ...)`
 2. **Track lineage**: Always specify `inputs` to track data dependencies
 3. **Add descriptions**: Help future you understand what each item contains
 4. **Use custom metadata**: Store experiment context in `folio.metadata` for better tracking
 5. **Leverage autocomplete**: Use `folio.data.item_name.content` for cleaner, more discoverable code
 6. **Clean up regularly**: Use `delete()` to remove temporary or obsolete items
 7. **Version control**: Commit your folio directories to git (data is stored efficiently)
-8. **Use references**: For large external datasets, use `reference` to avoid copying
+8. **Use references**: For large external datasets, use `reference_table()` to avoid copying
 9. **Check describe()**: Regularly review your folio with `folio.describe()` to see data and metadata
 10. **Share across notebooks**: Multiple DataFolio instances can safely access the same bundle - changes are automatically detected and synchronized
 11. **Snapshot before major changes**: Create snapshots before experimenting with new approaches—it's free insurance
@@ -389,10 +392,16 @@ For complete API documentation and detailed guides, see the [full documentation]
 - pandas >= 2.0.0
 - pyarrow >= 14.0.0
 - joblib >= 1.3.0
+- skops >= 0.10.0
 - orjson >= 3.9.0
 - cloud-files >= 5.8.1
 - click >= 8.1.0 (for CLI)
 - rich >= 13.0.0 (for CLI formatting)
+- filelock >= 3.12.0
+
+Optional extras:
+
+- polars >= 1.0.0 (`pip install datafolio[polars]`)
 
 ## License
 

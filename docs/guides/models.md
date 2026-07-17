@@ -14,12 +14,12 @@ clf.fit(X_train, y_train)
 
 # Save it
 folio = DataFolio('experiments/my_experiment')
-folio.add_sklearn('classifier', clf,
+folio.add_model('classifier', clf,
     description='Random forest baseline',
     inputs=['training_data'])
 
 # Load it later
-loaded_clf = folio.get_sklearn('classifier')
+loaded_clf = folio.get_model('classifier')
 predictions = loaded_clf.predict(X_test)
 ```
 
@@ -37,13 +37,18 @@ import xgboost as xgb
 import lightgbm as lgb
 
 # All of these work automatically
-folio.add_sklearn('rf', RandomForestClassifier())
-folio.add_sklearn('gbr', GradientBoostingRegressor())
-folio.add_sklearn('lr', LogisticRegression())
-folio.add_sklearn('svm', SVC())
-folio.add_sklearn('xgb', xgb.XGBClassifier())
-folio.add_sklearn('lgb', lgb.LGBMRegressor())
+folio.add_model('rf', RandomForestClassifier())
+folio.add_model('gbr', GradientBoostingRegressor())
+folio.add_model('lr', LogisticRegression())
+folio.add_model('svm', SVC())
+folio.add_model('xgb', xgb.XGBClassifier())
+folio.add_model('lgb', lgb.LGBMRegressor())
 ```
+
+The universal `add()` also auto-detects real estimator instances from
+sklearn, XGBoost, LightGBM, and CatBoost, so `folio.add('rf', clf)` works for
+these. `add_model()` goes further: it stores *any* picklable object — use it
+for duck-typed objects that merely implement `fit`/`predict`.
 
 ### Custom Transformers with Skops
 
@@ -158,7 +163,7 @@ y_train = np.random.randint(0, 2, 100)
 pipeline.fit(X_train, y_train)
 
 # Save with skops format
-folio.add_sklearn('custom_pipeline', pipeline,
+folio.add_model('custom_pipeline', pipeline,
     custom=True,  # ← Important! Enables skops
     description='Pipeline with custom percentile clipper',
     inputs=['training_data'])
@@ -166,9 +171,14 @@ folio.add_sklearn('custom_pipeline', pipeline,
 # Load in a different environment
 # No need for PercentileClipper class definition!
 folio2 = DataFolio('experiments/my_experiment')
-loaded_pipeline = folio2.get_sklearn('custom_pipeline')
+loaded_pipeline = folio2.get_model('custom_pipeline', trusted=True)
 predictions = loaded_pipeline.predict(X_test)
 ```
+
+Skops-format models require `trusted=True` to load: skops refuses to
+deserialize types it doesn't recognize by default, and `trusted=True` tells it
+you trust this folio's contents. (Joblib models are plain pickle, so the same
+principle applies across the board — only load folios you trust.)
 
 #### Best Practices for Custom Transformers
 
@@ -230,14 +240,15 @@ def transform(self, X):
 
 ```python
 # Joblib format (default)
-folio.add_sklearn('model', pipeline)
+folio.add_model('model', pipeline)
 # → Saves as .joblib
 # → Fast but requires class definitions
 
 # Skops format (portable)
-folio.add_sklearn('model', pipeline, custom=True)
+folio.add_model('model', pipeline, custom=True)
 # → Saves as .skops
 # → Self-contained, works without class definitions
+# → Requires trusted=True when loading: get_model('model', trusted=True)
 ```
 
 ### Complete Example: Custom Transformer Pipeline
@@ -285,7 +296,7 @@ pipeline.fit(X_train, y_train)
 
 # Save with skops
 folio = DataFolio('experiments/outlier_detection')
-folio.add_sklearn('pipeline', pipeline,
+folio.add_model('pipeline', pipeline,
     custom=True,  # Enable skops for custom transformer
     description='Logistic regression with IQR-based outlier clipping',
     inputs=['training_data'],
@@ -296,7 +307,7 @@ folio.add_sklearn('pipeline', pipeline,
 
 # Later: Load and use (even without OutlierClipper class!)
 folio2 = DataFolio('experiments/outlier_detection')
-loaded_pipeline = folio2.get_sklearn('pipeline')
+loaded_pipeline = folio2.get_model('pipeline', trusted=True)
 
 # Make predictions
 X_test = np.random.randn(50, 10)
@@ -312,7 +323,7 @@ print(f"Probabilities: {probabilities[:5]}")
 Add rich metadata to track model provenance:
 
 ```python
-folio.add_sklearn('classifier', model,
+folio.add_model('classifier', model,
     description='Random forest with balanced class weights',
     inputs=['processed_features', 'labels'],
     hyperparameters={
@@ -334,14 +345,14 @@ folio.add_sklearn('classifier', model,
 
 ## Loading Models
 
-All models can be loaded with type-specific or generic methods:
+Load models with `get_model()` or the data accessor:
 
 ```python
-# Type-specific method
-clf = folio.get_sklearn('classifier')
-
-# Generic method (delegates to get_sklearn)
+# Load a model
 clf = folio.get_model('classifier')
+
+# skops-format models (saved with custom=True) require trusted=True
+pipe = folio.get_model('custom_pipeline', trusted=True)
 
 # Data accessor (autocomplete-friendly)
 clf = folio.data.classifier.content
@@ -361,8 +372,8 @@ variant = RandomForestClassifier(n_estimators=200)
 variant.fit(X_train, y_train)
 
 # Save both
-folio.add_sklearn('baseline', baseline)
-folio.add_sklearn('variant', variant)
+folio.add_model('baseline', baseline)
+folio.add_model('variant', variant)
 
 # Compare
 baseline_score = folio.data.baseline.content.score(X_test, y_test)
@@ -370,9 +381,9 @@ variant_score = folio.data.variant.content.score(X_test, y_test)
 
 # Deploy winner
 if variant_score > baseline_score:
-    production_model = folio.get_sklearn('variant')
+    production_model = folio.get_model('variant')
 else:
-    production_model = folio.get_sklearn('baseline')
+    production_model = folio.get_model('baseline')
 ```
 
 ### Pipeline Versioning
@@ -384,7 +395,7 @@ v1_pipeline = Pipeline([
     ('clf', LogisticRegression())
 ])
 v1_pipeline.fit(X_train, y_train)
-folio.add_sklearn('pipeline_v1', v1_pipeline)
+folio.add_model('pipeline_v1', v1_pipeline)
 
 # Version 2: Added custom preprocessing
 v2_pipeline = Pipeline([
@@ -393,7 +404,7 @@ v2_pipeline = Pipeline([
     ('clf', LogisticRegression())
 ])
 v2_pipeline.fit(X_train, y_train)
-folio.add_sklearn('pipeline_v2', v2_pipeline, custom=True)  # Need skops!
+folio.add_model('pipeline_v2', v2_pipeline, custom=True)  # Need skops!
 
 # Compare versions
 v1_score = folio.data.pipeline_v1.content.score(X_test, y_test)
@@ -419,7 +430,7 @@ for params in ParameterGrid(param_grid):
 
     # Save each model
     name = f"rf_n{params['n_estimators']}_d{params['max_depth']}"
-    folio.add_sklearn(name, model,
+    folio.add_model(name, model,
         hyperparameters=params,
         description=f"RF with {params['n_estimators']} trees, depth {params['max_depth']}")
 
@@ -429,7 +440,7 @@ for params in ParameterGrid(param_grid):
 # Find best model
 best_name = max(folio.models,
     key=lambda name: folio._items[name].get('test_score', 0))
-best_model = folio.get_sklearn(best_name)
+best_model = folio.get_model(best_name)
 print(f"Best model: {best_name}")
 print(f"Score: {folio._items[best_name]['test_score']}")
 ```
@@ -452,8 +463,8 @@ A: Only if you use `custom=True`. For standard models (joblib format), skops is 
 
 A: Yes, just load and re-save with `custom=True`:
 ```python
-model = folio.get_sklearn('old_model')
-folio.add_sklearn('new_model', model, custom=True)
+model = folio.get_model('old_model')
+folio.add_model('new_model', model, custom=True)
 ```
 
 **Q: What if I don't inherit from BaseEstimator/TransformerMixin?**

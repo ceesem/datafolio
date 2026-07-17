@@ -1,5 +1,45 @@
 # Changelog
 
+## 2.0.0
+
+### Unified item API (breaking)
+
+- **One write, one read**: `add(name, obj)` and `get(name)` replace the
+  per-type method families (`add_table`/`add_numpy`/`add_json`/
+  `add_timestamp`/`add_data`, `get_table`/`get_numpy`/`get_json`/
+  `get_timestamp`/`get_data`, every `get_*_path` and `get_*_info`).
+  `item_path(name)` and `item_info(name)` cover paths and manifest entries
+  for all types. See the [migration guide](guides/migrating-to-2.0.md).
+- **Explicit verbs** kept where being explicit matters: `add_model`/
+  `get_model` (any picklable object; skops models need `trusted=True`),
+  `add_file` (files never enter via string sniffing), and
+  `reference_table`/`inspect_table`/`scan_table`.
+- **The on-disk format is unchanged** — 1.x folios open in 2.0 directly.
+
+### Correctness
+
+- Snapshots now honor "owned data frozen" everywhere: `delete()` preserves
+  snapshotted versions, `restore_snapshot` restores deleted items and never
+  copies bytes, `export_snapshot` works with external references and
+  preserves lineage/descriptions, `create_snapshot` inside `batch()` raises,
+  and `update_item` no longer edits snapshot views.
+- Read-only mode is enforced on every mutation path.
+- Item names are validated (traversal-safe segment grammar; `/` namespacing
+  kept).
+- Cloud fixes: `exists()` no longer swallows errors (a transient auth
+  failure can no longer cause a fresh bundle to be written over a real
+  one); included-table reads go through cloudfiles instead of a second
+  credential chain; missing cloud objects raise `FileNotFoundError`.
+- `diff_from_snapshot()` and `datafolio snapshot status` compare against
+  the newest snapshot (previously the oldest).
+- Git context for snapshots is captured from the working directory (the
+  running code), not the bundle directory.
+
+### Removed
+
+- The caching subsystem (`cache_enabled`/`cache_dir`/`cache_ttl` and the
+  four `cache_*` methods).
+
 ## 1.3.0
 
 ### Polars DataFrame Support

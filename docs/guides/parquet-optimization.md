@@ -19,11 +19,11 @@ Parquet is a columnar storage format designed for analytics workloads:
 folio = DataFolio('s3://huge-bucket/analysis')
 
 # Bad: Loads entire 100GB into memory! 💥
-df = folio.get_table('transactions')  # OOM error!
+df = folio.get('transactions')  # OOM error!
 df_filtered = df[df['amount'] > 1000][['user_id', 'amount']]
 
 # Good: Loads only ~1GB (filtered subset) ✅
-df_filtered = folio.get_table('transactions',
+df_filtered = folio.get('transactions',
     columns=['user_id', 'amount'],
     filters=[('amount', '>', 1000)],
     engine='pyarrow')
@@ -41,10 +41,10 @@ Read only the columns you need, reducing memory usage and load time.
 folio = DataFolio('experiments/analysis')
 
 # Full table has 50 columns
-df_full = folio.get_table('user_events')  # Loads all 50 columns
+df_full = folio.get('user_events')  # Loads all 50 columns
 
 # Read only specific columns
-df_subset = folio.get_table('user_events',
+df_subset = folio.get('user_events',
     columns=['user_id', 'timestamp', 'event_type'])  # Loads only 3 columns
 ```
 
@@ -55,14 +55,14 @@ import time
 
 # Example: 10M rows × 50 columns = 4GB
 start = time.time()
-df_full = folio.get_table('large_table')
+df_full = folio.get('large_table')
 full_time = time.time() - start
 print(f"Full table: {full_time:.2f}s, {df_full.memory_usage().sum() / 1e9:.2f} GB")
 # Full table: 12.3s, 4.2 GB
 
 # Read only 5 columns
 start = time.time()
-df_subset = folio.get_table('large_table',
+df_subset = folio.get('large_table',
     columns=['col1', 'col2', 'col3', 'col4', 'col5'])
 subset_time = time.time() - start
 print(f"5 columns: {subset_time:.2f}s, {df_subset.memory_usage().sum() / 1e9:.2f} GB")
@@ -75,7 +75,7 @@ print(f"5 columns: {subset_time:.2f}s, {df_subset.memory_usage().sum() / 1e9:.2f
 **Data Exploration**
 ```python
 # Quick peek at data without loading everything
-summary = folio.get_table('user_data',
+summary = folio.get('user_data',
     columns=['user_id', 'signup_date', 'country'])
 
 print(summary.head())
@@ -88,7 +88,7 @@ print(summary['country'].value_counts())
 features = ['age', 'income', 'education', 'job_title']
 target = 'churn'
 
-df = folio.get_table('training_data',
+df = folio.get('training_data',
     columns=features + [target])
 
 X = df[features]
@@ -105,12 +105,12 @@ Row filtering requires the `pyarrow` engine:
 
 ```python
 # Filter rows where amount > 1000
-df = folio.get_table('transactions',
+df = folio.get('transactions',
     filters=[('amount', '>', 1000)],
     engine='pyarrow')
 
 # Multiple conditions (AND)
-df = folio.get_table('transactions',
+df = folio.get('transactions',
     filters=[
         ('amount', '>', 1000),
         ('country', '==', 'US')
@@ -142,7 +142,7 @@ Combine multiple conditions:
 
 ```python
 # AND conditions (list of tuples)
-df = folio.get_table('users',
+df = folio.get('users',
     filters=[
         ('age', '>=', 18),
         ('age', '<', 65),
@@ -152,7 +152,7 @@ df = folio.get_table('users',
 
 # OR conditions (list of lists)
 # Get users who are either (age < 18) OR (country == 'US')
-df = folio.get_table('users',
+df = folio.get('users',
     filters=[
         [('age', '<', 18)],
         [('country', '==', 'US')]
@@ -160,7 +160,7 @@ df = folio.get_table('users',
     engine='pyarrow')
 
 # Complex: (age >= 18 AND country == 'US') OR (status == 'premium')
-df = folio.get_table('users',
+df = folio.get('users',
     filters=[
         [('age', '>=', 18), ('country', '==', 'US')],
         [('status', '==', 'premium')]
@@ -174,11 +174,11 @@ df = folio.get_table('users',
 # Example: 100M rows, filter returns 1M rows
 
 # Bad: Load all 100M rows, then filter (slow!) 💥
-df = folio.get_table('events')  # 30s, 8GB memory
+df = folio.get('events')  # 30s, 8GB memory
 df_filtered = df[df['event_type'] == 'purchase']  # Another 5s
 
 # Good: Filter at file level (fast!) ✅
-df_filtered = folio.get_table('events',
+df_filtered = folio.get('events',
     filters=[('event_type', '==', 'purchase')],
     engine='pyarrow')  # 2s, 80MB memory
 # 17.5x faster, 100x less memory!
@@ -193,7 +193,7 @@ The real power comes from combining both techniques:
 # Goal: Get user_id and amount for large transactions in 2024
 
 # Optimal approach: Filter first, select columns
-df = folio.get_table('transactions',
+df = folio.get('transactions',
     columns=['user_id', 'amount', 'timestamp'],  # Only 3 columns
     filters=[
         ('timestamp', '>=', '2024-01-01'),
@@ -215,7 +215,7 @@ folio = DataFolio('s3://fraud-detection/production')
 # Full dataset: 10TB of transaction data
 # We need: Recent high-value transactions from flagged countries
 
-df = folio.get_table('transactions',
+df = folio.get('transactions',
     # Only these columns
     columns=[
         'transaction_id',
@@ -241,7 +241,7 @@ model = RandomForestClassifier()
 # ... feature engineering and training ...
 
 # Save everything
-folio.add_table('flagged_transactions', df)
+folio.add('flagged_transactions', df)
 folio.add_model('fraud_detector', model,
     inputs=['transactions'])
 folio.metadata['filtered_rows'] = len(df)
@@ -256,7 +256,7 @@ For datasets too large to fit in memory, process in chunks:
 
 ```python
 # Get list of unique dates
-info = folio.get_table_info('huge_dataset')
+info = folio.item_info('huge_dataset')
 # Assume we know the date range: 2020-01-01 to 2024-12-31
 
 from datetime import datetime, timedelta
@@ -271,7 +271,7 @@ while current_date < end_date:
     next_date = current_date + timedelta(days=30)
 
     # Load one month at a time
-    df_month = folio.get_table('huge_dataset',
+    df_month = folio.get('huge_dataset',
         filters=[
             ('date', '>=', current_date.strftime('%Y-%m-%d')),
             ('date', '<', next_date.strftime('%Y-%m-%d'))
@@ -288,14 +288,14 @@ while current_date < end_date:
 
 # Combine results
 final_results = pd.concat(results)
-folio.add_table('monthly_statistics', final_results)
+folio.add('monthly_statistics', final_results)
 ```
 
 ### Pattern 2: Sample First, Analyze Later
 
 ```python
 # 1. Get a sample to develop your analysis
-df_sample = folio.get_table('massive_dataset',
+df_sample = folio.get('massive_dataset',
     filters=[('random_partition', '==', 0)],  # 1% sample
     engine='pyarrow')
 
@@ -309,9 +309,9 @@ result_sample = analyze_data(df_sample)
 print("Sample results:", result_sample)
 
 # 4. Run on full dataset
-df_full = folio.get_table('massive_dataset')
+df_full = folio.get('massive_dataset')
 result_full = analyze_data(df_full)
-folio.add_table('analysis_results', result_full)
+folio.add('analysis_results', result_full)
 ```
 
 ### Pattern 3: Progressive Loading
@@ -320,14 +320,14 @@ folio.add_table('analysis_results', result_full)
 # Load increasingly detailed data as needed
 
 # Step 1: Load summary columns for filtering
-df_summary = folio.get_table('user_behavior',
+df_summary = folio.get('user_behavior',
     columns=['user_id', 'total_spend', 'num_purchases'])
 
 # Step 2: Identify users of interest
 high_value_users = df_summary[df_summary['total_spend'] > 10000]['user_id']
 
 # Step 3: Load detailed data only for those users
-df_detailed = folio.get_table('user_behavior',
+df_detailed = folio.get('user_behavior',
     filters=[('user_id', 'in', high_value_users.tolist())],
     engine='pyarrow')
 # All columns, but only for high-value users
@@ -339,13 +339,13 @@ df_detailed = folio.get_table('user_behavior',
 
 ```python
 # See what columns are available without loading data
-info = folio.get_table_info('my_table')
+info = folio.item_info('my_table')
 print("Available columns:", info.get('columns', []))
 print("Total rows:", info.get('num_rows'))
 print("Total columns:", info.get('num_cols'))
 
 # Now load only what you need
-df = folio.get_table('my_table',
+df = folio.get('my_table',
     columns=['col1', 'col2', 'col3'])
 ```
 
@@ -353,7 +353,7 @@ df = folio.get_table('my_table',
 
 ```python
 # Load with optimized dtypes
-df = folio.get_table('user_data',
+df = folio.get('user_data',
     columns=['user_id', 'age', 'country'])
 
 # Convert to more efficient types
@@ -368,11 +368,11 @@ df['country'] = df['country'].astype('category') # Categorical for repeated stri
 
 ```python
 # Bad: Load everything, then filter
-df = folio.get_table('events')  # 10GB
+df = folio.get('events')  # 10GB
 active_users = df[df['status'] == 'active']['user_id'].unique()
 
 # Good: Filter first, then load
-df_active = folio.get_table('events',
+df_active = folio.get('events',
     columns=['user_id', 'status'],
     filters=[('status', '==', 'active')],
     engine='pyarrow')  # 100MB
@@ -389,8 +389,8 @@ import pyarrow.parquet as pq
 # Get the file path
 folio = DataFolio('experiments/data')
 
-# get_table_path() works for both included and referenced tables
-file_path = folio.get_table_path('my_table')
+# item_path() works for both included and referenced tables
+file_path = folio.item_path('my_table')
 
 # Read as PyArrow table (zero-copy, very fast)
 table = pq.read_table(file_path,
@@ -415,7 +415,7 @@ import duckdb
 folio = DataFolio('s3://my-bucket/analysis')
 
 # Get path to table (works for included and referenced tables)
-table_path = folio.get_table_path('large_table')
+table_path = folio.item_path('large_table')
 
 # Query with DuckDB (very fast, minimal memory)
 result = duckdb.query(f"""
@@ -432,7 +432,7 @@ result = duckdb.query(f"""
 """).to_df()
 
 # Save results
-folio.add_table('category_summary', result,
+folio.add('category_summary', result,
     description='Top 100 categories by average amount',
     inputs=['large_table'])
 ```
@@ -444,11 +444,11 @@ folio.add_table('category_summary', result,
 ```python
 # Bad: Transfer entire file from S3, then filter locally
 folio = DataFolio('s3://huge-bucket/data')
-df = folio.get_table('transactions')  # Transfers 50GB!
+df = folio.get('transactions')  # Transfers 50GB!
 df_us = df[df['country'] == 'US']     # Then filters locally
 
 # Good: Filter on S3, transfer only results
-df_us = folio.get_table('transactions',
+df_us = folio.get('transactions',
     columns=['id', 'amount', 'date'],
     filters=[('country', '==', 'US')],
     engine='pyarrow')  # Transfers only 500MB
@@ -460,10 +460,10 @@ df_us = folio.get_table('transactions',
 
 ```python
 # Default: Read all columns
-df = folio.get_table('data')  # All columns
+df = folio.get('data')  # All columns
 
 # Better: Specify exactly what you need
-df = folio.get_table('data',
+df = folio.get('data',
     columns=['essential_col1', 'essential_col2'])
 ```
 
@@ -471,7 +471,7 @@ df = folio.get_table('data',
 
 ```python
 # Analyze only recent data
-df = folio.get_table('events',
+df = folio.get('events',
     filters=[('timestamp', '>=', '2024-12-01')],
     engine='pyarrow')
 ```
@@ -483,10 +483,10 @@ df = folio.get_table('events',
 df['year'] = df['date'].dt.year
 df['month'] = df['date'].dt.month
 
-folio.add_table('data_with_partitions', df)
+folio.add('data_with_partitions', df)
 
 # Later: Fast filtering
-df_2024 = folio.get_table('data_with_partitions',
+df_2024 = folio.get('data_with_partitions',
     filters=[('year', '==', 2024)],
     engine='pyarrow')
 ```
@@ -495,7 +495,7 @@ df_2024 = folio.get_table('data_with_partitions',
 
 ```python
 # Verify filter syntax before processing huge files
-df_test = folio.get_table('data',
+df_test = folio.get('data',
     filters=[('category', 'in', ['A', 'B'])],
     engine='pyarrow')
 
@@ -511,13 +511,13 @@ else:
 
 ```python
 # Find top users by spend, without loading everyone
-df_all = folio.get_table('user_spending',
+df_all = folio.get('user_spending',
     columns=['user_id', 'total_spend'])
 
 top_users = df_all.nlargest(1000, 'total_spend')['user_id']
 
 # Load full details only for top users
-df_top = folio.get_table('user_details',
+df_top = folio.get('user_details',
     filters=[('user_id', 'in', top_users.tolist())],
     engine='pyarrow')
 ```
@@ -531,7 +531,7 @@ from datetime import datetime, timedelta
 end_date = datetime.now()
 start_date = end_date - timedelta(days=7)
 
-df = folio.get_table('events',
+df = folio.get('events',
     columns=['user_id', 'event_type', 'timestamp', 'value'],
     filters=[
         ('timestamp', '>=', start_date.strftime('%Y-%m-%d')),
@@ -541,19 +541,19 @@ df = folio.get_table('events',
 
 # Analyze this week's data
 summary = df.groupby('event_type').agg({'value': 'sum'})
-folio.add_table(f'weekly_summary_{start_date:%Y%m%d}', summary)
+folio.add(f'weekly_summary_{start_date:%Y%m%d}', summary)
 ```
 
 ### Pattern: A/B Test Analysis
 
 ```python
 # Load only treatment group data
-df_treatment = folio.get_table('experiment_data',
+df_treatment = folio.get('experiment_data',
     columns=['user_id', 'conversion', 'revenue'],
     filters=[('group', '==', 'treatment')],
     engine='pyarrow')
 
-df_control = folio.get_table('experiment_data',
+df_control = folio.get('experiment_data',
     columns=['user_id', 'conversion', 'revenue'],
     filters=[('group', '==', 'control')],
     engine='pyarrow')
@@ -570,10 +570,10 @@ print(f"Control: {df_control['conversion'].mean():.2%}")
 Use `engine='pyarrow'`:
 ```python
 # Wrong
-df = folio.get_table('data', filters=[('a', '>', 1)])  # Error!
+df = folio.get('data', filters=[('a', '>', 1)])  # Error!
 
 # Right
-df = folio.get_table('data',
+df = folio.get('data',
     filters=[('a', '>', 1)],
     engine='pyarrow')  # Works!
 ```
@@ -582,7 +582,7 @@ df = folio.get_table('data',
 
 Check available columns:
 ```python
-info = folio.get_table_info('data')
+info = folio.item_info('data')
 print("Available columns:", info.get('columns', []))
 ```
 
@@ -608,6 +608,6 @@ print("Available columns:", info.get('columns', []))
 
 - [Getting Started Guide](getting-started.md) - Basic DataFolio usage
 - [Snapshots Guide](snapshots.md) - Version your filtered datasets
-- [DataFolio API Reference](../reference/datafolio-api.md) - All `get_table()` options
+- [DataFolio API Reference](../reference/datafolio-api.md) - All `get()` options
 - [Pandas read_parquet docs](https://pandas.pydata.org/docs/reference/api/pandas.read_parquet.html) - Full parameter reference
 - [PyArrow filtering docs](https://arrow.apache.org/docs/python/parquet.html#filtering) - Advanced filter syntax

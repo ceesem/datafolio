@@ -4,7 +4,7 @@ Snapshots let you version experiments, compare results, and return to previous
 states without duplicating data.
 
 !!! info "What a snapshot preserves"
-    A snapshot preserves folio-owned data (included tables, models, artifacts,
+    A snapshot preserves folio-owned data (included tables, models, files,
     numpy arrays, JSON, timestamps) and the **recorded state** of external
     references. It does **not** preserve or guarantee the *contents* of
     referenced data — datafolio never copies or freezes external bytes, so the
@@ -73,7 +73,7 @@ good_model = baseline.get_model('model')  # Original 89% model
 folio = DataFolio('experiments/my_experiment')
 
 # Add your data
-folio.add_table('train_data', df)
+folio.add('train_data', df)
 folio.add_model('model', trained_model)
 folio.metadata['accuracy'] = 0.92
 
@@ -94,11 +94,15 @@ folio.create_snapshot(
 )
 ```
 
+!!! note "Snapshots and `batch()`"
+    Calling `create_snapshot()` inside a `batch()` block raises an error —
+    create the snapshot after the batch completes.
+
 ### What Gets Captured
 
 When you create a snapshot, DataFolio automatically captures:
 
-- **Item versions** - Current state of all data, models, and artifacts
+- **Item versions** - Current state of all data, models, and files
 - **Metadata** - Complete folio metadata
 - **Git information** - Commit hash, branch, dirty status (if in a git repo)
 - **Environment** - Python version, dependencies
@@ -161,7 +165,7 @@ snapshot = folio.get_snapshot('v1.0-baseline')  # Equivalent to above
 
 # Access data exactly as it was
 model = snapshot.get_model('model')
-data = snapshot.get_table('train_data')
+data = snapshot.get('train_data')
 accuracy = snapshot.metadata['accuracy']
 
 # Snapshot is read-only by default
@@ -184,7 +188,8 @@ print(view.name)
 print(view.timestamp)
 
 # Can also get data, but more limited than full DataFolio
-data = view.get_table('train_data')
+# (SnapshotView supports both .get(name) and .get_table(name))
+data = view.get('train_data')
 ```
 
 **When to use which:**
@@ -255,6 +260,28 @@ print("Modified items:", diff['modified_items'])
 print("Metadata changes:", diff['metadata_changes'])
 ```
 
+### Diff Against the Current State
+
+```python
+# Compare the current working state to a snapshot
+diff = folio.diff_from_snapshot('v1.0')
+
+# With no argument, compares against the newest snapshot
+diff = folio.diff_from_snapshot()
+```
+
+### Restore a Snapshot
+
+Roll the working state back to a snapshot:
+
+```python
+# Requires explicit confirmation
+folio.restore_snapshot('v1.0', confirm=True)
+```
+
+Restoring also brings back items that were deleted after the snapshot was
+taken, so the folio matches the snapshot exactly.
+
 ### Delete Snapshots
 
 ```python
@@ -285,7 +312,7 @@ Snapshots use copy-on-write versioning to save disk space:
 
 ```python
 # Initial data (5GB file)
-folio.add_table('big_data', huge_df)
+folio.add('big_data', huge_df)
 folio.create_snapshot('v1.0')
 
 # Create 10 more snapshots - still only 5GB!
@@ -293,8 +320,9 @@ folio.create_snapshot('v1.1')
 folio.create_snapshot('v1.2')
 # ... no new files created for 'big_data'
 
-# Only when you overwrite an item in a snapshot do we create a new version
-folio.add_table('big_data', modified_df, overwrite=True)
+# Replacing any existing item requires overwrite=True; only when the item is
+# pinned by a snapshot does this create a new version file
+folio.add('big_data', modified_df, overwrite=True)
 # Now we have: big_data.parquet (5GB) and big_data_v2.parquet (5GB)
 
 folio.create_snapshot('v2.0')
@@ -402,7 +430,7 @@ datafolio snapshot list
 ```python
 # September: Finalize results for paper
 folio = DataFolio('research/protein-analysis')
-folio.add_table('data', processed_data)
+folio.add('data', processed_data)
 folio.add_model('classifier', final_model)
 folio.metadata['accuracy'] = 0.92
 
@@ -422,7 +450,7 @@ paper_folio = DataFolio.load_snapshot(
 
 # Run additional experiments with original data/model
 original_model = paper_folio.get_model('classifier')
-original_data = paper_folio.get_table('data')
+original_data = paper_folio.get('data')
 ```
 
 ### A/B Testing
@@ -566,17 +594,18 @@ orphans = folio.cleanup_orphaned_versions(dry_run=True)
 folio.cleanup_orphaned_versions()
 ```
 
-### Can't delete item
+### Deleting snapshotted items
 
-Items in snapshots can't be deleted. Delete the snapshot first:
+Deleting an item that appears in a snapshot is safe: `delete()` removes it from
+the working state but preserves the pinned version, so the snapshot stays
+readable (and `restore_snapshot()` can bring it back). To reclaim the disk
+space, delete the snapshot and clean up:
 
 ```python
-# Error
-folio.delete('model')  # Used by snapshot v1.0!
+folio.delete('model')  # Working copy removed; snapshot v1.0 still readable
 
-# Fix
+# Reclaim the bytes
 folio.delete_snapshot('v1.0', cleanup_orphans=True)
-folio.delete('model')  # Now works
 ```
 
 ## Advanced Topics

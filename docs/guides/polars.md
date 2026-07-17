@@ -13,9 +13,15 @@ same three access modes:
 ```python
 import polars as pl
 
-folio.get_table("t")                    # pandas.DataFrame  (default, unchanged)
-folio.get_table("t", frame="polars")    # eager polars.DataFrame (downloads/collects)
-folio.scan_table("t")                   # genuinely lazy polars.LazyFrame
+folio.get("t")                    # pandas.DataFrame  (default, unchanged)
+folio.get("t", frame="polars")    # eager polars.DataFrame (downloads/collects)
+folio.scan_table("t")             # genuinely lazy polars.LazyFrame
+```
+
+Eager reads pass reader options through to the underlying Parquet reader:
+
+```python
+folio.get("t", columns=["user_id", "amount"], filters=[("amount", ">", 0)])
 ```
 
 `scan_table` returns a `pl.LazyFrame`, so you get predicate/projection pushdown
@@ -32,8 +38,6 @@ and never materialize more than you ask for:
 )
 ```
 
-`get_lazy` is a backward-compatible alias for `scan_table`.
-
 ### Which lazy scans are *genuinely* lazy?
 
 `scan_table` is honest about laziness. It performs a real, streaming scan
@@ -45,18 +49,18 @@ and never materialize more than you ask for:
 
 For any scheme it **cannot** scan lazily, it raises a clear error instead of
 silently downloading the whole object and pretending it was lazy. If you want an
-eager read that downloads, use `get_table(..., frame="polars")`.
+eager read that downloads, use `get(..., frame="polars")`.
 
 ## Writing tables
 
-`add_table` accepts a pandas DataFrame, a polars DataFrame, or a polars
+`add` accepts a pandas DataFrame, a polars DataFrame, or a polars
 **LazyFrame**. A LazyFrame is materialized with a streaming `sink_parquet`
 (bounded memory — the full result is never held at once), and its schema/row
 count are read back cheaply from the written Parquet footer:
 
 ```python
 lf = pl.scan_parquet("raw/*.parquet").filter(pl.col("keep")).select(["a", "b"])
-folio.add_table("clean", lf)          # streamed to the bundle, bounded memory
+folio.add("clean", lf)                # streamed to the bundle, bounded memory
 ```
 
 Cloud writes are bounded too: the file is serialized to a temp file and streamed
@@ -89,19 +93,19 @@ Use `validate()` to check existence.
 
 A reference to a directory of Parquet shards (including hive-partitioned
 datasets) is read lazily via polars and marked **polars-only**: `scan_table` and
-`get_table(frame="polars")` work, but a plain pandas `get_table` raises a clear
+`get(frame="polars")` work, but a plain pandas `get` raises a clear
 error (pandas mishandles such layouts). DataFolio *reads* sharded data; it does
 not create sharded layouts itself.
 
 ```python
 folio.reference_table("events", path="s3://bucket/events/")  # hive-partitioned dir
 folio.scan_table("events").collect()                          # ok (lazy)
-folio.get_table("events")                                     # raises: polars-only
+folio.get("events")                                           # raises: polars-only
 ```
 
 ### References and snapshots
 
-Snapshots freeze **owned** items (included tables, models, artifacts). A
+Snapshots freeze **owned** items (included tables, models, files). A
 referenced table's external bytes are **not** owned and may change over time — a
 snapshot preserves the *link*, not the content. `get_snapshot_info` flags any
 mutable references, and `folio.mutable_references()` lists them. Use

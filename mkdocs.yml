@@ -13,6 +13,7 @@ nav:
     - Using a folio without Datafolio: guides/format.md
     - Snapshots: guides/snapshots.md
     - Parquet Optimization: guides/parquet-optimization.md
+    - Migrating to 2.0: guides/migrating-to-2.0.md
 - API Reference:
     - DataFolio Methods: reference/datafolio-api.md
     - CLI Reference: reference/cli.md

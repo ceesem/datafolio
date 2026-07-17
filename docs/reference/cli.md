@@ -636,7 +636,7 @@ import datafolio
 import pandas as pd
 
 folio = datafolio.DataFolio('my_analysis')
-folio.add_table('results', df)
+folio.add('results', df)
 folio.add_model('classifier', model)
 ```
 
@@ -654,7 +654,7 @@ datafolio -f my_analysis describe
 ```python
 # Python: Load snapshot later
 folio = datafolio.DataFolio.load_snapshot('v1.0')
-results = folio.get_table('results')
+results = folio.get('results')
 ```
 
 ---

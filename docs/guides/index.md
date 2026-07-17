@@ -74,7 +74,7 @@ Advanced techniques for working with large Parquet files:
 - **Reproducible research** → [Snapshots](snapshots.md)
 - **Curating results for publication** → `archive()` / `copy(follow_lineage=True)` in the [API Reference](../reference/datafolio-api.md#archiving-items)
 - **Team collaboration** → [Getting Started](getting-started.md) (Multi-Instance Access section)
-- **Sharing files with non-datafolio users** → `get_item_path()` / `describe(show_paths=True)` in the [API Reference](../reference/datafolio-api.md#sharing-paths-with-collaborators)
+- **Sharing files with non-datafolio users** → `item_path()` / `describe(show_paths=True)` in the [API Reference](../reference/datafolio-api.md#sharing-paths-with-collaborators)
 - **Model deployment** → [Working with Models](models.md)
 - **Custom sklearn pipelines** → [Working with Models](models.md)
 - **Cloud storage** → [Parquet Optimization](parquet-optimization.md)

@@ -1,8 +1,8 @@
 """Demonstration of how handlers distinguish between data types.
 
 Shows the two mechanisms for type detection:
-1. Auto-detection via can_handle() - for add_data()
-2. Explicit type via item_type - for get_data()
+1. Auto-detection via can_handle() - for add()
+2. Explicit type via item_type - for get()
 """
 
 import pandas as pd
@@ -61,19 +61,12 @@ def demo_auto_detection():
     """Show how handlers auto-detect data types."""
 
     print("=" * 70)
-    print("AUTO-DETECTION: How add_data() knows what handler to use")
+    print("AUTO-DETECTION: How add() knows what handler to use")
     print("=" * 70)
 
     # Register handlers
-    handlers = [
-        PandasHandler(),
-        NumpyHandler(),
-        JsonHandler(),
-        ArtifactHandler(),
-    ]
-
-    for handler in handlers:
-        register_handler(handler)
+    # Built-in handlers self-register when datafolio is imported;
+    # detection order follows registration order.
 
     # Test different data types
     test_cases = [
@@ -102,7 +95,7 @@ def demo_auto_detection():
     print("-" * 70)
     print("""
 When you call:
-    folio.add_data('my_data', data)
+    folio.add('my_data', data)
 
 DataFolio does:
     1. handler = detect_handler(data)
@@ -120,7 +113,7 @@ def demo_explicit_type():
     """Show how handlers are selected when reading data."""
 
     print("\n" + "=" * 70)
-    print("EXPLICIT TYPE: How get_data() knows what handler to use")
+    print("EXPLICIT TYPE: How get() knows what handler to use")
     print("=" * 70)
 
     print("""
@@ -135,7 +128,7 @@ When data is stored, metadata includes 'item_type':
     }
 
 When you call:
-    folio.get_data('my_data')
+    folio.get('my_data')
 
 DataFolio does:
     1. item = folio._items['my_data']
@@ -196,7 +189,7 @@ Some data types CANNOT be auto-detected:
 
 2. Artifacts (files)
    • Can't detect "this is a file path to copy"
-   • Must use: folio.add_artifact('name', source_path='/path/to/file.png')
+   • Must use: folio.add_file('/path/to/file.png', name='name')
 
 3. PyTorch Models
    • Could auto-detect isinstance(model, nn.Module)
@@ -206,7 +199,7 @@ Some data types CANNOT be auto-detected:
 4. Timestamps
    • datetime objects could be auto-detected
    • But treated specially for metadata
-   • Must use: folio.add_timestamp('name', datetime.now(UTC))
+   • Must use: folio.add('name', datetime.now(UTC))
 
 These handlers set can_handle() → False to prevent auto-detection.
 """)
@@ -223,14 +216,14 @@ These handlers set can_handle() → False to prevent auto-detection.
     print(f"ReferenceTableHandler.can_handle(DataFrame): {ref_handler.can_handle(df)}")
     print(f"ArtifactHandler.can_handle(DataFrame):      {artifact_handler.can_handle(df)}")
     print(f"\n→ Both return False, so they're never auto-selected")
-    print(f"→ Must use explicit methods: reference_table(), add_artifact()")
+    print(f"→ Must use explicit methods: reference_table(), add_file()")
 
 
 def demo_complete_flow():
     """Show the complete flow from add to get."""
 
     print("\n" + "=" * 70)
-    print("COMPLETE FLOW: From add_data() to get_data()")
+    print("COMPLETE FLOW: From add() to get()")
     print("=" * 70)
 
     print("""
@@ -238,7 +231,7 @@ Step-by-step example:
 
 1. USER CODE
    --------
-   folio.add_data('results', pd.DataFrame({'a': [1, 2, 3]}))
+   folio.add('results', pd.DataFrame({'a': [1, 2, 3]}))
 
 2. AUTO-DETECTION
    --------------
@@ -267,7 +260,7 @@ Step-by-step example:
 
 5. USER RETRIEVES DATA
    -------------------
-   folio.get_data('results')
+   folio.get('results')
 
 6. TYPE LOOKUP
    -----------
@@ -288,7 +281,7 @@ Step-by-step example:
    --------------
    Returns DataFrame to user
 
-Key insight: Detection happens ONCE during add_data().
+Key insight: Detection happens ONCE during add().
              Retrieval uses stored 'item_type' - no guessing!
 """)
 

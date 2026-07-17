@@ -22,14 +22,12 @@ def demo_handler_system():
     print("HANDLER ARCHITECTURE DEMONSTRATION")
     print("=" * 70)
 
-    # 1. Register handlers
-    print("\n1. Registering Handlers")
+    # 1. Handlers self-register on import (importing datafolio registers
+    # all built-in handlers with the global registry)
+    print("\n1. Registered Handlers")
     print("-" * 70)
-    pandas_handler = PandasHandler()
-    ref_handler = ReferenceTableHandler()
-
-    register_handler(pandas_handler)
-    register_handler(ref_handler)
+    pandas_handler = get_handler("included_table")
+    ref_handler = get_handler("referenced_table")
     print(f"✓ Registered: {pandas_handler.item_type}")
     print(f"✓ Registered: {ref_handler.item_type}")
 
@@ -78,20 +76,20 @@ def demo_with_datafolio():
     df = pd.DataFrame({'a': [1, 2, 3]})
 
     # This call now uses the handler system internally:
-    folio.add_table('data', df)
+    folio.add('data', df)
 
     # Behind the scenes:
-    # 1. DataFolio.add_table() gets the 'included_table' handler
+    # 1. DataFolio.add() gets the 'included_table' handler
     # 2. Calls handler.add(folio, 'data', df, ...)
     # 3. Handler writes data via folio._storage
     # 4. Handler returns metadata dict
     # 5. DataFolio stores metadata in folio._items
 
     # Reading works similarly:
-    df_loaded = folio.get_table('data')
+    df_loaded = folio.get('data')
 
     # Behind the scenes:
-    # 1. DataFolio.get_table() gets the 'included_table' handler
+    # 1. DataFolio.get() gets the 'included_table' handler
     # 2. Calls handler.get(folio, 'data')
     # 3. Handler reads from folio._storage
     # 4. Returns DataFrame to user

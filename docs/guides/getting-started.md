@@ -1,6 +1,6 @@
 # Getting Started with DataFolio
 
-DataFolio is a lightweight, filesystem-based experiment tracking library that helps you organize data science experiments by storing datasets, models, and artifacts in a simple, transparent directory structure.
+DataFolio is a lightweight, filesystem-based experiment tracking library that helps you organize data science experiments by storing datasets, models, and files in a simple, transparent directory structure.
 
 ## Why DataFolio?
 
@@ -40,7 +40,7 @@ df = pd.DataFrame({
     'target': [0, 1, 0]
 })
 
-folio.add_data('training_data', df)
+folio.add('training_data', df)
 
 # View what's in the bundle
 folio.describe()
@@ -102,29 +102,29 @@ DataFolio supports multiple data types, each optimized for its use case:
 | **Numpy Arrays** | Embeddings, tensors | `.npy` |
 | **JSON** | Configs, metrics, lists | `.json` |
 | **Models** | sklearn | `.joblib`, `.skops` |
-| **Artifacts** | Images, PDFs, any file | Original format |
+| **Files** | Images, PDFs, any file | Original format |
 | **References** | External data (S3, etc.) | Metadata only |
 
-### The Universal `add_data()` Method
+### The Universal `add()` Method
 
-For simplicity, use `add_data()` which automatically detects the type:
+For simplicity, use `add()` which automatically detects the type:
 
 ```python
 # Automatically handles different types
-folio.add_data('df', dataframe)           # Table
-folio.add_data('embeddings', np_array)    # Numpy
-folio.add_data('config', {'lr': 0.01})    # JSON
-folio.add_data('model', sklearn_model)    # Model
-folio.add_data('score', 0.95)             # JSON (scalar)
+folio.add('df', dataframe)           # Table
+folio.add('embeddings', np_array)    # Numpy
+folio.add('config', {'lr': 0.01})    # JSON
+folio.add('model', sklearn_model)    # Model (real sklearn/XGBoost/LightGBM/CatBoost estimators)
+folio.add('score', 0.95)             # JSON (scalar)
 ```
 
-Or use type-specific methods for more control:
+Strings are always stored as JSON — a string that looks like a path is never
+treated as a file. Use the dedicated methods for what `add()` doesn't cover:
 
 ```python
-folio.add_table('df', dataframe, description='Training data')
-folio.add_numpy('embeddings', array, description='Word embeddings')
-folio.add_json('config', config_dict, description='Model config')
-folio.add_model('clf', model, description='Random forest')
+folio.add_model('clf', model, description='Random forest')      # any picklable object
+folio.add_file('path/to/plot.png', name='plot', description='Training curve')
+folio.reference_table('raw', path='s3://bucket/raw.parquet')    # external data, no copy
 ```
 
 ## Working with Data
@@ -137,40 +137,46 @@ import numpy as np
 
 # Tables (pandas or Polars DataFrames)
 df = pd.DataFrame({'x': [1, 2, 3], 'y': [4, 5, 6]})
-folio.add_table('data', df,
+folio.add('data', df,
     description='Experimental data',
     inputs=['raw_data'])  # Optional: track lineage
 
+# A non-default pandas index warns that it is dropped;
+# keep it explicitly with preserve_index=True
+folio.add('indexed_data', df_with_index, preserve_index=True)
+
 # Numpy arrays
 embeddings = np.random.randn(100, 128)
-folio.add_numpy('embeddings', embeddings,
+folio.add('embeddings', embeddings,
     description='Model embeddings')
 
 # JSON data (configs, metrics, lists)
 config = {'learning_rate': 0.01, 'batch_size': 32}
-folio.add_json('config', config,
+folio.add('config', config,
     description='Training configuration')
 
-# Scalars are stored as JSON
-folio.add_json('accuracy', 0.95)
+# Scalars are stored as JSON (note: NaN/inf serialize as null)
+folio.add('accuracy', 0.95)
 
-# Files/artifacts
-folio.add_artifact('plot.png', 'path/to/plot.png',
+# Files
+folio.add_file('path/to/plot.png', name='plot.png',
     description='Training curve')
 ```
 
 ### Retrieving Data
 
 ```python
-# Get by type-specific method
-df = folio.get_table('data')
-arr = folio.get_numpy('embeddings')
-config = folio.get_json('config')
+# Universal get() returns the right type
+df = folio.get('data')        # Returns DataFrame
+arr = folio.get('embeddings') # Returns numpy array
+config = folio.get('config')  # Returns dict
 
-# Or use universal get_data()
-df = folio.get_data('data')        # Returns DataFrame
-arr = folio.get_data('embeddings') # Returns numpy array
-config = folio.get_data('config')  # Returns dict
+# Tables support reader options
+df = folio.get('data', columns=['x'], filters=[('x', '>', 1)])
+pl_df = folio.get('data', frame='polars')  # eager Polars DataFrame
+
+# get() on a file item returns the payload path
+plot_path = folio.get('plot.png')
 ```
 
 ### Autocomplete-Friendly Access
@@ -196,14 +202,17 @@ folio.data.<TAB>  # Shows all available items
 
 ```python
 # Add initial data
-folio.add_data('model', model_v1)
+folio.add('model', model_v1)
 
 # Overwrite with new version
-folio.add_data('model', model_v2, overwrite=True)
+folio.add('model', model_v2, overwrite=True)
 
 # Without overwrite=True, you'll get an error
-folio.add_data('model', model_v3)  # Error: item exists!
+folio.add('model', model_v3)  # Error: item exists!
 ```
+
+`overwrite=True` is required to replace *any* existing item. If the item is
+pinned by a snapshot, the prior version is preserved via copy-on-write.
 
 ### Deleting Data
 
@@ -306,13 +315,14 @@ y_train = np.random.randint(0, 2, 100)
 pipeline.fit(X_train, y_train)
 
 # Save with skops format (custom=True)
-folio.add_sklearn('custom_pipeline', pipeline,
+folio.add_model('custom_pipeline', pipeline,
     custom=True,  # Uses skops for portability
     description='Pipeline with custom percentile clipper')
 
 # Load in a different environment (doesn't need PercentileClipper class!)
+# skops refuses unknown types by default, so trusted=True is required
 folio2 = DataFolio('path/to/bundle')
-loaded_pipeline = folio2.get_sklearn('custom_pipeline')
+loaded_pipeline = folio2.get_model('custom_pipeline', trusted=True)
 predictions = loaded_pipeline.predict(X_test)
 ```
 
@@ -325,14 +335,17 @@ predictions = loaded_pipeline.predict(X_test)
 
 ```python
 # Joblib format (default)
-folio.add_sklearn('model', pipeline)  # Uses joblib
+folio.add_model('model', pipeline)  # Uses joblib
 
 # Skops format (portable)
-folio.add_sklearn('model', pipeline, custom=True)  # Uses skops
+folio.add_model('model', pipeline, custom=True)  # Uses skops
 
-# Both work through generic add_model() too
-folio.add_model('model', pipeline, custom=True)
+# Loading a skops model requires opting in to trust its contents
+model = folio.get_model('model', trusted=True)
 ```
+
+Joblib models are pickle under the hood, so the same rule applies everywhere:
+only load folios you trust.
 
 **Best practices for custom transformers:**
 
@@ -371,16 +384,16 @@ Track dependencies between your data items to understand your workflow:
 ```python
 # Reference external data
 folio.reference_table('raw_data',
-    reference='s3://bucket/raw_data.parquet',
+    path='s3://bucket/raw_data.parquet',
     description='Original raw data from database')
 
 # Add processed data with lineage
-folio.add_table('cleaned_data', cleaned_df,
+folio.add('cleaned_data', cleaned_df,
     description='Cleaned and preprocessed',
     inputs=['raw_data'])  # Depends on raw_data
 
 # Add features
-folio.add_table('features', feature_df,
+folio.add('features', feature_df,
     description='Engineered features',
     inputs=['cleaned_data'])  # Depends on cleaned_data
 
@@ -424,12 +437,12 @@ For large datasets stored elsewhere (S3, network drives, etc.), use references i
 ```python
 # Reference data without copying
 folio.reference_table('huge_dataset',
-    reference='s3://my-bucket/data/train.parquet',
+    path='s3://my-bucket/data/train.parquet',
     description='10GB training dataset')
 
 # Reference with additional metadata
 folio.reference_table('cloud_data',
-    reference='gs://bucket/data.csv',
+    path='gs://bucket/data.csv',
     description='Data in Google Cloud Storage',
     num_rows=1_000_000,
     num_cols=500)
@@ -522,18 +535,18 @@ Multiple notebooks or processes can safely access the same bundle:
 ```python
 # Notebook 1: Create bundle
 folio1 = DataFolio('experiments/shared')
-folio1.add_data('results', df1)
+folio1.add('results', df1)
 
 # Notebook 2: Open same bundle
 folio2 = DataFolio('experiments/shared')
 print(folio2.describe())  # Shows 'results'
 
 # Notebook 1: Add more data
-folio1.add_data('analysis', df2)
+folio1.add('analysis', df2)
 
 # Notebook 2: Automatically sees new data!
 folio2.describe()  # Now shows both 'results' and 'analysis'
-data = folio2.get_data('analysis')  # Works immediately ✅
+data = folio2.get('analysis')  # Works immediately ✅
 ```
 
 All read operations automatically refresh from disk, so you always see the latest state.
@@ -558,7 +571,7 @@ folio.metadata['tags'] = ['classification', 'fraud', 'baseline']
 
 # 2. Reference external raw data
 folio.reference_table('raw_data',
-    reference='s3://data-lake/fraud/raw_2024.parquet',
+    path='s3://data-lake/fraud/raw_2024.parquet',
     description='Raw transaction data from 2024',
     num_rows=1_000_000,
     num_cols=25)
@@ -567,14 +580,14 @@ folio.reference_table('raw_data',
 raw_df = pd.read_parquet('s3://data-lake/fraud/raw_2024.parquet')
 cleaned_df = clean_data(raw_df)  # Your cleaning function
 
-folio.add_table('cleaned_data', cleaned_df,
+folio.add('cleaned_data', cleaned_df,
     description='Cleaned transaction data',
     inputs=['raw_data'])
 
 # 4. Engineer features
 features_df = engineer_features(cleaned_df)  # Your feature engineering
 
-folio.add_table('features', features_df,
+folio.add('features', features_df,
     description='Engineered features for classification',
     inputs=['cleaned_data'])
 
@@ -604,14 +617,14 @@ folio.add_model('classifier', clf,
     },
     inputs=['features'])
 
-folio.add_json('metrics', {
+folio.add('metrics', {
     'accuracy': float(accuracy),
     'f1_score': float(f1),
     'train_samples': len(X_train),
     'test_samples': len(X_test)
 })
 
-folio.add_json('feature_importance', {
+folio.add('feature_importance', {
     feature: float(importance)
     for feature, importance in zip(X.columns, clf.feature_importances_)
 })
@@ -627,7 +640,7 @@ folio.describe()
 # 11. Later: Load and use in production
 production_folio = DataFolio('experiments/fraud_detection_v1')
 model = production_folio.get_model('classifier')
-metrics = production_folio.get_json('metrics')
+metrics = production_folio.get('metrics')
 
 print(f"Deploying model with accuracy: {metrics['accuracy']}")
 predictions = model.predict(new_transactions)
@@ -672,11 +685,11 @@ You can inspect any file directly without DataFolio!
 
 ```python
 # Good
-folio.add_data('training_features_v2', df)
+folio.add('training_features_v2', df)
 folio.add_model('random_forest_baseline', model)
 
 # Bad
-folio.add_data('data1', df)
+folio.add('data1', df)
 folio.add_model('model', model)
 ```
 
@@ -684,7 +697,7 @@ folio.add_model('model', model)
 
 ```python
 # Always add descriptions
-folio.add_table('features', df,
+folio.add('features', df,
     description='Engineered features with PCA and polynomial terms')
 
 # Future you will thank present you
@@ -694,7 +707,7 @@ folio.add_table('features', df,
 
 ```python
 # Always specify inputs
-folio.add_table('features', feature_df,
+folio.add('features', feature_df,
     inputs=['cleaned_data'])
 
 # This helps you understand the data flow
@@ -724,7 +737,7 @@ folio.describe()  # Review what you have
 ```python
 # Don't copy huge datasets
 folio.reference_table('training_data',
-    reference='s3://bucket/huge_data.parquet')
+    path='s3://bucket/huge_data.parquet')
 
 # Load directly from source when needed
 df = pd.read_parquet(folio.data.training_data.path)
@@ -738,8 +751,8 @@ config = folio.data.config.content
 model = folio.data.classifier.content
 
 # Than this
-config = folio.get_data('config')
-model = folio.get_data('classifier')
+config = folio.get('config')
+model = folio.get('classifier')
 ```
 
 ### 8. Commit to Git
@@ -794,7 +807,7 @@ def run_experiment(name, config):
 
     # Load data
     data = load_data(config['data_source'])
-    folio.add_data('data', data)
+    folio.add('data', data)
 
     # Train
     model = train_model(data, config)
@@ -802,7 +815,7 @@ def run_experiment(name, config):
 
     # Evaluate
     metrics = evaluate_model(model, data)
-    folio.add_json('metrics', metrics)
+    folio.add('metrics', metrics)
     folio.metadata.update(metrics)
     folio.metadata['status'] = 'completed'
 

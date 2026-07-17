@@ -7,6 +7,15 @@
 > later section describing a `PyTorchHandler`, `add_pytorch`/`get_pytorch`,
 > `write_pytorch`/`read_pytorch`, or a `pytorch_model` item type is historical
 > and no longer applies; models are scikit-learn style via the `model` handler.
+> **As of 2.0 the public API is the unified core** — `add()`, `get()`,
+> `item_path()`, `item_info()` — plus the explicit verbs `add_model`/`get_model`
+> and `add_file`, and the table tools `reference_table`/`inspect_table`/
+> `scan_table`. Any later section showing `add_table`, `add_data`, `get_table`,
+> `add_numpy`, per-type `get_*_path`/`get_*_info` methods, a caching layer, or a
+> `cache/` package is historical and no longer applies (caching was removed
+> entirely; `overwrite=True` is required to replace any existing item). The
+> `DataFolio` class is now composed of `SnapshotMixin` (`snapshots.py`) and
+> `ContextCaptureMixin` (`context.py`).
 > Line-count and test-count figures elsewhere in this document are illustrative,
 > not current — run `uv run pytest --cov=datafolio tests` for live numbers.
 
@@ -48,8 +57,8 @@ The architecture is built on these core principles:
 ┌─────────────────────────────────────────────────────────────┐
 │                      User Code                               │
 │  folio = DataFolio('experiment')                            │
-│  folio.add_data('data', df)        ← Auto-detection         │
-│  folio.add_table('t', lazyframe)   ← Type-specific          │
+│  folio.add('data', df)             ← Auto-detection         │
+│  folio.add_model('m', model)       ← Explicit verb          │
 └─────────────────────┬───────────────────────────────────────┘
                       │
 ┌─────────────────────▼───────────────────────────────────────┐
@@ -110,7 +119,9 @@ The system consists of six main components that work together to provide the han
 
 ### 2.1 DataFolio Class (`folio.py`)
 
-The main orchestrator that users interact with. Responsibilities:
+The main orchestrator that users interact with. The class is composed of
+`SnapshotMixin` (`snapshots.py`, snapshot/versioning behavior) and
+`ContextCaptureMixin` (`context.py`, code/context capture). Responsibilities:
 
 **Bundle Management:**
 - Create/load/save bundles
@@ -120,7 +131,7 @@ The main orchestrator that users interact with. Responsibilities:
 **Item Registry:**
 - Maintain `_items` dict mapping names to metadata
 - Save/load items.json
-- Prevent duplicate names
+- Reject duplicate names (replacing an existing item requires `overwrite=True`)
 
 **Lineage Tracking:**
 - Record inputs for each item
@@ -129,26 +140,25 @@ The main orchestrator that users interact with. Responsibilities:
 
 **API Methods:**
 ```python
-# Generic API (auto-detection)
-folio.add_data(name, data, description=None, inputs=None)
-folio.get_data(name)
+# Unified write API (auto-detection: DataFrame/LazyFrame, numpy array,
+# dict/list/scalar, datetime, sklearn estimator)
+folio.add(name, obj, description=None, inputs=None, overwrite=False, code=None)
 folio.delete(name)
 
-# Type-specific API (explicit handlers)
-folio.add_table(name, df_or_lazyframe, ...)   # pandas / polars / LazyFrame
-folio.add_numpy(name, array, ...)
-folio.add_json(name, data, ...)
-folio.add_model(name, model, ...)             # scikit-learn style
-folio.add_artifact(name, filepath, ...)
-folio.add_timestamp(name, dt, ...)
+# Explicit verbs (for what add() can't auto-detect)
+folio.add_model(name, model, ...)             # scikit-learn style / picklable
+folio.add_file(filepath, name=name, ...)      # copy a file into the bundle
 folio.reference_table(name, path, ...)        # external link (offline)
 
-# Retrieval (type-specific methods available)
-folio.get_table(name)                          # pandas (default)
-folio.get_table(name, frame="polars")          # eager polars
+# Unified read API (single entry point; type-specific kwargs pass through)
+folio.get(name)                                # tables: pandas (default)
+folio.get(name, frame="polars")                # eager polars
+folio.get(name, columns=[...], filters=[...], engine="pyarrow")  # reader kwargs
+folio.get_model(name)                          # loaded model object
 folio.scan_table(name)                         # genuinely lazy pl.LazyFrame
 folio.inspect_table(name)                      # enrich a reference (I/O)
-# ... etc
+folio.item_path(name)                          # path to any item's payload
+folio.item_info(name)                          # metadata dict for any item
 
 # Metadata & lineage
 folio.describe()
@@ -158,7 +168,7 @@ folio.get_dependents(name)
 
 # Validation & Batching
 with folio.batch():
-    folio.add_data(...)
+    folio.add(...)
     folio.add_model(...)
 
 folio.validate()  # Check integrity
@@ -174,7 +184,7 @@ Abstract base class defining the handler interface. All handlers must inherit fr
 @property
 @abstractmethod
 def item_type(self) -> str:
-    """Unique identifier like 'pytorch_model' or 'included_table'"""
+    """Unique identifier like 'model' or 'included_table'"""
 ```
 
 **Required Methods:**
@@ -234,14 +244,13 @@ registry.clear()
 
 **Registration Order:**
 Handlers are registered in order of specificity (most specific first):
-1. TimestampHandler (datetime objects)
-2. PandasHandler (DataFrames)
-3. ReferenceTableHandler (table references)
-4. PyTorchHandler (torch.nn.Module)
-5. SklearnHandler (any joblib-serializable - catch-all)
-6. NumpyHandler (numpy arrays)
-7. JsonHandler (dicts and lists)
-8. ArtifactHandler (file paths)
+1. DataframeHandler (pandas/Polars DataFrames, Polars LazyFrames)
+2. NumpyHandler (numpy arrays)
+3. SklearnHandler (ML models with sklearn API)
+4. ArtifactHandler (existing file paths)
+5. TimestampHandler (datetime objects)
+6. ReferenceTableHandler (never auto-detects; position neutral)
+7. JsonHandler (dicts and lists - generic)
 
 This ordering ensures correct auto-detection when types overlap.
 
@@ -273,14 +282,9 @@ def read_parquet(self, path: str, **kwargs) -> pd.DataFrame
 def write_joblib(self, path: str, obj: Any) -> None
 def read_joblib(self, path: str) -> Any
 
-# PyTorch
-def write_pytorch(
-    self, path: str, model: Any,
-    init_args: Optional[Dict] = None,
-    save_class: bool = False,
-    optimizer_state: Optional[Dict] = None
-) -> None
-def read_pytorch(self, path: str, **kwargs) -> Dict[str, Any]
+# Skops (secure sklearn model format)
+def write_skops(self, path: str, obj: Any) -> None
+def read_skops(self, path: str, trusted: Any = False) -> Any
 
 # NumPy
 def write_numpy(self, path: str, array: np.ndarray) -> None
@@ -305,8 +309,9 @@ Type-safe enum system for organizing items into subdirectories.
 ```python
 class StorageCategory(Enum):
     TABLES = "tables"      # DataFrames and references
-    MODELS = "models"      # ML models (sklearn, pytorch)
+    MODELS = "models"      # ML models (sklearn-style)
     ARTIFACTS = "artifacts"  # Everything else
+    VIEWS = "views"        # Reserved for future use
 ```
 
 **Item Type Mapping:**
@@ -315,7 +320,6 @@ ITEM_TYPE_TO_CATEGORY = {
     "included_table": StorageCategory.TABLES,
     "referenced_table": StorageCategory.TABLES,
     "model": StorageCategory.MODELS,
-    "pytorch_model": StorageCategory.MODELS,
     "numpy_array": StorageCategory.ARTIFACTS,
     "json_data": StorageCategory.ARTIFACTS,
     "artifact": StorageCategory.ARTIFACTS,
@@ -356,16 +360,15 @@ folio.metadata.update({'author': 'Alice'})  # Auto-saves
 Provides convenient data access patterns:
 
 ```python
-# Dictionary-style access
-folio['data'] = df           # Calls add_data()
-df = folio['data']           # Calls get_data()
-del folio['data']            # Calls delete()
+# Accessed via the read-only folio.data accessor
+proxy = folio.data['my_item']    # Dictionary-style: returns ItemProxy
+proxy = folio.data.my_item       # Attribute-style: returns ItemProxy
 
-# Attribute-style access (ItemProxy)
-folio.data.get()             # Get data
-folio.data.metadata          # Get metadata
-folio.data.inputs            # Get inputs
-folio.data.dependents        # Get dependents
+# ItemProxy delegates to the unified API
+proxy.get()                  # Calls folio.get(name)
+proxy.metadata               # Get metadata
+proxy.inputs                 # Get inputs
+proxy.dependents             # Get dependents
 ```
 
 #### DisplayFormatter (`display.py` - 265 lines, 73% coverage)

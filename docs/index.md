@@ -2,7 +2,7 @@
 
 **A lightweight, filesystem-based data versioning and experiment tracking library for Python.**
 
-DataFolio helps you organize, version, and track your data science experiments by storing datasets, models, and artifacts in a simple, transparent directory structure. Everything is saved as plain files (Parquet, JSON, pickle) that you can inspect, version with git, or backup to any storage system.
+DataFolio helps you organize, version, and track your data science experiments by storing datasets, models, and files in a simple, transparent directory structure. Everything is saved as plain files (Parquet, JSON, pickle) that you can inspect, version with git, or backup to any storage system.
 
 ## Why DataFolio?
 
@@ -20,7 +20,7 @@ from sklearn.ensemble import RandomForestClassifier
 folio = DataFolio('experiments/fraud_detection')
 
 # Process your data
-folio.add_table('training_data', processed_df,
+folio.add('training_data', processed_df,
     description='Cleaned transaction data with engineered features')
 
 # Train a model - it gets 89% accuracy! 🎉
@@ -59,7 +59,7 @@ This is the core DataFolio workflow: track your data, models, and results; snaps
 
 ## Key Features
 
-- **Universal Data Management** - Single `add_data()` method handles DataFrames, numpy arrays, dicts, lists, and scalars
+- **Universal Data Management** - A unified `add()`/`get()` pair handles DataFrames, numpy arrays, dicts, lists, scalars, and datetimes
 - **Model Support** - Save and load scikit-learn models with full metadata
 - **Snapshots** - Checkpoint owned data with copy-on-write versioning (no data duplication; external references preserve the link, not the bytes)
 - **Data Lineage** - Track inputs and dependencies between datasets and models
@@ -96,9 +96,9 @@ folio.metadata['experiment'] = 'hyperparameter_tuning'
 folio.metadata['date'] = '2025-01-20'
 
 # Save data, models, and results
-folio.add_table('features', feature_df)
+folio.add('features', feature_df)
 folio.add_model('model', trained_model)
-folio.add_json('metrics', {'accuracy': 0.92, 'f1': 0.89})
+folio.add('metrics', {'accuracy': 0.92, 'f1': 0.89})
 
 # Create snapshot at milestones
 folio.create_snapshot('v2.0-production', tags=['production'])
@@ -115,7 +115,7 @@ folio.create_snapshot('neurips-2025-submission',
 # Six months later: reviewers ask for clarification
 paper_version = DataFolio.load_snapshot('research/exp', 'neurips-2025-submission')
 exact_model = paper_version.get_model('classifier')
-exact_data = paper_version.get_table('test_data')
+exact_data = paper_version.get('test_data')
 ```
 
 ### Team Collaboration
@@ -125,7 +125,7 @@ exact_data = paper_version.get_table('test_data')
 folio = DataFolio('s3://team-bucket/shared-experiment')
 
 # Everyone sees the same data
-df = folio.get_table('results')
+df = folio.get('results')
 model = folio.get_model('classifier')
 
 # Compare different team members' approaches
@@ -162,18 +162,16 @@ experiments/my_experiment/
 ├── snapshots.json            # Snapshot registry
 │
 ├── tables/
-│   └── features.parquet      # DataFrames as Parquet
+│   └── features--r2.parquet  # DataFrames as Parquet (versioned filenames)
 │
 ├── models/
-│   └── classifier.joblib     # Scikit-learn models
-│
-├── numpy/
-│   └── embeddings.npy        # Numpy arrays
+│   └── classifier--r3.joblib # Scikit-learn models
 │
 └── artifacts/
-    ├── config.json           # JSON data
-    ├── plot.png              # Images
-    └── report.pdf            # Any file type
+    ├── embeddings--r1.npy    # Numpy arrays
+    ├── config--r4.json       # JSON data
+    ├── plot--r1.png          # Images
+    └── report--r1.pdf        # Any file type
 ```
 
 All files use standard formats you can open with any tool!
