@@ -664,3 +664,12 @@ def validate_snapshot_name(name: str) -> None:
     # Check reasonable length
     if len(name) > 100:
         raise ValueError(f"Snapshot name '{name}' is too long (max 100 characters)")
+
+
+def _polars_only_error(name: str) -> ValueError:
+    """Build the standard error for pandas access to a polars-only table."""
+    return ValueError(
+        f"Table '{name}' is a sharded/partitioned (polars-only) dataset and "
+        f"cannot be loaded as pandas. Use get_lazy('{name}') for a lazy scan, "
+        f"or get_table('{name}', frame='polars') to collect it eagerly."
+    )
