@@ -224,7 +224,7 @@ class DisplayFormatter:
                     desc = item.get("description", "(no description)")
                     lines.append(f"  • {name}: {desc}")
                     if show_paths:
-                        lines.append(f"    ↳ path: {self._folio.get_item_path(name)}")
+                        lines.append(f"    ↳ path: {self._folio.item_path(name)}")
                     # Show file size if available
                     filesize = self._get_item_filesize(item)
                     if filesize is not None:
@@ -250,7 +250,7 @@ class DisplayFormatter:
                     dtype = item.get("dtype", "unknown")
                     lines.append(f"  • {name}: {desc}")
                     if show_paths:
-                        lines.append(f"    ↳ path: {self._folio.get_item_path(name)}")
+                        lines.append(f"    ↳ path: {self._folio.item_path(name)}")
                     lines.append(f"    ↳ shape: {shape}, dtype: {dtype}")
                     # Show file size if available
                     filesize = self._get_item_filesize(item)
@@ -274,7 +274,7 @@ class DisplayFormatter:
                     data_type = item.get("data_type", "unknown")
                     lines.append(f"  • {name}: {desc}")
                     if show_paths:
-                        lines.append(f"    ↳ path: {self._folio.get_item_path(name)}")
+                        lines.append(f"    ↳ path: {self._folio.item_path(name)}")
                     lines.append(f"    ↳ type: {data_type}")
                     # Show file size if available
                     filesize = self._get_item_filesize(item)
@@ -297,7 +297,7 @@ class DisplayFormatter:
                     desc = item.get("description", "(no description)")
                     lines.append(f"  • {name}: {desc}")
                     if show_paths:
-                        lines.append(f"    ↳ path: {self._folio.get_item_path(name)}")
+                        lines.append(f"    ↳ path: {self._folio.item_path(name)}")
                     # Show file size if available
                     filesize = self._get_item_filesize(item)
                     if filesize is not None:
@@ -328,7 +328,7 @@ class DisplayFormatter:
                     category_str = f" ({category})" if category else ""
                     lines.append(f"  • {name}{category_str}: {desc}")
                     if show_paths:
-                        lines.append(f"    ↳ path: {self._folio.get_item_path(name)}")
+                        lines.append(f"    ↳ path: {self._folio.item_path(name)}")
                     # Show file size if available
                     filesize = self._get_item_filesize(item)
                     if filesize is not None:
@@ -347,7 +347,7 @@ class DisplayFormatter:
                     desc = item.get("description", "(no description)")
                     lines.append(f"  • {name}: {desc}")
                     if show_paths:
-                        lines.append(f"    ↳ path: {self._folio.get_item_path(name)}")
+                        lines.append(f"    ↳ path: {self._folio.item_path(name)}")
                     # Show formatted timestamp
                     iso_string = item.get("iso_string", "")
                     if iso_string:

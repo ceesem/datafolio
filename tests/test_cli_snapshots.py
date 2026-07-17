@@ -25,7 +25,7 @@ class TestSnapshotCreate:
         # Setup bundle
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
 
         # Run CLI command
         runner = CliRunner()
@@ -45,7 +45,7 @@ class TestSnapshotCreate:
         """Test snapshot creation with description and tags."""
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
 
         runner = CliRunner()
         result = runner.invoke(
@@ -160,7 +160,7 @@ class TestSnapshotShow:
         """Test showing snapshot details."""
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
         folio.metadata["accuracy"] = 0.89
         folio.create_snapshot("v1.0", description="Test snapshot")
 
@@ -194,11 +194,11 @@ class TestSnapshotCompare:
         """Test comparing two snapshots."""
         folio = DataFolio(tmp_path / "test")
         df1 = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data1", df1)
+        folio.add("data1", df1)
         folio.create_snapshot("v1.0")
 
         df2 = pd.DataFrame({"b": [4, 5, 6]})
-        folio.add_table("data2", df2)
+        folio.add("data2", df2)
         folio.create_snapshot("v2.0")
 
         runner = CliRunner()
@@ -302,12 +302,12 @@ class TestSnapshotGC:
         """Test garbage collection dry run."""
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
         folio.create_snapshot("v1.0")
 
         # Create orphaned version
-        folio.add_table("data", pd.DataFrame({"a": [4, 5, 6]}), overwrite=True)
-        folio.add_table("data", pd.DataFrame({"a": [7, 8, 9]}), overwrite=True)
+        folio.add("data", pd.DataFrame({"a": [4, 5, 6]}), overwrite=True)
+        folio.add("data", pd.DataFrame({"a": [7, 8, 9]}), overwrite=True)
 
         runner = CliRunner()
         result = runner.invoke(
@@ -321,7 +321,7 @@ class TestSnapshotGC:
         """Test actual garbage collection."""
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
         folio.create_snapshot("v1.0")
 
         runner = CliRunner()
@@ -339,7 +339,7 @@ class TestSnapshotReproduce:
         """Test showing reproduction instructions."""
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
         folio.create_snapshot("v1.0")
 
         runner = CliRunner()
@@ -371,7 +371,7 @@ class TestSnapshotStatus:
         """Test status when no changes since last snapshot."""
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
         folio.create_snapshot("v1.0")
 
         runner = CliRunner()
@@ -386,12 +386,12 @@ class TestSnapshotStatus:
         """Test status showing changes since last snapshot."""
         folio = DataFolio(tmp_path / "test")
         df1 = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data1", df1)
+        folio.add("data1", df1)
         folio.create_snapshot("v1.0")
 
         # Add new item
         df2 = pd.DataFrame({"b": [4, 5, 6]})
-        folio.add_table("data2", df2)
+        folio.add("data2", df2)
 
         runner = CliRunner()
         result = runner.invoke(
@@ -406,12 +406,12 @@ class TestSnapshotStatus:
         """Test status showing modified items."""
         folio = DataFolio(tmp_path / "test")
         df1 = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df1)
+        folio.add("data", df1)
         folio.create_snapshot("v1.0")
 
         # Modify item
         df2 = pd.DataFrame({"a": [4, 5, 6]})
-        folio.add_table("data", df2, overwrite=True)
+        folio.add("data", df2, overwrite=True)
 
         runner = CliRunner()
         result = runner.invoke(
@@ -430,12 +430,12 @@ class TestSnapshotDiff:
         """Test diff to last snapshot (no argument)."""
         folio = DataFolio(tmp_path / "test")
         df1 = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data1", df1)
+        folio.add("data1", df1)
         folio.create_snapshot("v1.0")
 
         # Add new item
         df2 = pd.DataFrame({"b": [4, 5, 6]})
-        folio.add_table("data2", df2)
+        folio.add("data2", df2)
 
         runner = CliRunner()
         result = runner.invoke(
@@ -450,16 +450,16 @@ class TestSnapshotDiff:
         """Test diff to specific snapshot."""
         folio = DataFolio(tmp_path / "test")
         df1 = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data1", df1)
+        folio.add("data1", df1)
         folio.create_snapshot("v1.0")
 
         df2 = pd.DataFrame({"b": [4, 5, 6]})
-        folio.add_table("data2", df2)
+        folio.add("data2", df2)
         folio.create_snapshot("v2.0")
 
         # Add another item
         df3 = pd.DataFrame({"c": [7, 8, 9]})
-        folio.add_table("data3", df3)
+        folio.add("data3", df3)
 
         runner = CliRunner()
         result = runner.invoke(
@@ -475,7 +475,7 @@ class TestSnapshotDiff:
         """Test diff when no changes."""
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
         folio.create_snapshot("v1.0")
 
         runner = CliRunner()
@@ -581,7 +581,7 @@ class TestDescribe:
         """Test describing a bundle."""
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
 
         runner = CliRunner()
         result = runner.invoke(cli, ["--folio", str(tmp_path / "test"), "describe"])

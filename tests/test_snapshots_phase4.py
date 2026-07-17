@@ -17,7 +17,7 @@ class TestSnapshotAccessor:
         """Test accessing snapshot using dict-like syntax."""
         folio = DataFolio(tmp_path / "test-bundle")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
         folio.create_snapshot("v1.0")
 
         # Access snapshot
@@ -28,7 +28,7 @@ class TestSnapshotAccessor:
         """Test 'in' operator for checking snapshot existence."""
         folio = DataFolio(tmp_path / "test-bundle")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
         folio.create_snapshot("v1.0")
 
         assert "v1.0" in folio.snapshots
@@ -38,9 +38,9 @@ class TestSnapshotAccessor:
         """Test iterating over snapshot names."""
         folio = DataFolio(tmp_path / "test-bundle")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
         folio.create_snapshot("v1.0")
-        folio.add_table("data2", df.copy())
+        folio.add("data2", df.copy())
         folio.create_snapshot("v2.0")
 
         snapshot_names = list(folio.snapshots)
@@ -52,14 +52,14 @@ class TestSnapshotAccessor:
         """Test len() on snapshots accessor."""
         folio = DataFolio(tmp_path / "test-bundle")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
 
         assert len(folio.snapshots) == 0
 
         folio.create_snapshot("v1.0")
         assert len(folio.snapshots) == 1
 
-        folio.add_table("data2", df.copy())
+        folio.add("data2", df.copy())
         folio.create_snapshot("v2.0")
         assert len(folio.snapshots) == 2
 
@@ -67,9 +67,9 @@ class TestSnapshotAccessor:
         """Test keys(), values(), items() methods."""
         folio = DataFolio(tmp_path / "test-bundle")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
         folio.create_snapshot("v1.0")
-        folio.add_table("data2", df.copy())
+        folio.add("data2", df.copy())
         folio.create_snapshot("v2.0")
 
         # Keys
@@ -90,7 +90,7 @@ class TestSnapshotAccessor:
         """Test accessing nonexistent snapshot raises KeyError."""
         folio = DataFolio(tmp_path / "test-bundle")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
 
         with pytest.raises(KeyError, match="not found"):
             _ = folio.snapshots["nonexistent"]
@@ -103,7 +103,7 @@ class TestSnapshotView:
         """Test accessing snapshot metadata properties."""
         folio = DataFolio(tmp_path / "test-bundle")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
         folio.create_snapshot("v1.0", description="Test snapshot", tags=["test"])
 
         snapshot = folio.snapshots["v1.0"]
@@ -119,7 +119,7 @@ class TestSnapshotView:
             tmp_path / "test-bundle", metadata={"experiment": "test", "value": 42}
         )
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
         folio.create_snapshot("v1.0")
 
         snapshot = folio.snapshots["v1.0"]
@@ -130,12 +130,12 @@ class TestSnapshotView:
         """Test reading table from snapshot that's still current."""
         folio = DataFolio(tmp_path / "test-bundle")
         df = pd.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6]})
-        folio.add_table("data", df)
+        folio.add("data", df)
         folio.create_snapshot("v1.0")
 
         # Read from snapshot
         snapshot = folio.snapshots["v1.0"]
-        loaded_df = snapshot.get_table("data")
+        loaded_df = snapshot.get("data")
 
         pd.testing.assert_frame_equal(loaded_df, df)
 
@@ -146,38 +146,38 @@ class TestSnapshotView:
         df2 = pd.DataFrame({"a": [4, 5, 6]})
 
         # Create v1.0 snapshot
-        folio.add_table("data", df1)
+        folio.add("data", df1)
         folio.create_snapshot("v1.0")
 
         # Overwrite and create v2.0
-        folio.add_table("data", df2, overwrite=True)
+        folio.add("data", df2, overwrite=True)
         folio.create_snapshot("v2.0")
 
         # Read from v1.0 snapshot - should get old data
         snapshot_v1 = folio.snapshots["v1.0"]
-        loaded_df1 = snapshot_v1.get_table("data")
+        loaded_df1 = snapshot_v1.get("data")
         pd.testing.assert_frame_equal(loaded_df1, df1)
 
         # Read from v2.0 snapshot - should get new data
         snapshot_v2 = folio.snapshots["v2.0"]
-        loaded_df2 = snapshot_v2.get_table("data")
+        loaded_df2 = snapshot_v2.get("data")
         pd.testing.assert_frame_equal(loaded_df2, df2)
 
         # Current version should also be new data
-        current_df = folio.get_table("data")
+        current_df = folio.get("data")
         pd.testing.assert_frame_equal(current_df, df2)
 
     def test_get_nonexistent_table_from_snapshot(self, tmp_path):
         """Test getting nonexistent table from snapshot raises KeyError."""
         folio = DataFolio(tmp_path / "test-bundle")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
         folio.create_snapshot("v1.0")
 
         snapshot = folio.snapshots["v1.0"]
 
         with pytest.raises(KeyError, match="not found"):
-            snapshot.get_table("nonexistent")
+            snapshot.get("nonexistent")
 
     def test_snapshot_item_versions(self, tmp_path):
         """Test that item_versions dict shows correct items."""
@@ -185,8 +185,8 @@ class TestSnapshotView:
         df1 = pd.DataFrame({"a": [1, 2, 3]})
         df2 = pd.DataFrame({"b": [4, 5, 6]})
 
-        folio.add_table("table1", df1)
-        folio.add_table("table2", df2)
+        folio.add("table1", df1)
+        folio.add("table2", df2)
         folio.create_snapshot("v1.0")
 
         snapshot = folio.snapshots["v1.0"]
@@ -207,7 +207,7 @@ class TestListSnapshots:
         """Test listing single snapshot."""
         folio = DataFolio(tmp_path / "test-bundle")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
         folio.create_snapshot("v1.0", description="First snapshot", tags=["baseline"])
 
         snapshots = folio.list_snapshots()
@@ -223,13 +223,13 @@ class TestListSnapshots:
         df = pd.DataFrame({"a": [1, 2, 3]})
 
         # Create snapshots in order
-        folio.add_table("data", df)
+        folio.add("data", df)
         folio.create_snapshot("v1.0")
 
-        folio.add_table("data2", df.copy())
+        folio.add("data2", df.copy())
         folio.create_snapshot("v2.0")
 
-        folio.add_table("data3", df.copy())
+        folio.add("data3", df.copy())
         folio.create_snapshot("v3.0")
 
         snapshots = folio.list_snapshots()
@@ -255,10 +255,10 @@ class TestSnapshotReloadingPhase4:
         df1 = pd.DataFrame({"a": [1, 2, 3]})
         df2 = pd.DataFrame({"a": [4, 5, 6]})
 
-        folio1.add_table("data", df1)
+        folio1.add("data", df1)
         folio1.create_snapshot("v1.0")
 
-        folio1.add_table("data", df2, overwrite=True)
+        folio1.add("data", df2, overwrite=True)
         folio1.create_snapshot("v2.0")
 
         # Reload bundle
@@ -270,12 +270,12 @@ class TestSnapshotReloadingPhase4:
 
         # Should be able to read old data from v1.0
         snapshot_v1 = folio2.snapshots["v1.0"]
-        loaded_df1 = snapshot_v1.get_table("data")
+        loaded_df1 = snapshot_v1.get("data")
         pd.testing.assert_frame_equal(loaded_df1, df1)
 
         # Should be able to read new data from v2.0
         snapshot_v2 = folio2.snapshots["v2.0"]
-        loaded_df2 = snapshot_v2.get_table("data")
+        loaded_df2 = snapshot_v2.get("data")
         pd.testing.assert_frame_equal(loaded_df2, df2)
 
 
@@ -288,7 +288,7 @@ class TestCompleteSnapshotWorkflow:
 
         # Initial state
         train_v1 = pd.DataFrame({"features": [1, 2, 3], "labels": [0, 1, 0]})
-        folio.add_table("train_data", train_v1)
+        folio.add("train_data", train_v1)
         folio.metadata["accuracy"] = 0.85
         folio.create_snapshot("v1.0-baseline", description="Initial model")
 
@@ -296,7 +296,7 @@ class TestCompleteSnapshotWorkflow:
         train_v2 = pd.DataFrame(
             {"features": [1, 2, 3, 4, 5], "labels": [0, 1, 0, 1, 1]}
         )
-        folio.add_table("train_data", train_v2, overwrite=True)
+        folio.add("train_data", train_v2, overwrite=True)
         folio.metadata["accuracy"] = 0.92
         folio.create_snapshot("v2.0-optimized", description="Tuned model")
 
@@ -306,18 +306,18 @@ class TestCompleteSnapshotWorkflow:
 
         # Access v1.0 snapshot
         v1_snapshot = folio.snapshots["v1.0-baseline"]
-        v1_data = v1_snapshot.get_table("train_data")
+        v1_data = v1_snapshot.get("train_data")
         assert len(v1_data) == 3  # Original had 3 rows
         assert v1_snapshot.metadata["accuracy"] == 0.85
 
         # Access v2.0 snapshot
         v2_snapshot = folio.snapshots["v2.0-optimized"]
-        v2_data = v2_snapshot.get_table("train_data")
+        v2_data = v2_snapshot.get("train_data")
         assert len(v2_data) == 5  # New version has 5 rows
         assert v2_snapshot.metadata["accuracy"] == 0.92
 
         # Current state should match v2.0
-        current_data = folio.get_table("train_data")
+        current_data = folio.get("train_data")
         pd.testing.assert_frame_equal(current_data, train_v2)
         assert folio.metadata["accuracy"] == 0.92
 

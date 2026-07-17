@@ -21,7 +21,7 @@ class TestExportSnapshot:
         # Create source bundle with data
         source = DataFolio(tmp_path / "source")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        source.add_table("data", df)
+        source.add("data", df)
         source.metadata["accuracy"] = 0.89
         source.create_snapshot("v1.0")
 
@@ -34,14 +34,14 @@ class TestExportSnapshot:
         assert "data" in exported._items
 
         # Verify data is intact
-        exported_df = exported.get_table("data")
+        exported_df = exported.get("data")
         pd.testing.assert_frame_equal(exported_df, df)
 
     def test_export_includes_source_metadata(self, tmp_path):
         """Test that export includes source snapshot metadata."""
         source = DataFolio(tmp_path / "source")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        source.add_table("data", df)
+        source.add("data", df)
         source.create_snapshot("v1.0", description="Test snapshot", tags=["baseline"])
 
         # Export with metadata
@@ -59,7 +59,7 @@ class TestExportSnapshot:
         """Test export without source snapshot metadata."""
         source = DataFolio(tmp_path / "source")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        source.add_table("data", df)
+        source.add("data", df)
         source.create_snapshot("v1.0")
 
         # Export without metadata
@@ -74,12 +74,12 @@ class TestExportSnapshot:
         """Test that export creates bundle without version history."""
         source = DataFolio(tmp_path / "source")
         df1 = pd.DataFrame({"a": [1, 2, 3]})
-        source.add_table("data", df1)
+        source.add("data", df1)
         source.create_snapshot("v1.0")
 
         # Add more data and create another snapshot
         df2 = pd.DataFrame({"b": [4, 5, 6]})
-        source.add_table("data2", df2)
+        source.add("data2", df2)
         source.create_snapshot("v2.0")
 
         # Export v1.0
@@ -97,9 +97,9 @@ class TestExportSnapshot:
         source = DataFolio(tmp_path / "source")
         df1 = pd.DataFrame({"a": [1, 2, 3]})
         df2 = pd.DataFrame({"b": [4, 5, 6]})
-        source.add_table("table1", df1)
-        source.add_table("table2", df2)
-        source.add_json("config", {"key": "value"})
+        source.add("table1", df1)
+        source.add("table2", df2)
+        source.add("config", {"key": "value"})
         source.metadata["experiment"] = "test"
         source.create_snapshot("v1.0")
 
@@ -112,16 +112,16 @@ class TestExportSnapshot:
         assert "config" in exported._items
 
         # Verify data integrity
-        pd.testing.assert_frame_equal(exported.get_table("table1"), df1)
-        pd.testing.assert_frame_equal(exported.get_table("table2"), df2)
-        assert exported.get_json("config") == {"key": "value"}
+        pd.testing.assert_frame_equal(exported.get("table1"), df1)
+        pd.testing.assert_frame_equal(exported.get("table2"), df2)
+        assert exported.get("config") == {"key": "value"}
         assert exported.metadata["experiment"] == "test"
 
     def test_export_preserves_metadata(self, tmp_path):
         """Test that export preserves custom metadata."""
         source = DataFolio(tmp_path / "source")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        source.add_table("data", df)
+        source.add("data", df)
         source.metadata["accuracy"] = 0.89
         source.metadata["model_type"] = "random_forest"
         source.metadata["dataset"] = "iris"
@@ -146,7 +146,7 @@ class TestExportSnapshot:
         """Test that export fails if target exists."""
         source = DataFolio(tmp_path / "source")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        source.add_table("data", df)
+        source.add("data", df)
         source.create_snapshot("v1.0")
 
         # Create target directory
@@ -161,7 +161,7 @@ class TestExportSnapshot:
         """Test that exported bundle is mutable."""
         source = DataFolio(tmp_path / "source")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        source.add_table("data", df)
+        source.add("data", df)
         source.create_snapshot("v1.0")
 
         # Export
@@ -172,7 +172,7 @@ class TestExportSnapshot:
 
         # Should be able to add data
         df2 = pd.DataFrame({"b": [4, 5, 6]})
-        exported.add_table("new_data", df2)
+        exported.add("new_data", df2)
         assert "new_data" in exported._items
 
     def test_export_snapshot_from_history(self, tmp_path):
@@ -181,17 +181,17 @@ class TestExportSnapshot:
 
         # v1.0: Initial state
         df1 = pd.DataFrame({"a": [1, 2, 3]})
-        source.add_table("data", df1)
+        source.add("data", df1)
         source.metadata["version"] = "1.0"
         source.create_snapshot("v1.0")
 
         # v2.0: Modified state
-        source.add_table("data", pd.DataFrame({"a": [4, 5, 6]}), overwrite=True)
+        source.add("data", pd.DataFrame({"a": [4, 5, 6]}), overwrite=True)
         source.metadata["version"] = "2.0"
         source.create_snapshot("v2.0")
 
         # v3.0: Further modified
-        source.add_table("data", pd.DataFrame({"a": [7, 8, 9]}), overwrite=True)
+        source.add("data", pd.DataFrame({"a": [7, 8, 9]}), overwrite=True)
         source.metadata["version"] = "3.0"
         source.create_snapshot("v3.0")
 
@@ -200,7 +200,7 @@ class TestExportSnapshot:
 
         # Should have v1.0 state
         assert exported.metadata["version"] == "1.0"
-        exported_df = exported.get_table("data")
+        exported_df = exported.get("data")
         pd.testing.assert_frame_equal(exported_df, df1)
 
 
@@ -212,7 +212,7 @@ class TestExportWorkflows:
         # Research bundle with multiple iterations
         research = DataFolio(tmp_path / "research")
         df = pd.DataFrame({"data": [1, 2, 3]})
-        research.add_table("data", df)
+        research.add("data", df)
         research.metadata["accuracy"] = 0.89
         research.create_snapshot("baseline")
 
@@ -233,7 +233,7 @@ class TestExportWorkflows:
         # Development bundle
         dev = DataFolio(tmp_path / "dev")
         df = pd.DataFrame({"features": [1, 2, 3]})
-        dev.add_table("training_data", df)
+        dev.add("training_data", df)
         dev.metadata["model_version"] = "2.1"
         dev.metadata["environment"] = "development"
         dev.create_snapshot("production-v2.1", tags=["production"])
@@ -251,7 +251,7 @@ class TestExportWorkflows:
         # Active research bundle
         active = DataFolio(tmp_path / "active")
         df = pd.DataFrame({"data": [1, 2, 3]})
-        active.add_table("data", df)
+        active.add("data", df)
         active.metadata["experiment"] = "paper-2024"
         active.create_snapshot("paper-submission")
 

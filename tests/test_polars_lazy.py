@@ -141,9 +141,9 @@ class TestHandlerLazy:
     def test_included_get_lazy(self, tmp_path):
         folio = DataFolio(tmp_path / "b")
         df = pd.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6]})
-        folio.add_table("t", df)
+        folio.add("t", df)
 
-        lf = folio.get_lazy("t")
+        lf = folio.scan_table("t")
         assert isinstance(lf, pl.LazyFrame)
         assert lf.collect()["a"].to_list() == [1, 2, 3]
 
@@ -155,7 +155,7 @@ class TestHandlerLazy:
         folio = DataFolio(tmp_path / "b")
         folio.reference_table("ref", ext)
 
-        lf = folio.get_lazy("ref")
+        lf = folio.scan_table("ref")
         assert isinstance(lf, pl.LazyFrame)
         assert lf.filter(pl.col("a") > 1).collect().shape == (2, 2)
 
@@ -166,10 +166,10 @@ class TestHandlerLazy:
 
         folio = DataFolio(tmp_path / "b")
         folio.reference_table("ref", ext)  # offline: no schema yet
-        assert "columns" not in folio.get_table_info("ref")
+        assert "columns" not in folio.item_info("ref")
 
         folio.inspect_table("ref")  # explicit enrichment
-        info = folio.get_table_info("ref")
+        info = folio.item_info("ref")
         assert info["columns"] == ["a", "b"]
         assert set(info["dtypes"]) == {"a", "b"}
         assert info["num_rows"] == 3
@@ -182,7 +182,7 @@ class TestHandlerLazy:
         folio = DataFolio(tmp_path / "b")
         folio.reference_table("ref", ext)
 
-        info = folio.get_table_info("ref")
+        info = folio.item_info("ref")
         assert "columns" not in info
 
     def test_reference_records_size_via_inspect(self, tmp_path):
@@ -192,16 +192,16 @@ class TestHandlerLazy:
 
         folio = DataFolio(tmp_path / "b")
         folio.reference_table("ref", ext)
-        assert "size_bytes" not in folio.get_table_info("ref")
+        assert "size_bytes" not in folio.item_info("ref")
 
         folio.inspect_table("ref")
-        info = folio.get_table_info("ref")
+        info = folio.item_info("ref")
         assert info["size_bytes"] == ext.stat().st_size
 
     def test_included_records_size(self, tmp_path):
         folio = DataFolio(tmp_path / "b")
-        folio.add_table("t", pd.DataFrame({"a": range(100)}))
-        info = folio.get_table_info("t")
+        folio.add("t", pd.DataFrame({"a": range(100)}))
+        info = folio.item_info("t")
         assert info["size_bytes"] > 0
 
 
@@ -213,14 +213,14 @@ class TestHandlerLazy:
 class TestFramePivot:
     def test_get_table_default_pandas(self, tmp_path):
         folio = DataFolio(tmp_path / "b")
-        folio.add_table("t", pd.DataFrame({"a": [1, 2, 3]}))
-        out = folio.get_table("t")
+        folio.add("t", pd.DataFrame({"a": [1, 2, 3]}))
+        out = folio.get("t")
         assert isinstance(out, pd.DataFrame)
 
     def test_get_table_polars(self, tmp_path):
         folio = DataFolio(tmp_path / "b")
-        folio.add_table("t", pd.DataFrame({"a": [1, 2, 3]}))
-        out = folio.get_table("t", frame="polars")
+        folio.add("t", pd.DataFrame({"a": [1, 2, 3]}))
+        out = folio.get("t", frame="polars")
         assert isinstance(out, pl.DataFrame)
         assert out["a"].to_list() == [1, 2, 3]
 
@@ -230,14 +230,14 @@ class TestFramePivot:
         df.to_parquet(ext, index=False)
         folio = DataFolio(tmp_path / "b")
         folio.reference_table("ref", ext)
-        out = folio.get_table("ref", frame="polars")
+        out = folio.get("ref", frame="polars")
         assert isinstance(out, pl.DataFrame)
 
     def test_get_table_bad_frame(self, tmp_path):
         folio = DataFolio(tmp_path / "b")
-        folio.add_table("t", pd.DataFrame({"a": [1]}))
+        folio.add("t", pd.DataFrame({"a": [1]}))
         with pytest.raises(ValueError, match="Unknown frame"):
-            folio.get_table("t", frame="dask")
+            folio.get("t", frame="dask")
 
 
 # =============================================================================
@@ -257,26 +257,26 @@ class TestEagerGuard:
     def test_over_limit_blocks_eager(self, tmp_path):
         folio = self._make_ref(tmp_path)
         with pytest.raises(ValueError, match="eager-load limit"):
-            folio.get_table("ref")
+            folio.get("ref")
 
     def test_over_limit_blocks_polars_eager(self, tmp_path):
         folio = self._make_ref(tmp_path)
         with pytest.raises(ValueError, match="eager-load limit"):
-            folio.get_table("ref", frame="polars")
+            folio.get("ref", frame="polars")
 
     def test_lazy_never_blocked(self, tmp_path):
         folio = self._make_ref(tmp_path)
-        lf = folio.get_lazy("ref")  # must not raise
+        lf = folio.scan_table("ref")  # must not raise
         assert lf.collect().shape[0] == 1000
 
     def test_allow_full_load_per_call(self, tmp_path):
         folio = self._make_ref(tmp_path)
-        out = folio.get_table("ref", allow_full_load=True)
+        out = folio.get("ref", allow_full_load=True)
         assert len(out) == 1000
 
     def test_allow_full_load_per_table(self, tmp_path):
         folio = self._make_ref(tmp_path, allow_full_load=True)
-        assert len(folio.get_table("ref")) == 1000
+        assert len(folio.get("ref")) == 1000
 
     def test_guard_disabled(self, tmp_path):
         df = pd.DataFrame({"a": range(1000)})
@@ -284,14 +284,14 @@ class TestEagerGuard:
         df.to_parquet(ext, index=False)
         folio = DataFolio(tmp_path / "b", max_eager_bytes=None)
         folio.reference_table("ref", ext)
-        assert len(folio.get_table("ref")) == 1000
+        assert len(folio.get("ref")) == 1000
 
     def test_unknown_size_allowed(self, tmp_path):
         folio = DataFolio(tmp_path / "b", max_eager_bytes=1)
-        folio.add_table("t", pd.DataFrame({"a": [1, 2, 3]}))
+        folio.add("t", pd.DataFrame({"a": [1, 2, 3]}))
         # Simulate a table whose size wasn't recorded.
         folio._items["t"].pop("size_bytes", None)
-        assert len(folio.get_table("t")) == 3
+        assert len(folio.get("t")) == 3
 
 
 # =============================================================================
@@ -302,7 +302,7 @@ class TestEagerGuard:
 class TestParity:
     def test_accessor_lazy_and_polars(self, tmp_path):
         folio = DataFolio(tmp_path / "b")
-        folio.add_table("t", pd.DataFrame({"a": [1, 2, 3]}))
+        folio.add("t", pd.DataFrame({"a": [1, 2, 3]}))
         assert isinstance(folio.data.t.lazy, pl.LazyFrame)
         assert isinstance(folio.data.t.polars, pl.DataFrame)
 
@@ -316,10 +316,10 @@ class TestParity:
 
     def test_snapshot_get_table_polars(self, tmp_path):
         folio = DataFolio(tmp_path / "b")
-        folio.add_table("t", pd.DataFrame({"a": [1, 2, 3]}))
+        folio.add("t", pd.DataFrame({"a": [1, 2, 3]}))
         folio.create_snapshot("snap")
         snap = folio.snapshots["snap"]
-        out = snap.get_table("t", frame="polars")
+        out = snap.get("t", frame="polars")
         assert isinstance(out, pl.DataFrame)
 
     def test_reference_overwrite(self, tmp_path):
@@ -336,14 +336,14 @@ class TestParity:
             folio.reference_table("ref", e2)
 
         folio.reference_table("ref", e2, overwrite=True)
-        assert folio.get_table_info("ref")["path"].endswith("e2.parquet")
-        assert folio.get_table("ref")["a"].to_list() == [1, 2, 3, 4, 5]
+        assert folio.item_info("ref")["path"].endswith("e2.parquet")
+        assert folio.get("ref")["a"].to_list() == [1, 2, 3, 4, 5]
 
     def test_snapshot_get_table_pandas_still_works(self, tmp_path):
         folio = DataFolio(tmp_path / "b")
-        folio.add_table("t", pd.DataFrame({"a": [1, 2, 3]}))
+        folio.add("t", pd.DataFrame({"a": [1, 2, 3]}))
         folio.create_snapshot("snap")
-        out = folio.snapshots["snap"].get_table("t")
+        out = folio.snapshots["snap"].get("t")
         assert isinstance(out, pd.DataFrame)
 
     def test_reference_copy_on_write(self, tmp_path):
@@ -361,8 +361,8 @@ class TestParity:
         # Overwriting a snapshotted reference should copy-on-write, preserving
         # the snapshot's view.
         folio.reference_table("ref", e2, overwrite=True)
-        assert folio.get_table("ref")["a"].to_list() == [9, 9]
-        assert folio.snapshots["snap"].get_table("ref")["a"].to_list() == [1, 2, 3]
+        assert folio.get("ref")["a"].to_list() == [9, 9]
+        assert folio.snapshots["snap"].get("ref")["a"].to_list() == [1, 2, 3]
 
 
 # =============================================================================
@@ -381,17 +381,17 @@ class TestShardedPolarsOnly:
     def test_directory_reference_is_polars_only(self, tmp_path):
         folio = DataFolio(tmp_path / "b")
         folio.reference_table("big", path=self._hive_dir(tmp_path))
-        info = folio.get_table_info("big")
+        info = folio.item_info("big")
         assert info["is_directory"] is True
         assert info["polars_only"] is True
 
     def test_directory_reference_schema_via_inspect(self, tmp_path):
         folio = DataFolio(tmp_path / "b")
         folio.reference_table("big", path=self._hive_dir(tmp_path))
-        assert "columns" not in folio.get_table_info("big")  # offline creation
+        assert "columns" not in folio.item_info("big")  # offline creation
 
         folio.inspect_table("big")
-        info = folio.get_table_info("big")
+        info = folio.item_info("big")
         # partition column 'g' is included in the scanned schema
         assert set(info["columns"]) == {"g", "x"}
         assert info["num_rows"] == 4
@@ -400,14 +400,14 @@ class TestShardedPolarsOnly:
     def test_directory_reference_lazy_and_polars_work(self, tmp_path):
         folio = DataFolio(tmp_path / "b")
         folio.reference_table("big", path=self._hive_dir(tmp_path))
-        assert folio.get_lazy("big").select(pl.len()).collect().item() == 4
-        assert folio.get_table("big", frame="polars").height == 4
+        assert folio.scan_table("big").select(pl.len()).collect().item() == 4
+        assert folio.get("big", frame="polars").height == 4
 
     def test_directory_reference_pandas_friendly_error(self, tmp_path):
         folio = DataFolio(tmp_path / "b")
         folio.reference_table("big", path=self._hive_dir(tmp_path))
         with pytest.raises(ValueError, match="polars-only"):
-            folio.get_table("big")
+            folio.get("big")
 
     def test_accessor_content_polars_only_errors(self, tmp_path):
         folio = DataFolio(tmp_path / "b")
@@ -424,10 +424,10 @@ class TestShardedPolarsOnly:
         df.to_parquet(p, index=False)
         folio = DataFolio(tmp_path / "b")
         folio.reference_table("forced", path=p, polars_only=True)
-        assert folio.get_table_info("forced")["polars_only"] is True
+        assert folio.item_info("forced")["polars_only"] is True
         with pytest.raises(ValueError, match="polars-only"):
-            folio.get_table("forced")
-        assert folio.get_lazy("forced").collect().shape == (3, 1)
+            folio.get("forced")
+        assert folio.scan_table("forced").collect().shape == (3, 1)
 
     def test_single_file_reference_not_polars_only(self, tmp_path):
         df = pd.DataFrame({"a": [1, 2, 3]})
@@ -435,5 +435,5 @@ class TestShardedPolarsOnly:
         df.to_parquet(p, index=False)
         folio = DataFolio(tmp_path / "b")
         folio.reference_table("ok", path=p)
-        assert "polars_only" not in folio.get_table_info("ok")
-        assert len(folio.get_table("ok")) == 3  # pandas works
+        assert "polars_only" not in folio.item_info("ok")
+        assert len(folio.get("ok")) == 3  # pandas works

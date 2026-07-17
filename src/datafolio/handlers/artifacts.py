@@ -35,17 +35,20 @@ class ArtifactHandler(BaseHandler):
         return "artifact"
 
     def can_handle(self, data: Any) -> bool:
-        """Check if data is a file path string.
+        """Artifacts are never auto-detected.
+
+        Whether a string is "a file" depends on the current working
+        directory's contents, which made ``add()``'s behavior for strings
+        nondeterministic. Files enter the folio only through the explicit
+        ``add_file()`` verb; strings passed to ``add()`` are always stored
+        as JSON data.
 
         Args:
             data: Data to check
 
         Returns:
-            True if data is a string representing an existing file
+            Always False.
         """
-        if isinstance(data, (str, Path)):
-            path = Path(data)
-            return path.exists() and path.is_file()
         return False
 
     def add(

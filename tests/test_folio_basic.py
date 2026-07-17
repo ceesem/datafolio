@@ -142,7 +142,7 @@ class TestRepr:
 
         folio = DataFolio(tmp_path / "test", metadata={"key1": "val1"})
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("test", df)
+        folio.add("test", df)
         repr_str = repr(folio)
 
         assert "items=1" in repr_str
@@ -246,7 +246,7 @@ class TestVersionAndReadme:
         # Check that the path is included in usage example
         assert "from datafolio import DataFolio" in readme_content
         assert "folio.describe()" in readme_content
-        assert "folio.get_table" in readme_content
+        assert "folio.get(" in readme_content
 
     def test_existing_datafolio_metadata_not_overwritten(self, tmp_path):
         """Test that existing _datafolio metadata is not overwritten."""
@@ -284,8 +284,8 @@ class TestDelete:
 
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data1", df)
-        folio.add_table("data2", df)
+        folio.add("data1", df)
+        folio.add("data2", df)
 
         # Delete one table
         folio.delete("data1")
@@ -304,9 +304,9 @@ class TestDelete:
 
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data1", df)
-        folio.add_table("data2", df)
-        folio.add_table("data3", df)
+        folio.add("data1", df)
+        folio.add("data2", df)
+        folio.add("data3", df)
 
         # Delete multiple items
         folio.delete(["data1", "data2"])
@@ -343,7 +343,7 @@ class TestDelete:
 
         folio = DataFolio(tmp_path / "test")
         arr = np.array([1, 2, 3])
-        folio.add_numpy("embeddings", arr)
+        folio.add("embeddings", arr)
 
         # Delete array
         folio.delete("embeddings")
@@ -355,7 +355,7 @@ class TestDelete:
     def test_delete_json_data(self, tmp_path):
         """Test deleting JSON data."""
         folio = DataFolio(tmp_path / "test")
-        folio.add_json("config", {"lr": 0.01, "batch_size": 32})
+        folio.add("config", {"lr": 0.01, "batch_size": 32})
 
         # Delete JSON
         folio.delete("config")
@@ -371,7 +371,7 @@ class TestDelete:
         artifact_file.write_text("fake image")
 
         folio = DataFolio(tmp_path / "test")
-        folio.add_artifact("plot", artifact_file)
+        folio.add_file(artifact_file, name="plot")
 
         # Delete artifact
         folio.delete("plot")
@@ -414,8 +414,8 @@ class TestDelete:
 
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data1", df)
-        folio.add_table("data2", df)
+        folio.add("data1", df)
+        folio.add("data2", df)
 
         # Try to delete with one nonexistent item
         with pytest.raises(KeyError, match="nonexistent"):
@@ -434,8 +434,8 @@ class TestDelete:
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
 
-        folio.add_table("raw", df)
-        folio.add_table("processed", df, inputs=["raw"])
+        folio.add("raw", df)
+        folio.add("processed", df, inputs=["raw"])
 
         # Delete item with dependent - should warn
         with warnings.catch_warnings(record=True) as w:
@@ -459,8 +459,8 @@ class TestDelete:
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
 
-        folio.add_table("raw", df)
-        folio.add_table("processed", df, inputs=["raw"])
+        folio.add("raw", df)
+        folio.add("processed", df, inputs=["raw"])
 
         # Delete without warning
         with warnings.catch_warnings(record=True) as w:
@@ -479,8 +479,8 @@ class TestDelete:
 
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data1", df)
-        folio.add_table("data2", df)
+        folio.add("data1", df)
+        folio.add("data2", df)
 
         # Chain delete operations
         result = folio.delete("data1").delete("data2")
@@ -495,7 +495,7 @@ class TestDelete:
 
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
 
         # Delete and reload
         folio.delete("data")
@@ -514,7 +514,7 @@ class TestUpdateItem:
 
         folio = DataFolio(tmp_path / "test")
         arr = np.array([1, 2, 3])
-        folio.add_numpy("test_array", arr)
+        folio.add("test_array", arr)
 
         # Initially no description
         assert "description" not in folio._items["test_array"]
@@ -531,7 +531,7 @@ class TestUpdateItem:
 
         folio = DataFolio(tmp_path / "test")
         arr = np.array([1, 2, 3])
-        folio.add_numpy("test_array", arr)
+        folio.add("test_array", arr)
 
         # Update inputs
         folio.update_item("test_array", inputs=["raw_data", "preprocessing"])
@@ -543,7 +543,7 @@ class TestUpdateItem:
 
         folio = DataFolio(tmp_path / "test")
         arr = np.array([1, 2, 3])
-        folio.add_numpy("test_array", arr)
+        folio.add("test_array", arr)
 
         # Update code
         folio.update_item("test_array", code="arr = np.array([1, 2, 3])")
@@ -555,7 +555,7 @@ class TestUpdateItem:
 
         folio = DataFolio(tmp_path / "test")
         arr = np.array([1, 2, 3])
-        folio.add_numpy("test_array", arr)
+        folio.add("test_array", arr)
 
         # Update multiple fields
         folio.update_item(
@@ -576,7 +576,7 @@ class TestUpdateItem:
 
         folio = DataFolio(tmp_path / "test")
         arr = np.array([1, 2, 3])
-        folio.add_numpy(
+        folio.add(
             "test_array",
             arr,
             description="Initial description",
@@ -607,7 +607,7 @@ class TestUpdateItem:
 
         folio = DataFolio(tmp_path / "test")
         arr = np.array([1, 2, 3])
-        folio.add_numpy("test_array", arr)
+        folio.add("test_array", arr)
 
         # Update description
         folio.update_item("test_array", description="Persisted description")
@@ -622,7 +622,7 @@ class TestUpdateItem:
 
         folio = DataFolio(tmp_path / "test")
         arr = np.array([1, 2, 3])
-        folio.add_numpy("test_array", arr)
+        folio.add("test_array", arr)
 
         result = folio.update_item("test_array", description="Test")
         assert result is folio
@@ -634,7 +634,7 @@ class TestUpdateItem:
 
         folio = DataFolio(tmp_path / "test")
         arr = np.array([1, 2, 3])
-        folio.add_numpy("test_array", arr)
+        folio.add("test_array", arr)
 
         # Reopen in read-only mode
         folio_ro = DataFolio(tmp_path / "test", read_only=True)
@@ -648,7 +648,7 @@ class TestUpdateItem:
 
         folio = DataFolio(tmp_path / "test")
         arr = np.array([1, 2, 3])
-        folio.add_numpy(
+        folio.add(
             "test_array", arr, description="Original", inputs=["input1"], code="code1"
         )
 
@@ -713,7 +713,7 @@ class TestAddFile:
         folio.add_file(source)
 
         # Verify file was copied to artifacts/ (versioned payload filename)
-        copied_file = Path(folio.get_artifact_path("source"))
+        copied_file = Path(folio.item_path("source"))
         assert copied_file.parent == tmp_path / "test" / "artifacts"
         assert copied_file.exists()
         assert copied_file.read_text() == content
@@ -770,7 +770,7 @@ class TestAddFile:
         assert folio._items["data"]["description"] == "Updated"
 
         # Verify content was updated (read via the recorded versioned filename)
-        assert Path(folio.get_artifact_path("data")).read_text() == "updated content"
+        assert Path(folio.item_path("data")).read_text() == "updated content"
 
     def test_add_file_get_path(self, tmp_path):
         """Test retrieving file path with get_artifact_path."""
@@ -781,7 +781,7 @@ class TestAddFile:
         folio.add_file(source)
 
         # Get path using stem name
-        path = folio.get_artifact_path("readme")
+        path = folio.item_path("readme")
         assert Path(path).exists()
         assert Path(path).read_text() == "# README"
 
@@ -828,11 +828,11 @@ def test_percentile_clipper_roundtrip(tmp_path):
 
     # Save with skops
     folio = DataFolio(tmp_path / "analysis")
-    folio.add_sklearn("preprocessing_pipeline", pipeline, custom=True)
+    folio.add_model("preprocessing_pipeline", pipeline, custom=True)
 
     # Load in "different analysis project" (simulate by creating new folio)
     folio2 = DataFolio(tmp_path / "analysis")
-    loaded = folio2.get_sklearn("preprocessing_pipeline")
+    loaded = folio2.get_model("preprocessing_pipeline", trusted=True)
 
     # Verify it works
     X_test = np.random.randn(10, 5)

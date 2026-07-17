@@ -10,15 +10,15 @@ def test_batch_mode(tmp_path):
     folio = DataFolio(tmp_path / "batch_test")
 
     # Verify items.json is saved normally
-    folio.add_json("item1", {"a": 1})
+    folio.add("item1", {"a": 1})
     assert (folio._bundle_path / "items.json").exists()
 
     # Check timestamp of items.json
     t1 = (folio._bundle_path / "items.json").stat().st_mtime
 
     with folio.batch():
-        folio.add_json("item2", {"b": 2})
-        folio.add_json("item3", {"c": 3})
+        folio.add("item2", {"b": 2})
+        folio.add("item3", {"c": 3})
         # items.json should NOT be updated yet (or at least not written to disk repeatedly)
         # But since we can't easily check write count without mocking,
         # we rely on logic correctness.
@@ -38,7 +38,7 @@ def test_validate(tmp_path):
     folio = DataFolio(tmp_path / "validate_test")
 
     # Add valid items
-    folio.add_json("valid_json", {"a": 1})
+    folio.add("valid_json", {"a": 1})
 
     # Add reference
     ref_path = tmp_path / "external.csv"
@@ -70,7 +70,7 @@ def test_checksum_validation(tmp_path):
     art_path.write_text("hello world")
 
     # Add artifact (should calc checksum)
-    folio.add_artifact("my_art", str(art_path))
+    folio.add_file(str(art_path), name="my_art")
 
     # Verify checksum in metadata
     item = folio._items["my_art"]
@@ -127,12 +127,12 @@ def test_extended_checksums(tmp_path):
     import numpy as np
 
     arr = np.array([1, 2, 3])
-    folio.add_numpy("arr", arr)
+    folio.add("arr", arr)
     assert "checksum" in folio._items["arr"]
     assert folio.validate()["arr"] is True
 
     # Test JSON
-    folio.add_json("config", {"a": 1})
+    folio.add("config", {"a": 1})
     assert "checksum" in folio._items["config"]
     assert folio.validate()["config"] is True
 
@@ -155,8 +155,8 @@ def test_is_valid(tmp_path):
     folio = DataFolio(tmp_path / "is_valid_test")
 
     # Add valid items
-    folio.add_json("item1", {"a": 1})
-    folio.add_json("item2", {"b": 2})
+    folio.add("item1", {"a": 1})
+    folio.add("item2", {"b": 2})
 
     # Should be valid
     assert folio.is_valid() is True

@@ -91,6 +91,16 @@ class NumpyHandler(BaseHandler):
         if not isinstance(data, np.ndarray):
             raise TypeError(f"Expected numpy array, got {type(data).__name__}")
 
+        if data.dtype.hasobject:
+            # np.save writes object arrays with pickle, but np.load refuses
+            # them by default — the write would succeed and every read fail.
+            raise ValueError(
+                f"Cannot store array '{name}': object-dtype arrays are "
+                f"pickled by np.save and cannot be read back safely. Convert "
+                f"to a concrete dtype (e.g. .astype(str) or .astype(float)), "
+                f"or store the object explicitly with add_model()."
+            )
+
         # Build filename (folio injects a collision-safe versioned name)
         filename = kwargs.get("_filename") or f"{name}.npy"
         subdir = self.get_storage_subdir()

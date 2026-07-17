@@ -15,174 +15,40 @@ This page provides a comprehensive reference of all methods available on the `Da
 
 ---
 
-## Adding Data
+## Core Item API
 
-Methods for adding different types of data to a DataFolio.
+Two methods cover reading and writing every data type — the object's type
+selects the storage format on write, and the stored type determines what you
+get back on read.
 
-### Tables (DataFrames)
-
-::: datafolio.DataFolio.add_table
+::: datafolio.DataFolio.add
     options:
         show_source: false
         heading_level: 3
 
-::: datafolio.DataFolio.reference_table
+::: datafolio.DataFolio.get
     options:
         show_source: false
         heading_level: 3
 
-### Arrays
-
-::: datafolio.DataFolio.add_numpy
+::: datafolio.DataFolio.item_path
     options:
         show_source: false
         heading_level: 3
 
-### JSON Data
-
-::: datafolio.DataFolio.add_json
-    options:
-        show_source: false
-        heading_level: 3
-
-### Timestamps
-
-::: datafolio.DataFolio.add_timestamp
-    options:
-        show_source: false
-        heading_level: 3
-
-### Generic Data
-
-::: datafolio.DataFolio.add_data
+::: datafolio.DataFolio.item_info
     options:
         show_source: false
         heading_level: 3
 
 ---
 
-## Adding Models
+## Models
 
-Methods for saving machine learning models.
-
-### Scikit-learn Models
-
-::: datafolio.DataFolio.add_sklearn
-    options:
-        show_source: false
-        heading_level: 3
+The one explicit typed pair: `add_model` stores *any* picklable object (not
+just auto-detected sklearn estimators), and `get_model` loads it.
 
 ::: datafolio.DataFolio.add_model
-    options:
-        show_source: false
-        heading_level: 3
-
----
-
-## Adding Artifacts
-
-Methods for adding arbitrary files and artifacts.
-
-::: datafolio.DataFolio.add_artifact
-    options:
-        show_source: false
-        heading_level: 3
-
----
-
-## Retrieving Data
-
-Methods for loading data from a DataFolio.
-
-### Tables (DataFrames)
-
-::: datafolio.DataFolio.get_table
-    options:
-        show_source: false
-        heading_level: 3
-
-::: datafolio.DataFolio.scan_table
-    options:
-        show_source: false
-        heading_level: 3
-
-::: datafolio.DataFolio.get_lazy
-    options:
-        show_source: false
-        heading_level: 3
-
-::: datafolio.DataFolio.inspect_table
-    options:
-        show_source: false
-        heading_level: 3
-
-::: datafolio.DataFolio.get_table_path
-    options:
-        show_source: false
-        heading_level: 3
-
-### Arrays
-
-::: datafolio.DataFolio.get_numpy
-    options:
-        show_source: false
-        heading_level: 3
-
-::: datafolio.DataFolio.get_numpy_path
-    options:
-        show_source: false
-        heading_level: 3
-
-### JSON Data
-
-::: datafolio.DataFolio.get_json
-    options:
-        show_source: false
-        heading_level: 3
-
-::: datafolio.DataFolio.get_json_path
-    options:
-        show_source: false
-        heading_level: 3
-
-### Timestamps
-
-::: datafolio.DataFolio.get_timestamp
-    options:
-        show_source: false
-        heading_level: 3
-
-::: datafolio.DataFolio.get_timestamp_path
-    options:
-        show_source: false
-        heading_level: 3
-
-### Generic Data
-
-::: datafolio.DataFolio.get_data
-    options:
-        show_source: false
-        heading_level: 3
-
-::: datafolio.DataFolio.get_data_path
-    options:
-        show_source: false
-        heading_level: 3
-
-::: datafolio.DataFolio.get_item_path
-    options:
-        show_source: false
-        heading_level: 3
-
----
-
-## Retrieving Models
-
-Methods for loading machine learning models.
-
-### Scikit-learn Models
-
-::: datafolio.DataFolio.get_sklearn
     options:
         show_source: false
         heading_level: 3
@@ -192,16 +58,38 @@ Methods for loading machine learning models.
         show_source: false
         heading_level: 3
 
-::: datafolio.DataFolio.get_model_path
+---
+
+## Files
+
+::: datafolio.DataFolio.add_file
     options:
         show_source: false
         heading_level: 3
 
 ---
 
-## Retrieving Artifacts
+## External Table References
 
-::: datafolio.DataFolio.get_artifact_path
+Link tables that live outside the folio (S3, GCS, local paths) without
+copying them. Creating a reference is offline; `inspect_table` opts into I/O.
+
+::: datafolio.DataFolio.reference_table
+    options:
+        show_source: false
+        heading_level: 3
+
+::: datafolio.DataFolio.inspect_table
+    options:
+        show_source: false
+        heading_level: 3
+
+::: datafolio.DataFolio.scan_table
+    options:
+        show_source: false
+        heading_level: 3
+
+::: datafolio.DataFolio.mutable_references
     options:
         show_source: false
         heading_level: 3
@@ -210,24 +98,7 @@ Methods for loading machine learning models.
 
 ## Inspecting Items
 
-Methods for getting information about items.
-
 ::: datafolio.DataFolio.list_contents
-    options:
-        show_source: false
-        heading_level: 3
-
-::: datafolio.DataFolio.get_table_info
-    options:
-        show_source: false
-        heading_level: 3
-
-::: datafolio.DataFolio.get_model_info
-    options:
-        show_source: false
-        heading_level: 3
-
-::: datafolio.DataFolio.get_artifact_info
     options:
         show_source: false
         heading_level: 3
@@ -240,6 +111,13 @@ Methods for getting information about items.
 ---
 
 ## Managing Items
+
+### Updating Item Metadata
+
+::: datafolio.DataFolio.update_item
+    options:
+        show_source: false
+        heading_level: 3
 
 ### Deleting Items
 
@@ -425,8 +303,8 @@ print(folio.artifacts)  # e.g., ['config.yaml', 'results.png']
 Accessor for convenient data retrieval with autocomplete support.
 
 ```python
-df = folio.data.my_table  # Equivalent to folio.get_table('my_table')
-model = folio.data.my_model  # Equivalent to folio.get_model('my_model')
+df = folio.data.my_table.content  # Equivalent to folio.get('my_table')
+model = folio.data.my_model.content  # Equivalent to folio.get_model('my_model')
 ```
 
 ### Status Properties
@@ -458,17 +336,15 @@ print(folio.loaded_snapshot)  # e.g., 'v1.0' or None
 
 | Category | Methods |
 |----------|---------|
-| **Adding Data** | `add_table()`, `add_numpy()`, `add_json()`, `add_timestamp()`, `add_data()`, `reference_table()` |
-| **Adding Models** | `add_sklearn()`, `add_model()` |
-| **Adding Artifacts** | `add_artifact()` |
-| **Retrieving Data** | `get_table()`, `scan_table()`, `get_lazy()`, `get_table_path()`, `get_numpy()`, `get_numpy_path()`, `get_json()`, `get_json_path()`, `get_timestamp()`, `get_timestamp_path()`, `get_data()`, `get_data_path()`, `get_item_path()` |
-| **Retrieving Models** | `get_sklearn()`, `get_model()`, `get_model_path()` |
-| **Retrieving Artifacts** | `get_artifact_path()` |
-| **Inspecting Items** | `list_contents()`, `get_table_info()`, `inspect_table()`, `get_model_info()`, `get_artifact_info()`, `describe()` |
-| **Managing Items** | `delete()`, `copy()`, `validate()`, `is_valid()` |
+| **Core item API** | `add()`, `get()`, `item_path()`, `item_info()` |
+| **Models** | `add_model()`, `get_model()` |
+| **Files** | `add_file()` |
+| **External references** | `reference_table()`, `inspect_table()`, `scan_table()`, `mutable_references()` |
+| **Inspecting** | `list_contents()`, `describe()` |
+| **Managing Items** | `update_item()`, `delete()`, `archive()`, `unarchive()`, `copy()`, `validate()`, `is_valid()` |
 | **Lineage** | `get_inputs()`, `get_dependents()`, `get_lineage_graph()` |
 | **Snapshots** | `create_snapshot()`, `list_snapshots()`, `delete_snapshot()`, `load_snapshot()`, `get_snapshot()`, `get_snapshot_info()`, `compare_snapshots()`, `diff_from_snapshot()`, `restore_snapshot()`, `export_snapshot()` |
-| **Bundle Management** | `refresh()` |
+| **Bundle Management** | `refresh()`, `batch()` |
 
 ---
 
@@ -482,12 +358,15 @@ import pandas as pd
 # Create a new DataFolio
 folio = datafolio.DataFolio('my_analysis')
 
-# Add data
+# Add anything — the type picks the format
 df = pd.DataFrame({'x': [1, 2, 3], 'y': [4, 5, 6]})
-folio.add_table('results', df, description='Experimental results')
+folio.add('results', df, description='Experimental results')
+folio.add('config', {'lr': 0.01})
+folio.add('accuracy', 0.95)
 
-# Retrieve data
-df_loaded = folio.get_table('results')
+# Retrieve by name — the stored type determines what comes back
+df_loaded = folio.get('results')
+config = folio.get('config')
 
 # List contents
 print(folio.list_contents())
@@ -514,8 +393,8 @@ for snap in snapshots:
 ### Lineage Tracking
 ```python
 # Add data with lineage
-folio.add_table('raw_data', raw_df)
-folio.add_table('processed_data', processed_df, inputs=['raw_data'])
+folio.add('raw_data', raw_df)
+folio.add('processed_data', processed_df, inputs=['raw_data'])
 folio.add_model('trained_model', model, inputs=['processed_data'])
 
 # Query lineage
@@ -532,16 +411,15 @@ print(graph)  # Shows dependency relationships
 # For a cloud-hosted folio, get the direct path to any item
 folio = datafolio.DataFolio('s3://my-bucket/experiments/run-42')
 
-# Type-specific path methods (recommended):
-path = folio.get_table_path('results')
-# → 's3://my-bucket/experiments/run-42/tables/results.parquet'
+# One path getter for every item type:
+path = folio.item_path('results')
+# → 's3://my-bucket/experiments/run-42/tables/results--r2.parquet'
 
-path = folio.get_model_path('classifier')
-# → 's3://my-bucket/experiments/run-42/models/classifier.joblib'
+path = folio.item_path('classifier')
+# → 's3://my-bucket/experiments/run-42/models/classifier--r3.joblib'
 
-# Generic path getter (dispatches to the appropriate method automatically):
-path = folio.get_data_path('results')   # same as get_table_path for tables
-path = folio.get_item_path('results')   # lower-level, skips type-specific logic
+# External references return the external path:
+path = folio.item_path('raw_data')      # → 's3://data-lake/raw.parquet' 
 
 # Share with a colleague who doesn't use datafolio:
 # import pandas as pd; pd.read_parquet('s3://my-bucket/.../results.parquet')

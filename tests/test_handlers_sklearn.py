@@ -44,11 +44,11 @@ def test_skops_custom_transformer(tmp_path):
 
     # Save with skops
     folio = DataFolio(tmp_path / "test_folio")
-    folio.add_sklearn("custom_pipeline", pipeline, custom=True)
+    folio.add_model("custom_pipeline", pipeline, custom=True)
 
     # Load and verify
     folio2 = DataFolio(tmp_path / "test_folio")
-    loaded_pipeline = folio2.get_sklearn("custom_pipeline")
+    loaded_pipeline = folio2.get_model("custom_pipeline", trusted=True)
 
     # Verify predictions match
     np.testing.assert_array_equal(pipeline.predict(X), loaded_pipeline.predict(X))
@@ -63,7 +63,7 @@ def test_skops_metadata_stored(tmp_path):
     pipeline = Pipeline([("scaler", StandardScaler())])
 
     folio = DataFolio(tmp_path / "test_folio")
-    folio.add_sklearn("pipeline", pipeline, custom=True)
+    folio.add_model("pipeline", pipeline, custom=True)
 
     # Check metadata
     assert folio._items["pipeline"]["serialization_format"] == "skops"
@@ -75,7 +75,7 @@ def test_joblib_still_default(tmp_path):
     pipeline = Pipeline([("scaler", StandardScaler())])
 
     folio = DataFolio(tmp_path / "test_folio")
-    folio.add_sklearn("pipeline", pipeline)  # No custom flag specified
+    folio.add_model("pipeline", pipeline)  # No custom flag specified
 
     # Should default to joblib
     assert folio._items["pipeline"]["serialization_format"] == "joblib"
@@ -87,7 +87,7 @@ def test_legacy_models_without_format_field(tmp_path):
     pipeline = Pipeline([("scaler", StandardScaler())])
 
     folio = DataFolio(tmp_path / "test_folio")
-    folio.add_sklearn("pipeline", pipeline)
+    folio.add_model("pipeline", pipeline)
 
     # Manually remove serialization_format to simulate legacy model
     del folio._items["pipeline"]["serialization_format"]
@@ -95,7 +95,7 @@ def test_legacy_models_without_format_field(tmp_path):
 
     # Should still load (defaults to joblib)
     folio2 = DataFolio(tmp_path / "test_folio")
-    loaded = folio2.get_sklearn("pipeline")
+    loaded = folio2.get_model("pipeline", trusted=True)
     assert loaded is not None
 
 
@@ -118,13 +118,13 @@ def test_both_formats_in_same_folio(tmp_path):
     p2.fit(X)
 
     folio = DataFolio(tmp_path / "test_folio")
-    folio.add_sklearn("joblib_model", p1)  # default: custom=False
-    folio.add_sklearn("skops_model", p2, custom=True)
+    folio.add_model("joblib_model", p1)  # default: custom=False
+    folio.add_model("skops_model", p2, custom=True)
 
     # Load and verify both work
     folio2 = DataFolio(tmp_path / "test_folio")
-    m1 = folio2.get_sklearn("joblib_model")
-    m2 = folio2.get_sklearn("skops_model")
+    m1 = folio2.get_model("joblib_model")
+    m2 = folio2.get_model("skops_model", trusted=True)
 
     assert m1 is not None
     assert m2 is not None
@@ -146,11 +146,11 @@ def test_skops_with_numpy_functions(tmp_path):
     pipeline.fit(X)
 
     folio = DataFolio(tmp_path / "test_folio")
-    folio.add_sklearn("numpy_pipeline", pipeline, custom=True)
+    folio.add_model("numpy_pipeline", pipeline, custom=True)
 
     # Load and verify
     folio2 = DataFolio(tmp_path / "test_folio")
-    loaded = folio2.get_sklearn("numpy_pipeline")
+    loaded = folio2.get_model("numpy_pipeline", trusted=True)
 
     # Verify transformation works
     result = loaded.transform(X[:10])
@@ -168,11 +168,11 @@ def test_skops_roundtrip_preserves_fitted_state(tmp_path):
 
     # Store fitted scaler
     folio = DataFolio(tmp_path / "test_folio")
-    folio.add_sklearn("scaler", scaler, custom=True)
+    folio.add_model("scaler", scaler, custom=True)
 
     # Load and verify fitted parameters
     folio2 = DataFolio(tmp_path / "test_folio")
-    loaded_scaler = folio2.get_sklearn("scaler")
+    loaded_scaler = folio2.get_model("scaler", trusted=True)
 
     # Verify fitted parameters match
     np.testing.assert_array_almost_equal(scaler.center_, loaded_scaler.center_)
@@ -187,13 +187,13 @@ def test_get_model_detects_format(tmp_path):
     p2.fit(X)
 
     folio = DataFolio(tmp_path / "test_folio")
-    folio.add_sklearn("joblib_model", p1)
-    folio.add_sklearn("skops_model", p2, custom=True)
+    folio.add_model("joblib_model", p1)
+    folio.add_model("skops_model", p2, custom=True)
 
     # Load using get_model() (generic method)
     folio2 = DataFolio(tmp_path / "test_folio")
     m1 = folio2.get_model("joblib_model")
-    m2 = folio2.get_model("skops_model")
+    m2 = folio2.get_model("skops_model", trusted=True)
 
     assert m1 is not None
     assert m2 is not None

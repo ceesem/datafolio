@@ -17,7 +17,7 @@ class TestGetSnapshotInfo:
         """Test getting basic snapshot information."""
         folio = DataFolio(tmp_path / "test-bundle")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
         folio.metadata["accuracy"] = 0.85
         folio.create_snapshot("v1.0", description="Test snapshot", tags=["test"])
 
@@ -51,7 +51,7 @@ class TestGetSnapshotInfo:
 
         folio = DataFolio(tmp_path / "test-bundle")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
 
         # Create initial commit
         subprocess.run(["git", "add", "."], cwd=folio._bundle_dir, capture_output=True)
@@ -74,7 +74,7 @@ class TestGetSnapshotInfo:
         """Test snapshot info includes environment information."""
         folio = DataFolio(tmp_path / "test-bundle")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
         folio.create_snapshot("v1.0", capture_environment=True)
 
         info = folio.get_snapshot_info("v1.0")
@@ -86,7 +86,7 @@ class TestGetSnapshotInfo:
         """Test getting info for nonexistent snapshot raises error."""
         folio = DataFolio(tmp_path / "test-bundle")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
 
         with pytest.raises(KeyError, match="not found"):
             folio.get_snapshot_info("nonexistent")
@@ -99,7 +99,7 @@ class TestReproduceInstructions:
         """Test generating basic reproduction instructions."""
         folio = DataFolio(tmp_path / "test-bundle")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
         folio.metadata["accuracy"] = 0.85
         folio.create_snapshot("v1.0", description="Test snapshot")
 
@@ -127,7 +127,7 @@ class TestReproduceInstructions:
 
         folio = DataFolio(tmp_path / "test-bundle")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
 
         subprocess.run(["git", "add", "."], cwd=folio._bundle_dir, capture_output=True)
         subprocess.run(
@@ -149,7 +149,7 @@ class TestReproduceInstructions:
         """Test instructions include entry point command."""
         folio = DataFolio(tmp_path / "test-bundle")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
         folio.create_snapshot("v1.0", capture_execution=True)
 
         instructions = folio.reproduce_instructions("v1.0")
@@ -161,7 +161,7 @@ class TestReproduceInstructions:
         """Test instructions include expected results from metadata."""
         folio = DataFolio(tmp_path / "test-bundle")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
         folio.metadata["accuracy"] = 0.85
         folio.metadata["f1_score"] = 0.87
         folio.create_snapshot("v1.0")
@@ -176,7 +176,7 @@ class TestReproduceInstructions:
         """Test reproduce_instructions for nonexistent snapshot raises error."""
         folio = DataFolio(tmp_path / "test-bundle")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
 
         with pytest.raises(KeyError, match="not found"):
             folio.reproduce_instructions("nonexistent")
@@ -185,7 +185,7 @@ class TestReproduceInstructions:
         """Test reproduce_instructions without snapshot name."""
         folio = DataFolio(tmp_path / "test-bundle")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
         folio.create_snapshot("v1.0")
 
         # Should work if there's at least one snapshot
@@ -205,7 +205,7 @@ class TestReprEnhancement:
         """Test repr shows no snapshots when none exist."""
         folio = DataFolio(tmp_path / "test-bundle")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
 
         repr_str = repr(folio)
 
@@ -218,7 +218,7 @@ class TestReprEnhancement:
         """Test repr shows snapshot count."""
         folio = DataFolio(tmp_path / "test-bundle")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
         folio.create_snapshot("v1.0")
         folio.create_snapshot("v2.0")
 
@@ -236,7 +236,7 @@ class TestDescribeEnhancement:
         """Test describe works when no snapshots exist."""
         folio = DataFolio(tmp_path / "test-bundle")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
 
         description = folio.describe(return_string=True)
 
@@ -247,7 +247,7 @@ class TestDescribeEnhancement:
         """Test describe shows snapshot information."""
         folio = DataFolio(tmp_path / "test-bundle")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
         folio.create_snapshot("v1.0", description="First version")
         folio.create_snapshot("v2.0", description="Second version")
 
@@ -266,10 +266,10 @@ class TestDescribeEnhancement:
         df1 = pd.DataFrame({"a": [1, 2, 3]})
         df2 = pd.DataFrame({"b": [4, 5, 6]})
 
-        folio.add_table("data1", df1)
+        folio.add("data1", df1)
         folio.create_snapshot("v1.0")
 
-        folio.add_table("data2", df2)
+        folio.add("data2", df2)
         folio.create_snapshot("v2.0")
 
         description = folio.describe(return_string=True)
@@ -287,7 +287,7 @@ class TestUtilityMethodsIntegration:
         """Test complete workflow using all utility methods."""
         folio = DataFolio(tmp_path / "experiment")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
         folio.metadata["accuracy"] = 0.85
         folio.create_snapshot("v1.0", description="Baseline model", tags=["baseline"])
 

@@ -29,34 +29,32 @@ pl = pytest.importorskip("polars")
 class TestDescriptionSemantics:
     def test_create_with_none_omits(self, tmp_path):
         folio = DataFolio(tmp_path / "b")
-        folio.add_table("t", pd.DataFrame({"a": [1]}))
-        assert "description" not in folio.get_table_info("t")
+        folio.add("t", pd.DataFrame({"a": [1]}))
+        assert "description" not in folio.item_info("t")
 
     def test_overwrite_with_none_preserves(self, tmp_path):
         folio = DataFolio(tmp_path / "b")
-        folio.add_table("t", pd.DataFrame({"a": [1]}), description="keep me")
-        folio.add_table("t", pd.DataFrame({"a": [2]}), overwrite=True)
-        assert folio.get_table_info("t")["description"] == "keep me"
+        folio.add("t", pd.DataFrame({"a": [1]}), description="keep me")
+        folio.add("t", pd.DataFrame({"a": [2]}), overwrite=True)
+        assert folio.item_info("t")["description"] == "keep me"
 
     def test_overwrite_with_nonempty_replaces(self, tmp_path):
         folio = DataFolio(tmp_path / "b")
-        folio.add_table("t", pd.DataFrame({"a": [1]}), description="old")
-        folio.add_table(
-            "t", pd.DataFrame({"a": [2]}), overwrite=True, description="new"
-        )
-        assert folio.get_table_info("t")["description"] == "new"
+        folio.add("t", pd.DataFrame({"a": [1]}), description="old")
+        folio.add("t", pd.DataFrame({"a": [2]}), overwrite=True, description="new")
+        assert folio.item_info("t")["description"] == "new"
 
     def test_overwrite_with_empty_string_removes(self, tmp_path):
         folio = DataFolio(tmp_path / "b")
-        folio.add_table("t", pd.DataFrame({"a": [1]}), description="old")
-        folio.add_table("t", pd.DataFrame({"a": [2]}), overwrite=True, description="")
-        assert "description" not in folio.get_table_info("t")
+        folio.add("t", pd.DataFrame({"a": [1]}), description="old")
+        folio.add("t", pd.DataFrame({"a": [2]}), overwrite=True, description="")
+        assert "description" not in folio.item_info("t")
 
     @pytest.mark.parametrize(
         "add,value",
         [
-            ("add_numpy", np.array([1, 2, 3])),
-            ("add_json", {"k": 1}),
+            ("add", np.array([1, 2, 3])),
+            ("add", {"k": 1}),
         ],
     )
     def test_preserved_across_types(self, tmp_path, add, value):
@@ -69,46 +67,46 @@ class TestDescriptionSemantics:
         folio = DataFolio(tmp_path / "b")
         folio.reference_table("r", path="s3://bucket/a.parquet", description="linked")
         folio.reference_table("r", path="s3://bucket/b.parquet", overwrite=True)
-        assert folio.get_table_info("r")["description"] == "linked"
+        assert folio.item_info("r")["description"] == "linked"
 
     def test_timestamp_description_preserved(self, tmp_path):
         from datetime import datetime, timezone
 
         folio = DataFolio(tmp_path / "b")
         dt = datetime(2024, 1, 1, tzinfo=timezone.utc)
-        folio.add_timestamp("ts", dt, description="event")
-        folio.add_timestamp("ts", dt, overwrite=True)
+        folio.add("ts", dt, description="event")
+        folio.add("ts", dt, overwrite=True)
         assert folio._items["ts"]["description"] == "event"
 
     def test_persists_after_reopen(self, tmp_path):
         bundle = tmp_path / "b"
         folio = DataFolio(bundle)
-        folio.add_table("t", pd.DataFrame({"a": [1]}), description="keep")
-        folio.add_table("t", pd.DataFrame({"a": [2]}), overwrite=True)
+        folio.add("t", pd.DataFrame({"a": [1]}), description="keep")
+        folio.add("t", pd.DataFrame({"a": [2]}), overwrite=True)
         reopened = DataFolio(bundle)
-        assert reopened.get_table_info("t")["description"] == "keep"
+        assert reopened.item_info("t")["description"] == "keep"
 
     def test_generic_add_data_preserves(self, tmp_path):
         folio = DataFolio(tmp_path / "b")
-        folio.add_data("t", pd.DataFrame({"a": [1]}), description="via generic")
-        folio.add_data("t", pd.DataFrame({"a": [2]}), overwrite=True)
-        assert folio.get_table_info("t")["description"] == "via generic"
+        folio.add("t", pd.DataFrame({"a": [1]}), description="via generic")
+        folio.add("t", pd.DataFrame({"a": [2]}), overwrite=True)
+        assert folio.item_info("t")["description"] == "via generic"
 
     def test_snapshot_cow_preserves_description(self, tmp_path):
         folio = DataFolio(tmp_path / "b")
-        folio.add_table("t", pd.DataFrame({"a": [1]}), description="v1 desc")
+        folio.add("t", pd.DataFrame({"a": [1]}), description="v1 desc")
         folio.create_snapshot("snap")
-        folio.add_table("t", pd.DataFrame({"a": [2]}), overwrite=True)
+        folio.add("t", pd.DataFrame({"a": [2]}), overwrite=True)
         # current keeps the preserved description; snapshot version keeps its own
-        assert folio.get_table_info("t")["description"] == "v1 desc"
+        assert folio.item_info("t")["description"] == "v1 desc"
         snap_item = folio._snapshot_versions[0]
         assert snap_item["description"] == "v1 desc"
 
     def test_batch_preserves_description(self, tmp_path):
         folio = DataFolio(tmp_path / "b")
-        folio.add_json("c", {"a": 1}, description="cfg")
+        folio.add("c", {"a": 1}, description="cfg")
         with folio.batch():
-            folio.add_json("c", {"a": 2}, overwrite=True)
+            folio.add("c", {"a": 2}, overwrite=True)
         assert folio._items["c"]["description"] == "cfg"
 
 
@@ -120,34 +118,34 @@ class TestDescriptionSemantics:
 class TestVersionedPayloads:
     def test_filenames_are_versioned(self, tmp_path):
         folio = DataFolio(tmp_path / "b")
-        folio.add_table("features", pd.DataFrame({"a": [1]}))
+        folio.add("features", pd.DataFrame({"a": [1]}))
         fn = folio._items["features"]["filename"]
         assert fn.startswith("features--r") and fn.endswith(".parquet")
 
     def test_overwrite_writes_new_file_not_clobber(self, tmp_path):
         bundle = tmp_path / "b"
         folio = DataFolio(bundle)
-        folio.add_table("t", pd.DataFrame({"a": [1]}))
+        folio.add("t", pd.DataFrame({"a": [1]}))
         first = folio._items["t"]["filename"]
-        folio.add_table("t", pd.DataFrame({"a": [2]}), overwrite=True)
+        folio.add("t", pd.DataFrame({"a": [2]}), overwrite=True)
         second = folio._items["t"]["filename"]
         assert first != second
 
     def test_obsolete_unsnapshotted_payload_deleted(self, tmp_path):
         bundle = tmp_path / "b"
         folio = DataFolio(bundle)
-        folio.add_table("t", pd.DataFrame({"a": [1]}))
+        folio.add("t", pd.DataFrame({"a": [1]}))
         first = folio._items["t"]["filename"]
-        folio.add_table("t", pd.DataFrame({"a": [2]}), overwrite=True)
+        folio.add("t", pd.DataFrame({"a": [2]}), overwrite=True)
         assert not (bundle / "tables" / first).exists()
 
     def test_snapshotted_payload_retained(self, tmp_path):
         bundle = tmp_path / "b"
         folio = DataFolio(bundle)
-        folio.add_table("t", pd.DataFrame({"a": [1]}))
+        folio.add("t", pd.DataFrame({"a": [1]}))
         first = folio._items["t"]["filename"]
         folio.create_snapshot("snap")
-        folio.add_table("t", pd.DataFrame({"a": [2]}), overwrite=True)
+        folio.add("t", pd.DataFrame({"a": [2]}), overwrite=True)
         # the snapshotted version's file must survive
         assert (bundle / "tables" / first).exists()
 
@@ -155,10 +153,10 @@ class TestVersionedPayloads:
         bundle = tmp_path / "b"
         folio = DataFolio(bundle)
         with folio.batch():
-            folio.add_table("t", pd.DataFrame({"a": [1]}))
-            folio.add_table("t", pd.DataFrame({"a": [2]}), overwrite=True)
-            folio.add_table("t", pd.DataFrame({"a": [3]}), overwrite=True)
-        assert folio.get_table("t")["a"].to_list() == [3]
+            folio.add("t", pd.DataFrame({"a": [1]}))
+            folio.add("t", pd.DataFrame({"a": [2]}), overwrite=True)
+            folio.add("t", pd.DataFrame({"a": [3]}), overwrite=True)
+        assert folio.get("t")["a"].to_list() == [3]
         # only the final payload survives; no collisions occurred
         remaining = list((bundle / "tables").glob("*.parquet"))
         assert len(remaining) == 1
@@ -169,7 +167,7 @@ class TestVersionedPayloads:
 
         bundle = tmp_path / "b"
         folio = DataFolio(bundle)
-        folio.add_table("t", pd.DataFrame({"a": [1, 2, 3]}))
+        folio.add("t", pd.DataFrame({"a": [1, 2, 3]}))
         # Rewrite to a legacy stable filename on disk + in manifest.
         tables = bundle / "tables"
         versioned = folio._items["t"]["filename"]
@@ -182,7 +180,7 @@ class TestVersionedPayloads:
         items_path.write_bytes(orjson.dumps(data))
 
         reopened = DataFolio(bundle)
-        assert reopened.get_table("t")["a"].to_list() == [1, 2, 3]
+        assert reopened.get("t")["a"].to_list() == [1, 2, 3]
 
 
 # =============================================================================
@@ -195,64 +193,65 @@ class TestMutationGuard:
     def test_two_instances_same_revision_second_write_is_stale(self, tmp_path):
         bundle = tmp_path / "b"
         a = DataFolio(bundle)
-        a.add_table("x", pd.DataFrame({"a": [1]}))
+        a.add("x", pd.DataFrame({"a": [1]}))
         b = DataFolio(bundle)  # loaded at current revision
-        a.add_table("y", pd.DataFrame({"a": [2]}))  # advances revision
+        a.add("y", pd.DataFrame({"a": [2]}))  # advances revision
         with pytest.raises(ConcurrentWriteError):
-            b.add_table("z", pd.DataFrame({"a": [3]}))
+            b.add("z", pd.DataFrame({"a": [3]}))
 
     def test_stale_overwrite_does_not_corrupt_committed_payload(self, tmp_path):
         bundle = tmp_path / "b"
         a = DataFolio(bundle)
-        a.add_table("data", pd.DataFrame({"a": [1]}))
+        a.add("data", pd.DataFrame({"a": [1]}))
         b = DataFolio(bundle)
-        a.add_table("data", pd.DataFrame({"a": [2]}), overwrite=True)
+        a.add("data", pd.DataFrame({"a": [2]}), overwrite=True)
         committed = a._items["data"]["filename"]
         with pytest.raises(ConcurrentWriteError):
-            b.add_table("data", pd.DataFrame({"a": [999]}), overwrite=True)
+            b.add("data", pd.DataFrame({"a": [999]}), overwrite=True)
         # A fresh reader sees A's committed value, uncorrupted.
         fresh = DataFolio(bundle)
-        assert fresh.get_table("data")["a"].to_list() == [2]
+        assert fresh.get("data")["a"].to_list() == [2]
         assert fresh._items["data"]["filename"] == committed
 
     def test_stale_new_item_rejected(self, tmp_path):
         bundle = tmp_path / "b"
         a = DataFolio(bundle)
-        a.add_table("x", pd.DataFrame({"a": [1]}))
+        a.add("x", pd.DataFrame({"a": [1]}))
         b = DataFolio(bundle)
-        a.add_json("cfg", {"a": 1})
+        a.add("cfg", {"a": 1})
         with pytest.raises(ConcurrentWriteError):
-            b.add_json("other", {"b": 2})
+            b.add("other", {"b": 2})
 
     def test_lock_released_after_exception(self, tmp_path):
         bundle = tmp_path / "b"
         folio = DataFolio(bundle)
-        # Force an error inside a mutation (numpy handler rejects non-arrays).
+        # Force an error inside a mutation (numpy handler rejects
+        # object-dtype arrays).
         with pytest.raises((TypeError, ValueError)):
-            folio.add_numpy("bad", "not an array")
+            folio.add("bad", np.array([object()], dtype=object))
         # The lock was released — a subsequent write succeeds.
-        folio.add_table("t", pd.DataFrame({"a": [1]}))
-        assert folio.get_table("t")["a"].to_list() == [1]
+        folio.add("t", pd.DataFrame({"a": [1]}))
+        assert folio.get("t")["a"].to_list() == [1]
 
     def test_readers_do_not_block_on_lock(self, tmp_path):
         # A reader opening a second instance never needs the write lock.
         bundle = tmp_path / "b"
         w = DataFolio(bundle)
-        w.add_table("t", pd.DataFrame({"a": [1, 2, 3]}))
+        w.add("t", pd.DataFrame({"a": [1, 2, 3]}))
         reader = DataFolio(bundle, read_only=True)
-        assert reader.get_table("t")["a"].to_list() == [1, 2, 3]
+        assert reader.get("t")["a"].to_list() == [1, 2, 3]
 
     def test_batch_is_atomic_under_staleness(self, tmp_path):
         bundle = tmp_path / "b"
         a = DataFolio(bundle)
-        a.add_table("seed", pd.DataFrame({"a": [1]}))
+        a.add("seed", pd.DataFrame({"a": [1]}))
         b = DataFolio(bundle)
-        a.add_table("advance", pd.DataFrame({"a": [2]}))  # b now stale
+        a.add("advance", pd.DataFrame({"a": [2]}))  # b now stale
         # The whole batch is rejected as a unit (stale check at guard entry).
         with pytest.raises(ConcurrentWriteError):
             with b.batch():
-                b.add_json("x", {"a": 1})
-                b.add_json("y", {"a": 2})
+                b.add("x", {"a": 1})
+                b.add("y", {"a": 2})
         fresh = DataFolio(bundle)
         assert "x" not in fresh._items
         assert "y" not in fresh._items
@@ -262,7 +261,7 @@ def _hammer_worker(bundle, name, barrier=None):
     """Worker: open a folio and try to add a uniquely-named table."""
     try:
         folio = DataFolio(bundle)
-        folio.add_table(name, pd.DataFrame({"a": [1, 2, 3]}))
+        folio.add(name, pd.DataFrame({"a": [1, 2, 3]}))
         return "ok"
     except ConcurrentWriteError:
         return "stale"
@@ -274,7 +273,7 @@ class TestMutationGuardMultiprocess:
     def test_concurrent_writers_do_not_corrupt_manifest(self, tmp_path):
         bundle = str(tmp_path / "b")
         # Seed the bundle so all workers load the same starting revision.
-        DataFolio(bundle).add_table("seed", pd.DataFrame({"a": [0]}))
+        DataFolio(bundle).add("seed", pd.DataFrame({"a": [0]}))
 
         ctx = mp.get_context("spawn")
         with ctx.Pool(4) as pool:
@@ -329,21 +328,21 @@ class TestReferenceSnapshotLifecycle:
 
     def test_snapshot_view_returns_recorded_reference(self, tmp_path):
         folio = self._bundle_with_ref(tmp_path)
-        assert folio.snapshots["snap"].get_table("ref")["a"].to_list() == [1, 2, 3]
+        assert folio.snapshots["snap"].get("ref")["a"].to_list() == [1, 2, 3]
 
     def test_reopen_preserves_current_reference(self, tmp_path):
         folio = self._bundle_with_ref(tmp_path)
         reopened = DataFolio(folio._bundle_dir)
-        assert reopened.get_table("ref")["a"].to_list() == [9, 9]
-        assert reopened.snapshots["snap"].get_table("ref")["a"].to_list() == [1, 2, 3]
+        assert reopened.get("ref")["a"].to_list() == [9, 9]
+        assert reopened.snapshots["snap"].get("ref")["a"].to_list() == [1, 2, 3]
 
     def test_load_snapshot_returns_exact_descriptor(self, tmp_path):
         folio = self._bundle_with_ref(tmp_path)
         paper = DataFolio.load_snapshot(folio._bundle_dir, "snap")
-        info = paper.get_table_info("ref")
+        info = paper.item_info("ref")
         assert info["path"].endswith("v1.parquet")
         assert info["description"] == "first"
-        assert paper.get_table("ref")["a"].to_list() == [1, 2, 3]
+        assert paper.get("ref")["a"].to_list() == [1, 2, 3]
 
 
 # =============================================================================
@@ -357,7 +356,7 @@ class TestSchemaVersioning:
 
         bundle = tmp_path / "b"
         folio = DataFolio(bundle)
-        folio.add_table("t", pd.DataFrame({"a": [1]}))
+        folio.add("t", pd.DataFrame({"a": [1]}))
         items_path = bundle / "items.json"
         data = orjson.loads(items_path.read_bytes())
         data["schema_version"] = 999
@@ -367,24 +366,24 @@ class TestSchemaVersioning:
 
     def test_current_version_accepted(self, tmp_path):
         bundle = tmp_path / "b"
-        DataFolio(bundle).add_table("t", pd.DataFrame({"a": [1]}))
+        DataFolio(bundle).add("t", pd.DataFrame({"a": [1]}))
         reopened = DataFolio(bundle)
-        assert reopened.get_table("t")["a"].to_list() == [1]
+        assert reopened.get("t")["a"].to_list() == [1]
 
     def test_pre_versioning_dict_migrated(self, tmp_path):
         import orjson
 
         bundle = tmp_path / "b"
         folio = DataFolio(bundle)
-        folio.add_table("t", pd.DataFrame({"a": [1]}))
+        folio.add("t", pd.DataFrame({"a": [1]}))
         items_path = bundle / "items.json"
         data = orjson.loads(items_path.read_bytes())
         del data["schema_version"]  # pre-versioning dict manifest
         data.pop("revision", None)
         items_path.write_bytes(orjson.dumps(data))
         reopened = DataFolio(bundle)
-        assert reopened.get_table("t")["a"].to_list() == [1]
-        reopened.add_table("u", pd.DataFrame({"a": [2]}))
+        assert reopened.get("t")["a"].to_list() == [1]
+        reopened.add("u", pd.DataFrame({"a": [2]}))
         migrated = orjson.loads(items_path.read_bytes())
         assert migrated["schema_version"] >= 1
 
@@ -397,7 +396,7 @@ class TestSchemaVersioning:
 class TestLazySnapshotAccess:
     def test_snapshot_scan_table_is_lazy(self, tmp_path):
         folio = DataFolio(tmp_path / "b")
-        folio.add_table("t", pd.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6]}))
+        folio.add("t", pd.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6]}))
         folio.create_snapshot("snap")
         lf = folio.snapshots["snap"].scan_table("t")
         assert isinstance(lf, pl.LazyFrame)
@@ -412,7 +411,7 @@ class TestLazySnapshotAccess:
         folio.reference_table("big", path=str(d / "hive"))
         folio.create_snapshot("snap")
         with pytest.raises(ValueError, match="polars-only"):
-            folio.snapshots["snap"].get_table("big")
+            folio.snapshots["snap"].get("big")
 
     def test_snapshot_get_table_eager_size_guard(self, tmp_path):
         df = pd.DataFrame({"a": range(1000)})
@@ -422,7 +421,7 @@ class TestLazySnapshotAccess:
         folio.reference_table("ref", path=str(ext))
         folio.create_snapshot("snap")
         with pytest.raises(ValueError, match="eager-load limit"):
-            folio.snapshots["snap"].get_table("ref")
+            folio.snapshots["snap"].get("ref")
 
     def test_cloud_exists_is_metadata_only(self, tmp_path):
         """StorageBackend.exists must not download the object to test presence."""
@@ -470,10 +469,10 @@ class TestFormatPortability:
 
         bundle = tmp_path / "b"
         folio = DataFolio(bundle)
-        folio.add_table("features", pd.DataFrame({"a": [1, 2, 3]}))
-        folio.add_numpy("emb", np.array([1.0, 2.0, 3.0]))
-        folio.add_json("config", {"lr": 0.01})
-        folio.add_timestamp("run_at", datetime(2024, 1, 1, tzinfo=timezone.utc))
+        folio.add("features", pd.DataFrame({"a": [1, 2, 3]}))
+        folio.add("emb", np.array([1.0, 2.0, 3.0]))
+        folio.add("config", {"lr": 0.01})
+        folio.add("run_at", datetime(2024, 1, 1, tzinfo=timezone.utc))
         txt = tmp_path / "notes.txt"
         txt.write_text("hello")
         folio.add_file(txt, name="notes")
@@ -514,9 +513,7 @@ class TestFormatPortability:
     def test_contents_md_is_derived_and_records_revision(self, tmp_path):
         bundle = tmp_path / "b"
         folio = DataFolio(bundle)
-        folio.add_table(
-            "features", pd.DataFrame({"a": [1]}), description="the features"
-        )
+        folio.add("features", pd.DataFrame({"a": [1]}), description="the features")
         contents = (bundle / "CONTENTS.md").read_text()
         assert "Derived" in contents
         assert "do not edit" in contents.lower()

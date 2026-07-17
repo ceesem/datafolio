@@ -386,7 +386,7 @@ class StorageBackend:
     # Parquet I/O
     # =========================================================================
 
-    def write_parquet(self, path: str, df: Any) -> None:
+    def write_parquet(self, path: str, df: Any, preserve_index: bool = False) -> None:
         """Write a DataFrame or PyArrow Table to parquet (local or cloud).
 
         Polars DataFrames are written with Polars' own writer so that the
@@ -410,16 +410,18 @@ class StorageBackend:
             fd, tmp = tempfile.mkstemp(suffix=".parquet")
             os.close(fd)
             try:
-                self._write_parquet_local(tmp, df)
+                self._write_parquet_local(tmp, df, preserve_index=preserve_index)
                 self._upload_file(path, tmp)
             finally:
                 if os.path.exists(tmp):
                     os.unlink(tmp)
         else:
             self._ensure_parent_dir(path)
-            self._write_parquet_local(path, df)
+            self._write_parquet_local(path, df, preserve_index=preserve_index)
 
-    def _write_parquet_local(self, path: str, df: Any) -> None:
+    def _write_parquet_local(
+        self, path: str, df: Any, preserve_index: bool = False
+    ) -> None:
         """Write a DataFrame / PyArrow Table to a local Parquet file.
 
         Polars DataFrames use Polars' own writer (so parquet statistics stay
@@ -445,7 +447,7 @@ class StorageBackend:
         table = (
             df
             if isinstance(df, pa.Table)
-            else pa.Table.from_pandas(df, preserve_index=False)
+            else pa.Table.from_pandas(df, preserve_index=preserve_index)
         )
         pq.write_table(table, path)
 
@@ -711,11 +713,14 @@ class StorageBackend:
             self._ensure_parent_dir(path)
             Path(path).write_bytes(data)
 
-    def read_skops(self, path: str) -> Any:
+    def read_skops(self, path: str, trusted: Any = False) -> Any:
         """Read object with skops (local or cloud).
 
         Args:
             path: File path
+            trusted: False (default) refuses files containing non-standard
+                types; True trusts every type found in the file; a list
+                trusts exactly those type names
 
         Returns:
             Deserialized object
@@ -733,10 +738,22 @@ class StorageBackend:
         else:
             data = Path(path).read_bytes()
 
-        # Get untrusted types and trust them all (user's own models)
-        # In skops 0.10+, trusted=True is not allowed due to CVE-2024-37065
+        # skops refuses non-standard types by design (CVE-2024-37065).
+        # Loading them requires the caller to opt in: trusted=True trusts
+        # everything found in this file; a list trusts exactly those types.
         unknown_types = sio.get_untrusted_types(data=data)
-        return sio.loads(data, trusted=unknown_types)
+        if not unknown_types:
+            return sio.loads(data, trusted=[])
+        if trusted is True:
+            return sio.loads(data, trusted=unknown_types)
+        if isinstance(trusted, (list, tuple, set)):
+            return sio.loads(data, trusted=list(trusted))
+        raise ValueError(
+            f"skops file at {path} contains non-standard types that are not "
+            f"trusted by default: {unknown_types}. If you trust the folio's "
+            f"author, load with trusted=True (e.g. "
+            f"folio.get_model(name, trusted=True))."
+        )
 
     # =========================================================================
     # Numpy I/O

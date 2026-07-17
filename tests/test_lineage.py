@@ -69,7 +69,7 @@ class TestLineageFields:
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
 
-        folio.add_table(
+        folio.add(
             "processed_data",
             df,
             inputs=["raw_data"],
@@ -129,7 +129,7 @@ class TestLineageFields:
         df = pd.DataFrame({"a": [1, 2, 3]})
 
         # Should work without lineage fields
-        folio.add_table("data", df)
+        folio.add("data", df)
 
         item = folio._items["data"]
         assert "created_at" in item  # Timestamp is always added
@@ -144,8 +144,8 @@ class TestLineageQueries:
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
 
-        folio.add_table("raw", df)
-        folio.add_table("processed", df, inputs=["raw"])
+        folio.add("raw", df)
+        folio.add("processed", df, inputs=["raw"])
 
         inputs = folio.get_inputs("processed")
         assert inputs == ["raw"]
@@ -155,7 +155,7 @@ class TestLineageQueries:
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
 
-        folio.add_table("processed", df, inputs=["raw_data"], models=["transformer"])
+        folio.add("processed", df, inputs=["raw_data"], models=["transformer"])
 
         inputs = folio.get_inputs("processed")
         assert "raw_data" in inputs
@@ -166,7 +166,7 @@ class TestLineageQueries:
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
 
-        folio.add_table("data", df)
+        folio.add("data", df)
 
         inputs = folio.get_inputs("data")
         assert inputs == []
@@ -183,9 +183,9 @@ class TestLineageQueries:
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
 
-        folio.add_table("raw", df)
-        folio.add_table("processed", df, inputs=["raw"])
-        folio.add_table("final", df, inputs=["processed"])
+        folio.add("raw", df)
+        folio.add("processed", df, inputs=["raw"])
+        folio.add("final", df, inputs=["processed"])
 
         dependents = folio.get_dependents("raw")
         assert "processed" in dependents
@@ -197,7 +197,7 @@ class TestLineageQueries:
         model = DummyModel()
 
         folio.add_model("transformer", model)
-        folio.add_table("processed", df, models=["transformer"])
+        folio.add("processed", df, models=["transformer"])
 
         dependents = folio.get_dependents("transformer")
         assert "processed" in dependents
@@ -207,7 +207,7 @@ class TestLineageQueries:
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
 
-        folio.add_table("data", df)
+        folio.add("data", df)
 
         dependents = folio.get_dependents("data")
         assert dependents == []
@@ -217,9 +217,9 @@ class TestLineageQueries:
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
 
-        folio.add_table("raw", df)
-        folio.add_table("processed", df, inputs=["raw"])
-        folio.add_table("final", df, inputs=["processed"])
+        folio.add("raw", df)
+        folio.add("processed", df, inputs=["raw"])
+        folio.add("final", df, inputs=["processed"])
 
         graph = folio.get_lineage_graph()
 
@@ -235,7 +235,7 @@ class TestCopyMethod:
         """Test basic bundle copying."""
         folio1 = DataFolio(tmp_path / "original" / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio1.add_table("data", df)
+        folio1.add("data", df)
         folio1.metadata["experiment"] = "exp001"
 
         # Copy to new location
@@ -243,7 +243,7 @@ class TestCopyMethod:
 
         # Verify copy has the same data
         assert "data" in folio2._items
-        df_copy = folio2.get_table("data")
+        df_copy = folio2.get("data")
         pd.testing.assert_frame_equal(df_copy, df)
 
         # Verify metadata was copied
@@ -272,8 +272,8 @@ class TestCopyMethod:
         df1 = pd.DataFrame({"a": [1, 2, 3]})
         df2 = pd.DataFrame({"b": [4, 5, 6]})
 
-        folio1.add_table("data1", df1)
-        folio1.add_table("data2", df2)
+        folio1.add("data1", df1)
+        folio1.add("data2", df2)
 
         folio2 = folio1.copy(
             path=tmp_path / "copy", name="test", include_items=["data1"]
@@ -288,8 +288,8 @@ class TestCopyMethod:
         df1 = pd.DataFrame({"a": [1, 2, 3]})
         df2 = pd.DataFrame({"b": [4, 5, 6]})
 
-        folio1.add_table("data1", df1)
-        folio1.add_table("data2", df2)
+        folio1.add("data1", df1)
+        folio1.add("data2", df2)
 
         folio2 = folio1.copy(
             path=tmp_path / "copy", name="test", exclude_items=["data2"]
@@ -330,13 +330,13 @@ class TestCopyMethod:
         artifact_file.write_text("fake image")
 
         folio1 = DataFolio(tmp_path / "original" / "test")
-        folio1.add_artifact("plot", artifact_file)
+        folio1.add_file(artifact_file, name="plot")
 
         folio2 = folio1.copy(path=tmp_path / "copy", name="test")
 
         # Verify artifact was copied
         assert "plot" in folio2._items
-        artifact_path = folio2.get_artifact_path("plot")
+        artifact_path = folio2.item_path("plot")
         assert Path(artifact_path).exists()
 
 
@@ -357,8 +357,8 @@ class TestDescribeWithLineage:
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
 
-        folio.add_table("raw", df)
-        folio.add_table("processed", df, inputs=["raw"])
+        folio.add("raw", df)
+        folio.add("processed", df, inputs=["raw"])
 
         description = folio.describe(return_string=True)
 

@@ -21,33 +21,33 @@ pl = pytest.importorskip("polars")
 class TestGenericApiInvariants:
     def test_add_data_duplicate_name_raises(self, tmp_path):
         folio = DataFolio(tmp_path / "b")
-        folio.add_data("t", pd.DataFrame({"a": [1, 2, 3]}))
+        folio.add("t", pd.DataFrame({"a": [1, 2, 3]}))
         with pytest.raises(ValueError, match="already exists"):
-            folio.add_data("t", pd.DataFrame({"a": [9]}))
+            folio.add("t", pd.DataFrame({"a": [9]}))
 
     def test_add_data_overwrite_allows_replace(self, tmp_path):
         folio = DataFolio(tmp_path / "b")
-        folio.add_data("t", pd.DataFrame({"a": [1, 2, 3]}))
-        folio.add_data("t", pd.DataFrame({"a": [9, 9]}), overwrite=True)
-        assert folio.get_table("t")["a"].to_list() == [9, 9]
+        folio.add("t", pd.DataFrame({"a": [1, 2, 3]}))
+        folio.add("t", pd.DataFrame({"a": [9, 9]}), overwrite=True)
+        assert folio.get("t")["a"].to_list() == [9, 9]
 
     def test_add_data_snapshot_copy_on_write(self, tmp_path):
         folio = DataFolio(tmp_path / "b")
-        folio.add_data("t", pd.DataFrame({"a": [1, 2, 3]}))
+        folio.add("t", pd.DataFrame({"a": [1, 2, 3]}))
         folio.create_snapshot("snap")
-        folio.add_data("t", pd.DataFrame({"a": [9]}), overwrite=True)
+        folio.add("t", pd.DataFrame({"a": [9]}), overwrite=True)
         # snapshot must still see the original data
-        assert folio.snapshots["snap"].get_table("t")["a"].to_list() == [1, 2, 3]
-        assert folio.get_table("t")["a"].to_list() == [9]
+        assert folio.snapshots["snap"].get("t")["a"].to_list() == [1, 2, 3]
+        assert folio.get("t")["a"].to_list() == [9]
 
     def test_add_data_numpy_json_timestamp_delegate(self, tmp_path):
         folio = DataFolio(tmp_path / "b")
-        folio.add_data("arr", np.array([1, 2, 3]))
-        folio.add_data("cfg", {"lr": 0.01})
-        folio.add_data("scalar", 0.95)
-        assert folio.get_data("arr").tolist() == [1, 2, 3]
-        assert folio.get_data("cfg") == {"lr": 0.01}
-        assert folio.get_data("scalar") == 0.95
+        folio.add("arr", np.array([1, 2, 3]))
+        folio.add("cfg", {"lr": 0.01})
+        folio.add("scalar", 0.95)
+        assert folio.get("arr").tolist() == [1, 2, 3]
+        assert folio.get("cfg") == {"lr": 0.01}
+        assert folio.get("scalar") == 0.95
 
     def test_get_data_polars_only_raises_friendly(self, tmp_path):
         # Build a partitioned dataset and reference it (auto polars_only).
@@ -56,7 +56,7 @@ class TestGenericApiInvariants:
         folio = DataFolio(tmp_path / "b")
         folio.reference_table("big", path=d)
         with pytest.raises(ValueError, match="polars-only"):
-            folio.get_data("big")
+            folio.get("big")
 
     def test_get_data_respects_eager_guard(self, tmp_path):
         df = pd.DataFrame({"a": range(1000)})
@@ -65,7 +65,7 @@ class TestGenericApiInvariants:
         folio = DataFolio(tmp_path / "b", max_eager_bytes=10)
         folio.reference_table("ref", ext)
         with pytest.raises(ValueError, match="eager-load limit"):
-            folio.get_data("ref")
+            folio.get("ref")
 
 
 # =============================================================================
@@ -98,7 +98,7 @@ class TestOfflineReferenceCreation:
 
         # Should complete purely as a manifest write.
         folio.reference_table("remote", path="s3://bucket/private/data.parquet")
-        info = folio.get_table_info("remote")
+        info = folio.item_info("remote")
         assert info["path"] == "s3://bucket/private/data.parquet"
         # No auto-enriched fields.
         assert "size_bytes" not in info
@@ -110,7 +110,7 @@ class TestOfflineReferenceCreation:
         folio.reference_table(
             "remote", path="s3://bucket/data.parquet", num_rows=1_000_000
         )
-        assert folio.get_table_info("remote")["num_rows"] == 1_000_000
+        assert folio.item_info("remote")["num_rows"] == 1_000_000
 
     def test_inspect_table_enriches_local(self, tmp_path):
         df = pd.DataFrame({"a": [1, 2, 3], "b": [4.0, 5.0, 6.0]})
@@ -118,10 +118,10 @@ class TestOfflineReferenceCreation:
         df.to_parquet(ext, index=False)
         folio = DataFolio(tmp_path / "b")
         folio.reference_table("ref", ext)
-        assert "columns" not in folio.get_table_info("ref")  # offline creation
+        assert "columns" not in folio.item_info("ref")  # offline creation
 
         result = folio.inspect_table("ref")
-        info = folio.get_table_info("ref")
+        info = folio.item_info("ref")
         assert info["columns"] == ["a", "b"]
         assert info["num_rows"] == 3
         assert info["size_bytes"] == ext.stat().st_size
@@ -154,7 +154,7 @@ class TestUnsupportedFormats:
     def test_supported_formats_accepted(self, tmp_path, fmt):
         folio = DataFolio(tmp_path / "b")
         folio.reference_table("x", path=f"s3://bucket/data.{fmt}", table_format=fmt)
-        assert folio.get_table_info("x")["table_format"] == fmt
+        assert folio.item_info("x")["table_format"] == fmt
 
 
 # =============================================================================
@@ -198,8 +198,8 @@ class TestReferencePathPolicy:
         items_path.write_bytes(orjson.dumps(data))
 
         reopened = DataFolio(bundle)
-        assert reopened.get_table_info("ref")["path"] == "ext.parquet"
-        assert reopened.get_table("ref")["a"].to_list() == [1, 2, 3]
+        assert reopened.item_info("ref")["path"] == "ext.parquet"
+        assert reopened.get("ref")["a"].to_list() == [1, 2, 3]
 
     def test_legacy_relative_reference_survives_move(self, tmp_path):
         import shutil
@@ -223,21 +223,21 @@ class TestReferencePathPolicy:
         shutil.rmtree(src)
 
         moved = DataFolio(dst)
-        assert moved.get_table("ref")["a"].to_list() == [1, 2, 3]
+        assert moved.get("ref")["a"].to_list() == [1, 2, 3]
 
     def test_absolute_reference_unchanged(self, tmp_path):
         data = tmp_path / "ext.parquet"
         pd.DataFrame({"a": [1]}).to_parquet(data, index=False)
         folio = DataFolio(tmp_path / "proj")
         folio.reference_table("ref", path=str(data))  # absolute
-        stored = folio.get_table_info("ref")["path"]
+        stored = folio.item_info("ref")["path"]
         assert stored.startswith("file://") or stored == str(data)
-        assert folio.get_table("ref")["a"].to_list() == [1]
+        assert folio.get("ref")["a"].to_list() == [1]
 
     def test_cloud_reference_unchanged(self, tmp_path):
         folio = DataFolio(tmp_path / "proj")
         folio.reference_table("ref", path="s3://bucket/data.parquet")
-        assert folio.get_table_info("ref")["path"] == "s3://bucket/data.parquet"
+        assert folio.item_info("ref")["path"] == "s3://bucket/data.parquet"
 
 
 # =============================================================================
@@ -250,7 +250,7 @@ class TestReferencePathPolicy:
 class TestLazyScanContract:
     def test_local_parquet_is_lazy(self, tmp_path):
         folio = DataFolio(tmp_path / "b")
-        folio.add_table("t", pd.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6]}))
+        folio.add("t", pd.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6]}))
         lf = folio.scan_table("t")
         assert isinstance(lf, pl.LazyFrame)
         # pushdown: only matching rows/cols materialize
@@ -269,8 +269,8 @@ class TestLazyScanContract:
 
     def test_get_lazy_is_alias_for_scan_table(self, tmp_path):
         folio = DataFolio(tmp_path / "b")
-        folio.add_table("t", pd.DataFrame({"a": [1, 2, 3]}))
-        assert isinstance(folio.get_lazy("t"), pl.LazyFrame)
+        folio.add("t", pd.DataFrame({"a": [1, 2, 3]}))
+        assert isinstance(folio.scan_table("t"), pl.LazyFrame)
 
     def test_native_scheme_classification(self):
         from datafolio.readers import _natively_scannable
@@ -321,8 +321,8 @@ class TestLazyScanContract:
     def test_eager_polars_download_path_still_works(self, tmp_path):
         """get_table(frame='polars') is the explicit eager op."""
         folio = DataFolio(tmp_path / "b")
-        folio.add_table("t", pd.DataFrame({"a": [1, 2, 3]}))
-        out = folio.get_table("t", frame="polars")
+        folio.add("t", pd.DataFrame({"a": [1, 2, 3]}))
+        out = folio.get("t", frame="polars")
         assert isinstance(out, pl.DataFrame)
         assert out["a"].to_list() == [1, 2, 3]
 
@@ -337,16 +337,16 @@ class TestLazyFrameInput:
     def test_add_table_lazyframe_roundtrip(self, tmp_path):
         folio = DataFolio(tmp_path / "b")
         lf = pl.LazyFrame({"a": [1, 2, 3], "b": [4, 5, 6]}).filter(pl.col("a") > 1)
-        folio.add_table("t", lf)
-        out = folio.get_table("t")
+        folio.add("t", lf)
+        out = folio.get("t")
         assert out["a"].to_list() == [2, 3]
         assert out["b"].to_list() == [5, 6]
 
     def test_add_table_lazyframe_metadata(self, tmp_path):
         folio = DataFolio(tmp_path / "b")
         lf = pl.LazyFrame({"a": [1, 2, 3], "b": [4.0, 5.0, 6.0]})
-        folio.add_table("t", lf)
-        info = folio.get_table_info("t")
+        folio.add("t", lf)
+        info = folio.item_info("t")
         assert info["columns"] == ["a", "b"]
         assert info["num_rows"] == 3
         assert info["num_cols"] == 2
@@ -355,20 +355,20 @@ class TestLazyFrameInput:
 
     def test_add_table_lazyframe_overwrite_and_snapshot(self, tmp_path):
         folio = DataFolio(tmp_path / "b")
-        folio.add_table("t", pl.LazyFrame({"a": [1, 2, 3]}))
+        folio.add("t", pl.LazyFrame({"a": [1, 2, 3]}))
         folio.create_snapshot("snap")
-        folio.add_table("t", pl.LazyFrame({"a": [9]}), overwrite=True)
-        assert folio.get_table("t")["a"].to_list() == [9]
-        assert folio.snapshots["snap"].get_table("t")["a"].to_list() == [1, 2, 3]
+        folio.add("t", pl.LazyFrame({"a": [9]}), overwrite=True)
+        assert folio.get("t")["a"].to_list() == [9]
+        assert folio.snapshots["snap"].get("t")["a"].to_list() == [1, 2, 3]
 
     def test_add_data_accepts_lazyframe(self, tmp_path):
         folio = DataFolio(tmp_path / "b")
-        folio.add_data("t", pl.LazyFrame({"a": [1, 2, 3]}))
-        assert folio.get_table("t")["a"].to_list() == [1, 2, 3]
+        folio.add("t", pl.LazyFrame({"a": [1, 2, 3]}))
+        assert folio.get("t")["a"].to_list() == [1, 2, 3]
 
     def test_add_table_lazyframe_scan_roundtrip(self, tmp_path):
         folio = DataFolio(tmp_path / "b")
-        folio.add_table("t", pl.LazyFrame({"a": [1, 2, 3]}))
+        folio.add("t", pl.LazyFrame({"a": [1, 2, 3]}))
         assert folio.scan_table("t").collect()["a"].to_list() == [1, 2, 3]
 
 
@@ -462,32 +462,26 @@ class TestBoundedCloudWrites:
 class TestArrowSchemaNormalization:
     def test_included_uses_arrow_dtypes(self, tmp_path):
         folio = DataFolio(tmp_path / "b")
-        folio.add_table("t", pd.DataFrame({"a": [1, 2, 3]}))
+        folio.add("t", pd.DataFrame({"a": [1, 2, 3]}))
         # Arrow logical type string, not a pandas/polars display string.
-        assert folio.get_table_info("t")["dtypes"]["a"] == "int64"
+        assert folio.item_info("t")["dtypes"]["a"] == "int64"
 
     def test_inspected_reference_matches_included_convention(self, tmp_path):
         df = pd.DataFrame({"a": [1, 2, 3], "b": [1.5, 2.5, 3.5]})
         folio = DataFolio(tmp_path / "b")
-        folio.add_table("inc", df)
+        folio.add("inc", df)
         ext = tmp_path / "e.parquet"
         df.to_parquet(ext, index=False)
         folio.reference_table("ref", ext)
         folio.inspect_table("ref")
         # same Arrow-derived dtype strings and column order for both kinds
-        assert (
-            folio.get_table_info("ref")["dtypes"]
-            == folio.get_table_info("inc")["dtypes"]
-        )
-        assert (
-            folio.get_table_info("ref")["columns"]
-            == folio.get_table_info("inc")["columns"]
-        )
+        assert folio.item_info("ref")["dtypes"] == folio.item_info("inc")["dtypes"]
+        assert folio.item_info("ref")["columns"] == folio.item_info("inc")["columns"]
 
     def test_lazyframe_add_uses_arrow_dtypes(self, tmp_path):
         folio = DataFolio(tmp_path / "b")
-        folio.add_table("t", pl.LazyFrame({"a": [1, 2, 3]}))
-        assert folio.get_table_info("t")["dtypes"]["a"] == "int64"
+        folio.add("t", pl.LazyFrame({"a": [1, 2, 3]}))
+        assert folio.item_info("t")["dtypes"]["a"] == "int64"
 
 
 # =============================================================================
@@ -500,7 +494,7 @@ class TestReferenceIdentity:
     def test_reference_marked_mutable(self, tmp_path):
         folio = DataFolio(tmp_path / "b")
         folio.reference_table("ref", path="s3://bucket/data.parquet")
-        assert folio.get_table_info("ref")["mutable"] is True
+        assert folio.item_info("ref")["mutable"] is True
 
     def test_inspect_captures_source_identity(self, tmp_path):
         df = pd.DataFrame({"a": [1, 2, 3]})
@@ -509,19 +503,19 @@ class TestReferenceIdentity:
         folio = DataFolio(tmp_path / "b")
         folio.reference_table("ref", ext)
         folio.inspect_table("ref")
-        ident = folio.get_table_info("ref")["source_identity"]
+        ident = folio.item_info("ref")["source_identity"]
         assert ident["size"] == ext.stat().st_size
         assert "last_modified" in ident  # from head()
 
     def test_mutable_references_listing(self, tmp_path):
         folio = DataFolio(tmp_path / "b")
-        folio.add_table("owned", pd.DataFrame({"a": [1]}))
+        folio.add("owned", pd.DataFrame({"a": [1]}))
         folio.reference_table("ext", path="s3://bucket/x.parquet")
         assert folio.mutable_references() == ["ext"]
 
     def test_snapshot_info_flags_mutable_references(self, tmp_path):
         folio = DataFolio(tmp_path / "b")
-        folio.add_table("owned", pd.DataFrame({"a": [1]}))
+        folio.add("owned", pd.DataFrame({"a": [1]}))
         folio.reference_table("ext", path="s3://bucket/x.parquet")
         folio.create_snapshot("snap")
         info = folio.get_snapshot_info("snap")
@@ -546,7 +540,7 @@ class TestManifestContract:
 
         bundle = tmp_path / "b"
         folio = DataFolio(bundle)
-        folio.add_table("x", pd.DataFrame({"a": [1]}))
+        folio.add("x", pd.DataFrame({"a": [1]}))
         data = self._read_items(bundle)
         assert data["schema_version"] == MANIFEST_SCHEMA_VERSION
         assert isinstance(data["revision"], int)
@@ -554,9 +548,9 @@ class TestManifestContract:
     def test_revision_increments_monotonically(self, tmp_path):
         bundle = tmp_path / "b"
         folio = DataFolio(bundle)
-        folio.add_table("x", pd.DataFrame({"a": [1]}))
+        folio.add("x", pd.DataFrame({"a": [1]}))
         r1 = self._read_items(bundle)["revision"]
-        folio.add_table("y", pd.DataFrame({"a": [2]}))
+        folio.add("y", pd.DataFrame({"a": [2]}))
         r2 = self._read_items(bundle)["revision"]
         assert r2 == r1 + 1
 
@@ -565,7 +559,7 @@ class TestManifestContract:
 
         bundle = tmp_path / "b"
         folio = DataFolio(bundle)
-        folio.add_table("x", pd.DataFrame({"a": [1, 2, 3]}))
+        folio.add("x", pd.DataFrame({"a": [1, 2, 3]}))
 
         # Rewrite items.json in the oldest (bare list) format.
         items_path = bundle / "items.json"
@@ -574,8 +568,8 @@ class TestManifestContract:
 
         # Opening still works, and the next write migrates to the new format.
         folio2 = DataFolio(bundle)
-        assert folio2.get_table("x")["a"].to_list() == [1, 2, 3]
-        folio2.add_table("y", pd.DataFrame({"a": [9]}))
+        assert folio2.get("x")["a"].to_list() == [1, 2, 3]
+        folio2.add("y", pd.DataFrame({"a": [9]}))
         migrated = orjson.loads(items_path.read_bytes())
         assert migrated["schema_version"] >= 1
         assert migrated["revision"] >= 1
@@ -585,20 +579,20 @@ class TestManifestContract:
 
         bundle = tmp_path / "b"
         writer_a = DataFolio(bundle)
-        writer_a.add_table("x", pd.DataFrame({"a": [1]}))
+        writer_a.add("x", pd.DataFrame({"a": [1]}))
 
         # Second instance loads the current revision.
         writer_b = DataFolio(bundle)
 
         # A advances the manifest; B is now stale.
-        writer_a.add_table("y", pd.DataFrame({"a": [2]}))
+        writer_a.add("y", pd.DataFrame({"a": [2]}))
 
         with pytest.raises(ConcurrentWriteError):
-            writer_b.add_table("z", pd.DataFrame({"a": [3]}))
+            writer_b.add("z", pd.DataFrame({"a": [3]}))
 
     def test_no_leftover_tmp_files(self, tmp_path):
         bundle = tmp_path / "b"
         folio = DataFolio(bundle)
-        folio.add_table("x", pd.DataFrame({"a": [1]}))
+        folio.add("x", pd.DataFrame({"a": [1]}))
         leftovers = list(bundle.glob("*.tmp"))
         assert leftovers == []

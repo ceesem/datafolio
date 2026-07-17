@@ -48,27 +48,10 @@ class ItemProxy:
             >>> with open(folio.data.plot.content, 'rb') as f:  # file path
             ...     img = f.read()
         """
-        # Auto-refresh before accessing
-        self._folio._refresh_if_needed()
-
-        item = self._folio._items[self._name]
-        item_type = item.get("item_type")
-
-        # Dispatch to appropriate getter
-        if item_type in ("referenced_table", "included_table"):
-            return self._folio.get_table(self._name)
-        elif item_type == "numpy_array":
-            return self._folio.get_numpy(self._name)
-        elif item_type == "json_data":
-            return self._folio.get_json(self._name)
-        elif item_type == "timestamp":
-            return self._folio.get_timestamp(self._name)
-        elif item_type in ("model", "pytorch_model"):
-            return self._folio.get_model(self._name)
-        elif item_type == "artifact":
-            return self._folio.get_artifact_path(self._name)
-        else:
-            raise ValueError(f"Unknown item type: {item_type}")
+        # Single read entry point: get() dispatches on the item's type and
+        # applies the same guards (eager-size, polars_only, refresh) as any
+        # direct call.
+        return self._folio.get(self._name)
 
     @property
     def lazy(self) -> Any:
@@ -88,8 +71,7 @@ class ItemProxy:
             >>> lf = folio.data.big_ref.lazy
             >>> lf.filter(pl.col("x") > 0).select("y").collect()
         """
-        self._folio._refresh_if_needed()
-        return self._folio.get_lazy(self._name)
+        return self._folio.scan_table(self._name)
 
     @property
     def polars(self) -> Any:
@@ -102,8 +84,7 @@ class ItemProxy:
             ValueError: If this item is not a table
             ImportError: If polars is not installed
         """
-        self._folio._refresh_if_needed()
-        return self._folio.get_table(self._name, frame="polars")
+        return self._folio.get(self._name, frame="polars")
 
     @property
     def description(self) -> Optional[str]:
@@ -137,28 +118,15 @@ class ItemProxy:
         """Get the file path for this item.
 
         Returns:
-            - For referenced tables: external file path
-            - For included tables: path to the parquet file inside the bundle
-            - For artifacts: artifact file path
-            - For other types: None
+            The payload file path (external path for referenced tables,
+            in-bundle payload path for everything else).
 
         Examples:
             >>> folio.data.external_data.path  # 's3://bucket/data.parquet'
             >>> folio.data.results.path  # '/path/to/bundle/tables/results.parquet'
             >>> folio.data.plot.path  # '/path/to/bundle/artifacts/plot.png'
         """
-        # Auto-refresh before accessing
-        self._folio._refresh_if_needed()
-
-        item = self._folio._items[self._name]
-        item_type = item.get("item_type")
-
-        if item_type in ("referenced_table", "included_table"):
-            return self._folio.get_table_path(self._name)
-        elif item_type == "artifact":
-            return self._folio.get_artifact_path(self._name)
-        else:
-            return None
+        return self._folio.item_path(self._name)
 
     @property
     def inputs(self) -> list[str]:
@@ -167,6 +135,7 @@ class ItemProxy:
         Returns:
             List of item names that were used to create this item
         """
+        self._folio._refresh_if_needed()
         return self._folio.get_inputs(self._name)
 
     @property
@@ -176,6 +145,7 @@ class ItemProxy:
         Returns:
             List of item names that use this item as input
         """
+        self._folio._refresh_if_needed()
         return self._folio.get_dependents(self._name)
 
     @property

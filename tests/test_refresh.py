@@ -15,7 +15,7 @@ class TestMultiInstanceRefresh:
 
         # Instance 1: Create bundle with one item
         folio1 = DataFolio(bundle_path)
-        folio1.add_json("config", {"version": 1})
+        folio1.add("config", {"version": 1})
 
         # Instance 2: Open same bundle
         folio2 = DataFolio(bundle_path)
@@ -23,7 +23,7 @@ class TestMultiInstanceRefresh:
         assert "new_data" not in folio2.list_contents()["json_data"]
 
         # Instance 1: Add new item
-        folio1.add_json("new_data", {"value": 42})
+        folio1.add("new_data", {"value": 42})
 
         # Instance 2: Should auto-refresh and see new item
         contents = folio2.list_contents()
@@ -37,7 +37,7 @@ class TestMultiInstanceRefresh:
         # Instance 1: Create bundle
         folio1 = DataFolio(bundle_path)
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio1.add_table("data1", df)
+        folio1.add("data1", df)
 
         # Instance 2: Open same bundle
         folio2 = DataFolio(bundle_path)
@@ -46,7 +46,7 @@ class TestMultiInstanceRefresh:
         assert "data2" not in desc
 
         # Instance 1: Add another table
-        folio1.add_table("data2", df)
+        folio1.add("data2", df)
 
         # Instance 2: Should auto-refresh in describe()
         desc = folio2.describe(return_string=True)
@@ -60,17 +60,17 @@ class TestMultiInstanceRefresh:
         # Instance 1: Create bundle
         folio1 = DataFolio(bundle_path)
         df1 = pd.DataFrame({"a": [1, 2, 3]})
-        folio1.add_table("initial", df1)
+        folio1.add("initial", df1)
 
         # Instance 2: Open same bundle
         folio2 = DataFolio(bundle_path)
 
         # Instance 1: Add new table
         df2 = pd.DataFrame({"b": [4, 5, 6]})
-        folio1.add_table("new_table", df2)
+        folio1.add("new_table", df2)
 
         # Instance 2: Should be able to get new table after auto-refresh
-        retrieved = folio2.get_table("new_table")
+        retrieved = folio2.get("new_table")
         pd.testing.assert_frame_equal(retrieved, df2)
 
     def test_get_json_sees_new_data(self, tmp_path):
@@ -79,16 +79,16 @@ class TestMultiInstanceRefresh:
 
         # Instance 1: Create bundle
         folio1 = DataFolio(bundle_path)
-        folio1.add_json("config1", {"key": "value1"})
+        folio1.add("config1", {"key": "value1"})
 
         # Instance 2: Open same bundle
         folio2 = DataFolio(bundle_path)
 
         # Instance 1: Add new JSON data
-        folio1.add_json("config2", {"key": "value2"})
+        folio1.add("config2", {"key": "value2"})
 
         # Instance 2: Should be able to get new data
-        retrieved = folio2.get_json("config2")
+        retrieved = folio2.get("config2")
         assert retrieved == {"key": "value2"}
 
     def test_metadata_updates_are_visible(self, tmp_path):
@@ -118,13 +118,13 @@ class TestMultiInstanceRefresh:
 
         # Instance 1: Create bundle
         folio1 = DataFolio(bundle_path)
-        folio1.add_json("initial", {"value": 1})
+        folio1.add("initial", {"value": 1})
 
         # Instance 2: Open same bundle
         folio2 = DataFolio(bundle_path)
 
         # Instance 1: Add new item
-        folio1.add_json("new_item", {"value": 2})
+        folio1.add("new_item", {"value": 2})
 
         # Instance 2: Access via data accessor should work
         retrieved = folio2.data.new_item.content
@@ -136,14 +136,14 @@ class TestMultiInstanceRefresh:
 
         # Instance 1: Create bundle
         folio1 = DataFolio(bundle_path)
-        folio1.add_json("config", {"value": 1}, description="Initial")
+        folio1.add("config", {"value": 1}, description="Initial")
 
         # Instance 2: Open same bundle
         folio2 = DataFolio(bundle_path)
         proxy = folio2.data.config
 
         # Instance 1: Add another item
-        folio1.add_json("new_config", {"value": 2})
+        folio1.add("new_config", {"value": 2})
 
         # Instance 2: ItemProxy should still work and refresh
         assert proxy.description == "Initial"
@@ -155,13 +155,13 @@ class TestMultiInstanceRefresh:
 
         # Instance 1: Create bundle
         folio1 = DataFolio(bundle_path)
-        folio1.add_json("data1", {"value": 1})
+        folio1.add("data1", {"value": 1})
 
         # Instance 2: Open same bundle
         folio2 = DataFolio(bundle_path)
 
         # Instance 1: Add new item
-        folio1.add_json("data2", {"value": 2})
+        folio1.add("data2", {"value": 2})
 
         # Instance 2: Explicitly refresh
         folio2.refresh()
@@ -182,7 +182,7 @@ class TestMultiInstanceRefresh:
         bundle_path = tmp_path / "shared"
 
         folio1 = DataFolio(bundle_path)
-        folio1.add_json("data", {"value": 1})
+        folio1.add("data", {"value": 1})
 
         folio2 = DataFolio(bundle_path)
 
@@ -199,13 +199,13 @@ class TestMultiInstanceRefresh:
         # Instance 1: Create bundle
         folio1 = DataFolio(bundle_path)
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio1.add_table("table1", df)
+        folio1.add("table1", df)
 
         # Instance 2: Open same bundle
         folio2 = DataFolio(bundle_path)
 
         # Instance 1: Add different types of items
-        folio1.add_json("config", {"key": "value"})
+        folio1.add("config", {"key": "value"})
         folio1.reference_table("external", path="s3://bucket/data.parquet")
 
         # Instance 2: Should see all new items
@@ -220,8 +220,8 @@ class TestMultiInstanceRefresh:
 
         # Instance 1: Create bundle with two items
         folio1 = DataFolio(bundle_path)
-        folio1.add_json("data1", {"value": 1})
-        folio1.add_json("data2", {"value": 2})
+        folio1.add("data1", {"value": 1})
+        folio1.add("data2", {"value": 2})
 
         # Instance 2: Open same bundle
         folio2 = DataFolio(bundle_path)
@@ -243,13 +243,13 @@ class TestMultiInstanceRefresh:
         # Instance 1: Create bundle with lineage
         folio1 = DataFolio(bundle_path)
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio1.add_table("raw_data", df)
+        folio1.add("raw_data", df)
 
         # Instance 2: Open same bundle
         folio2 = DataFolio(bundle_path)
 
         # Instance 1: Add derived item
-        folio1.add_json("processed", {"value": 1}, inputs=["raw_data"])
+        folio1.add("processed", {"value": 1}, inputs=["raw_data"])
 
         # Instance 2: Should see lineage after refresh
         graph = folio2.get_lineage_graph()
@@ -266,16 +266,16 @@ class TestMultiInstanceRefresh:
         # Instance 1: Create bundle
         folio1 = DataFolio(bundle_path)
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio1.add_table("data", df, description="Initial description")
+        folio1.add("data", df, description="Initial description")
 
         # Instance 2: Open same bundle
         folio2 = DataFolio(bundle_path)
 
         # Instance 1: Add new table
-        folio1.add_table("new_data", df, description="New description")
+        folio1.add("new_data", df, description="New description")
 
         # Instance 2: Should be able to get info after refresh
-        info = folio2.get_table_info("new_data")
+        info = folio2.item_info("new_data")
         assert info["description"] == "New description"
 
 
@@ -287,7 +287,7 @@ class TestRefreshEdgeCases:
         bundle_path = tmp_path / "shared"
 
         folio = DataFolio(bundle_path)
-        folio.add_json("data", {"value": 1})
+        folio.add("data", {"value": 1})
 
         # Delete metadata file
         metadata_file = bundle_path / "metadata.json"
@@ -302,7 +302,7 @@ class TestRefreshEdgeCases:
         bundle_path = tmp_path / "shared"
 
         folio = DataFolio(bundle_path)
-        folio.add_json("data", {"value": 1})
+        folio.add("data", {"value": 1})
 
         # Corrupt metadata file
         metadata_file = bundle_path / "metadata.json"
@@ -318,7 +318,7 @@ class TestRefreshEdgeCases:
 
         # Create new bundle
         folio = DataFolio(bundle_path)
-        folio.add_json("data", {"value": 1})
+        folio.add("data", {"value": 1})
 
         # Operations should work without refresh issues
         assert "data" in folio.list_contents()["json_data"]
@@ -333,12 +333,12 @@ class TestRefreshPerformance:
 
         folio = DataFolio(bundle_path)
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
 
         # Access multiple times - should be efficient
         for _ in range(10):
             folio.list_contents()
             folio.describe(return_string=True)
-            folio.get_table("data")
+            folio.get("data")
 
         # No assertion needed - just ensure no crashes or errors

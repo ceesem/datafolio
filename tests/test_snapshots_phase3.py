@@ -20,7 +20,7 @@ class TestSnapshotCreation:
         """Test creating a basic snapshot."""
         folio = DataFolio(tmp_path / "test-bundle")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
 
         # Create snapshot
         folio.create_snapshot("v1.0", description="First snapshot")
@@ -42,8 +42,8 @@ class TestSnapshotCreation:
         df1 = pd.DataFrame({"a": [1, 2, 3]})
         df2 = pd.DataFrame({"b": [4, 5, 6]})
 
-        folio.add_table("data1", df1)
-        folio.add_table("data2", df2)
+        folio.add("data1", df1)
+        folio.add("data2", df2)
 
         # Create snapshot
         folio.create_snapshot("v1.0")
@@ -56,7 +56,7 @@ class TestSnapshotCreation:
         """Test creating snapshot with tags."""
         folio = DataFolio(tmp_path / "test-bundle")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
 
         # Create snapshot with tags
         folio.create_snapshot("v1.0", tags=["baseline", "paper"])
@@ -70,8 +70,8 @@ class TestSnapshotCreation:
         df1 = pd.DataFrame({"a": [1, 2, 3]})
         df2 = pd.DataFrame({"b": [4, 5, 6]})
 
-        folio.add_table("data1", df1)
-        folio.add_table("data2", df2)
+        folio.add("data1", df1)
+        folio.add("data2", df2)
 
         # Create snapshot
         folio.create_snapshot("v1.0")
@@ -92,7 +92,7 @@ class TestSnapshotCreation:
             tmp_path / "test-bundle", metadata={"experiment": "test1", "value": 42}
         )
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
 
         # Create snapshot
         folio.create_snapshot("v1.0")
@@ -107,7 +107,7 @@ class TestSnapshotCreation:
         """Test that snapshots are persisted to snapshots.json."""
         folio = DataFolio(tmp_path / "test-bundle")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
 
         # Create snapshot
         folio.create_snapshot("v1.0", description="Test snapshot")
@@ -128,7 +128,7 @@ class TestSnapshotCreation:
         """Test that creating snapshot updates items.json with in_snapshots."""
         folio = DataFolio(tmp_path / "test-bundle")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
 
         # Create snapshot
         folio.create_snapshot("v1.0")
@@ -150,7 +150,7 @@ class TestSnapshotValidation:
         """Test that invalid snapshot names are rejected."""
         folio = DataFolio(tmp_path / "test-bundle")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
 
         # Should reject @ symbol
         with pytest.raises(ValueError, match="can only contain"):
@@ -164,7 +164,7 @@ class TestSnapshotValidation:
         """Test that duplicate snapshot names are rejected."""
         folio = DataFolio(tmp_path / "test-bundle")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
 
         # Create first snapshot
         folio.create_snapshot("v1.0")
@@ -177,15 +177,15 @@ class TestSnapshotValidation:
         """Test that valid snapshot names are accepted."""
         folio = DataFolio(tmp_path / "test-bundle")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
 
         # These should all work
         folio.create_snapshot("v1.0")
-        folio.add_table("data2", df.copy())
+        folio.add("data2", df.copy())
         folio.create_snapshot("baseline-2024")
-        folio.add_table("data3", df.copy())
+        folio.add("data3", df.copy())
         folio.create_snapshot("experiment_1")
-        folio.add_table("data4", df.copy())
+        folio.add("data4", df.copy())
         folio.create_snapshot("v2.0.1")
 
         assert len(folio._snapshots) == 4
@@ -198,7 +198,7 @@ class TestSnapshotContextCapture:
         """Test that environment info is captured when explicitly enabled."""
         folio = DataFolio(tmp_path / "test-bundle")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
 
         # Create snapshot with environment capture enabled
         folio.create_snapshot("v1.0", capture_environment=True)
@@ -212,7 +212,7 @@ class TestSnapshotContextCapture:
         """Test that context capture can be disabled."""
         folio = DataFolio(tmp_path / "test-bundle")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
 
         # Create snapshot without context
         folio.create_snapshot(
@@ -233,7 +233,7 @@ class TestSnapshotContextCapture:
         # It's okay if it's skipped in non-git environments
         folio = DataFolio(tmp_path / "test-bundle")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
 
         # Create snapshot
         folio.create_snapshot("v1.0")
@@ -254,7 +254,7 @@ class TestSnapshotReloading:
         # Create bundle and snapshot
         folio1 = DataFolio(tmp_path / "test-bundle")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio1.add_table("data", df)
+        folio1.add("data", df)
         folio1.create_snapshot("v1.0", description="Test snapshot")
 
         # Reload bundle
@@ -278,11 +278,11 @@ class TestSnapshotIntegrationWithCopyOnWrite:
         df2 = pd.DataFrame({"a": [4, 5, 6]})
 
         # Add data and create snapshot
-        folio.add_table("data", df1)
+        folio.add("data", df1)
         folio.create_snapshot("v1.0")
 
         # Overwrite - should trigger copy-on-write
-        folio.add_table("data", df2, overwrite=True)
+        folio.add("data", df2, overwrite=True)
 
         # Should have 1 current + 1 snapshot version
         assert len(folio._items) == 1
@@ -296,7 +296,7 @@ class TestSnapshotIntegrationWithCopyOnWrite:
         assert snapshot_item.get("version_id")
 
         # Current version should have new data
-        loaded_df = folio.get_table("data")
+        loaded_df = folio.get("data")
         pd.testing.assert_frame_equal(loaded_df, df2)
 
     def test_multiple_snapshots_same_item(self, tmp_path):
@@ -306,7 +306,7 @@ class TestSnapshotIntegrationWithCopyOnWrite:
         df2 = pd.DataFrame({"a": [4, 5, 6]})
 
         # Add data
-        folio.add_table("data", df1)
+        folio.add("data", df1)
 
         # Create multiple snapshots
         folio.create_snapshot("v1.0")
@@ -317,7 +317,7 @@ class TestSnapshotIntegrationWithCopyOnWrite:
         assert "v1.1" in folio._items["data"]["in_snapshots"]
 
         # Overwrite - should preserve for both snapshots
-        folio.add_table("data", df2, overwrite=True)
+        folio.add("data", df2, overwrite=True)
 
         # Should have snapshot version with both snapshots referenced
         snapshot_item = folio._snapshot_versions[0]

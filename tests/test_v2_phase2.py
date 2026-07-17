@@ -63,14 +63,14 @@ class TestItemNameGrammar:
         """A '..' name must be rejected before any payload is written."""
         folio = DataFolio(tmp_path / "inner" / "bundle")
         with pytest.raises(ValueError):
-            folio.add_json("../../escape", {"a": 1})
+            folio.add("../../escape", {"a": 1})
         # Nothing escaped the bundle
         assert not (tmp_path / "escape--r2.json").exists()
         assert not list(tmp_path.glob("escape*"))
 
     def test_namespaced_name_stays_inside_category_dir(self, tmp_path):
         folio = DataFolio(tmp_path / "bundle")
-        folio.add_table("examples/data", pd.DataFrame({"x": [1]}))
+        folio.add("examples/data", pd.DataFrame({"x": [1]}))
         filename = folio._items["examples/data"]["filename"]
         payload = (tmp_path / "bundle" / "tables" / filename).resolve()
         assert payload.is_file()
@@ -85,7 +85,7 @@ class TestAccessorHardening:
         written by an older version may still contain them — the accessor must
         skip them rather than shadow its own attributes."""
         folio = DataFolio(tmp_path / "bundle")
-        folio.add_json("good", 1)
+        folio.add("good", 1)
         # Simulate a legacy manifest entry with a reserved-looking name
         folio._items["_folio"] = {
             "name": "_folio",
@@ -116,7 +116,7 @@ class TestAccessorHardening:
 
     def test_namespaced_item_reachable_by_key(self, tmp_path):
         folio = DataFolio(tmp_path / "bundle")
-        folio.add_json("ns/item", {"v": 2})
+        folio.add("ns/item", {"v": 2})
         assert folio.data["ns/item"].content == {"v": 2}
 
 
@@ -165,7 +165,7 @@ class TestDiffDefaultSnapshot:
 
     def test_default_uses_newest(self, tmp_path):
         folio = DataFolio(tmp_path / "bundle")
-        folio.add_json("cfg", {"v": 1})
+        folio.add("cfg", {"v": 1})
         folio.create_snapshot("older")
         time.sleep(0.01)
         folio.create_snapshot("newer")

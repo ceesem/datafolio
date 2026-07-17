@@ -142,6 +142,21 @@ class SnapshotView:
         """Get item versions in this snapshot."""
         return self._snapshot_meta.get("item_versions", {})
 
+    def get(self, name: str, frame: str = "pandas") -> Any:
+        """Get a table from this snapshot (alias of :meth:`get_table`).
+
+        Mirrors :meth:`DataFolio.get` for the snapshot view. Only tables are
+        stored per-version today, so this delegates to :meth:`get_table`.
+
+        Args:
+            name: Table name
+            frame: ``'pandas'`` (default) or ``'polars'``
+
+        Returns:
+            Table data as it existed in this snapshot.
+        """
+        return self.get_table(name, frame=frame)
+
     def get_table(self, name: str, frame: str = "pandas") -> Any:
         """Get a table as it existed in this snapshot.
 
@@ -567,8 +582,6 @@ class DataFolio:
         # Create it here (not lazily) so autocomplete is immediately available
         self._data_accessor = DataAccessor(self)
 
-    # ==================== Well-factored I/O Helper Functions ====================
-
     def _sync_data_accessor(self) -> None:
         """Sync data accessor after items have changed.
 
@@ -590,352 +603,6 @@ class DataFolio:
                 msg += f" (loaded from snapshot '{self._loaded_snapshot}')"
             msg += ". Open without read_only=True to make changes."
             raise RuntimeError(msg)
-
-    def _exists(self, path: str) -> bool:
-        """Check if a path exists (local or cloud).
-
-        Args:
-            path: Path to check
-
-        Returns:
-            True if path exists
-        """
-        if is_cloud_path(path):
-            # For cloud, we'll try to list contents
-            # This is a placeholder - you'll refine for cloudfiles
-            try:
-                from cloudfiles import CloudFiles
-
-                cf = CloudFiles(path)
-                # Try to list - if it works, directory exists
-                list(cf.list())
-                return True
-            except:
-                return False
-        else:
-            return Path(path).exists()
-
-    def _mkdir(self, path: str, parents: bool = True, exist_ok: bool = True) -> None:
-        """Create a directory (local or cloud).
-
-        Args:
-            path: Directory path to create
-            parents: Create parent directories if needed
-            exist_ok: Don't error if directory exists
-        """
-        if is_cloud_path(path):
-            # Cloud storage is object-based, no need to create directories
-            # They're created implicitly when you write files
-            pass
-        else:
-            Path(path).mkdir(parents=parents, exist_ok=exist_ok)
-
-    def _join_paths(self, *parts: str) -> str:
-        """Join path components (local or cloud).
-
-        Args:
-            *parts: Path components to join
-
-        Returns:
-            Joined path string
-        """
-        if any(is_cloud_path(str(p)) for p in parts):
-            # Cloud path - use forward slashes
-            return "/".join(str(p).rstrip("/") for p in parts)
-        else:
-            # Local path
-            return str(Path(*parts))
-
-    def _write_json(self, path: str, data: Any) -> None:
-        """Write JSON data to file (local or cloud).
-
-        Args:
-            path: File path
-            data: Data to serialize
-        """
-        import orjson
-
-        content = orjson.dumps(
-            data, option=orjson.OPT_INDENT_2 | orjson.OPT_SERIALIZE_NUMPY
-        )
-
-        if is_cloud_path(path):
-            from cloudfiles import CloudFiles
-
-            # Extract directory and filename
-            parts = path.rsplit("/", 1)
-            if len(parts) == 2:
-                dir_path, filename = parts
-            else:
-                dir_path = ""
-                filename = parts[0]
-            cf = CloudFiles(dir_path) if dir_path else CloudFiles(path)
-            cf.put(filename, content)
-        else:
-            with open(path, "wb") as f:
-                f.write(content)
-
-    def _read_json(self, path: str) -> Any:
-        """Read JSON data from file (local or cloud).
-
-        Args:
-            path: File path
-
-        Returns:
-            Deserialized data
-
-        Raises:
-            FileNotFoundError: If file doesn't exist
-            ValueError: If file content is empty or invalid
-        """
-        import orjson
-
-        if is_cloud_path(path):
-            from cloudfiles import CloudFiles
-
-            parts = path.rsplit("/", 1)
-            if len(parts) == 2:
-                dir_path, filename = parts
-            else:
-                dir_path = ""
-                filename = parts[0]
-            cf = CloudFiles(dir_path) if dir_path else CloudFiles(path)
-            content = cf.get(filename)
-
-            # Handle case where file doesn't exist or is empty
-            if content is None:
-                raise FileNotFoundError(f"File not found in cloud storage: {path}")
-            if not content:
-                raise ValueError(f"Empty file in cloud storage: {path}")
-
-            return orjson.loads(content)
-        else:
-            with open(path, "rb") as f:
-                return orjson.loads(f.read())
-
-    def _write_parquet(self, path: str, df: Any) -> None:
-        """Write DataFrame to parquet (local or cloud).
-
-        Args:
-            path: File path
-            df: pandas DataFrame
-        """
-        # pandas.to_parquet handles cloud paths if fsspec/cloud libs installed
-        df.to_parquet(path, index=False)
-
-    def _read_parquet(self, path: str) -> Any:
-        """Read parquet file to DataFrame (local or cloud).
-
-        Args:
-            path: File path
-
-        Returns:
-            pandas DataFrame
-        """
-        import pandas as pd
-
-        return pd.read_parquet(path)
-
-    def _write_joblib(self, path: str, obj: Any) -> None:
-        """Write object with joblib (local or cloud).
-
-        Args:
-            path: File path
-            obj: Object to serialize
-        """
-        import joblib
-
-        if is_cloud_path(path):
-            # Write to temp file, then upload
-            import tempfile
-
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".joblib") as tmp:
-                joblib.dump(obj, tmp.name)
-                with open(tmp.name, "rb") as f:
-                    content = f.read()
-                # Upload
-                from cloudfiles import CloudFiles
-
-                parts = path.rsplit("/", 1)
-                if len(parts) == 2:
-                    dir_path, filename = parts
-                else:
-                    dir_path = ""
-                    filename = parts[0]
-                cf = CloudFiles(dir_path) if dir_path else CloudFiles(path)
-                cf.put(filename, content)
-                # Cleanup
-                Path(tmp.name).unlink()
-        else:
-            joblib.dump(obj, path)
-
-    def _read_joblib(self, path: str) -> Any:
-        """Read object with joblib (local or cloud).
-
-        Args:
-            path: File path
-
-        Returns:
-            Deserialized object
-        """
-        import joblib
-
-        if is_cloud_path(path):
-            # Download to temp file, then load
-            import tempfile
-
-            from cloudfiles import CloudFiles
-
-            parts = path.rsplit("/", 1)
-            if len(parts) == 2:
-                dir_path, filename = parts
-            else:
-                dir_path = ""
-                filename = parts[0]
-            cf = CloudFiles(dir_path) if dir_path else CloudFiles(path)
-            content = cf.get(filename)
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".joblib") as tmp:
-                tmp.write(content)
-                tmp.flush()
-                obj = joblib.load(tmp.name)
-                Path(tmp.name).unlink()
-                return obj
-        else:
-            return joblib.load(path)
-
-    def _write_numpy(self, path: str, array: Any) -> None:
-        """Write numpy array to file (local or cloud).
-
-        Args:
-            path: File path
-            array: numpy array to save
-        """
-        try:
-            import numpy as np
-        except ImportError:
-            raise ImportError(
-                "NumPy is required to save numpy arrays. "
-                "Install with: pip install numpy"
-            )
-
-        if is_cloud_path(path):
-            # Write to temp file, then upload
-            import tempfile
-
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".npy") as tmp:
-                np.save(tmp.name, array)
-                with open(tmp.name, "rb") as f:
-                    content = f.read()
-                # Upload
-                from cloudfiles import CloudFiles
-
-                parts = path.rsplit("/", 1)
-                if len(parts) == 2:
-                    dir_path, filename = parts
-                else:
-                    dir_path = ""
-                    filename = parts[0]
-                cf = CloudFiles(dir_path) if dir_path else CloudFiles(path)
-                cf.put(filename, content)
-                # Cleanup
-                Path(tmp.name).unlink()
-        else:
-            np.save(path, array)
-
-    def _read_numpy(self, path: str) -> Any:
-        """Read numpy array from file (local or cloud).
-
-        Args:
-            path: File path
-
-        Returns:
-            numpy array
-        """
-        try:
-            import numpy as np
-        except ImportError:
-            raise ImportError(
-                "NumPy is required to load numpy arrays. "
-                "Install with: pip install numpy"
-            )
-
-        if is_cloud_path(path):
-            # Download to temp file, then load
-            import tempfile
-
-            from cloudfiles import CloudFiles
-
-            parts = path.rsplit("/", 1)
-            if len(parts) == 2:
-                dir_path, filename = parts
-            else:
-                dir_path = ""
-                filename = parts[0]
-            cf = CloudFiles(dir_path) if dir_path else CloudFiles(path)
-            content = cf.get(filename)
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".npy") as tmp:
-                tmp.write(content)
-                tmp.flush()
-                array = np.load(tmp.name)
-                Path(tmp.name).unlink()
-                return array
-        else:
-            return np.load(path)
-
-    def _write_timestamp(self, path: str, timestamp: datetime) -> None:
-        """Write timestamp to JSON file (local or cloud).
-
-        Args:
-            path: File path
-            timestamp: datetime object (must be timezone-aware, will be converted to UTC)
-        """
-        # Convert to UTC and create ISO 8601 string
-        utc_timestamp = timestamp.astimezone(timezone.utc)
-        iso_string = utc_timestamp.isoformat()
-
-        # Write as JSON using existing method
-        self._storage.write_json(path, {"iso_string": iso_string})
-
-    def _read_timestamp(self, path: str) -> datetime:
-        """Read timestamp from JSON file (local or cloud).
-
-        Args:
-            path: File path
-
-        Returns:
-            UTC-aware datetime object
-        """
-        # Read JSON using existing method
-        data = self._storage.read_json(path)
-        iso_string = data["iso_string"]
-
-        # Parse ISO 8601 string to datetime
-        return datetime.fromisoformat(iso_string)
-
-    def _copy_file(self, src: Union[str, Path], dst: str) -> None:
-        """Copy a file (local to local/cloud).
-
-        Args:
-            src: Source file path (local)
-            dst: Destination path (local or cloud)
-        """
-        if is_cloud_path(dst):
-            from cloudfiles import CloudFiles
-
-            with open(src, "rb") as f:
-                content = f.read()
-            parts = dst.rsplit("/", 1)
-            if len(parts) == 2:
-                dir_path, filename = parts
-            else:
-                dir_path = ""
-                filename = parts[0]
-            cf = CloudFiles(dir_path) if dir_path else CloudFiles(dst)
-            cf.put(filename, content)
-        else:
-            import shutil
-
-            shutil.copy2(src, dst)
 
     # ==================== Bundle Initialization ====================
 
@@ -1003,9 +670,9 @@ from datafolio import DataFolio
 folio = DataFolio('{self.path}')
 folio.describe()                       # view contents
 
-df = folio.get_table('table_name')     # owned or referenced tables
+df = folio.get('table_name')           # any item: tables, arrays, JSON, ...
 model = folio.get_model('model_name')
-array = folio.get_numpy('array_name')
+path = folio.item_path('table_name')   # direct path to the payload file
 
 lf = folio.scan_table('big_reference') # lazy scan of a large external table
 folio.inspect_table('big_reference')   # record its schema/size on demand
@@ -3175,6 +2842,508 @@ For more information, see the [datafolio documentation](https://github.com/ceese
 
     # ==================== Public API Methods ====================
 
+    # ==================== Core item API ====================
+
+    def add(
+        self,
+        name: str,
+        obj: Any,
+        *,
+        description: Optional[str] = None,
+        inputs: Optional[list[str]] = None,
+        overwrite: bool = False,
+        code: Optional[str] = None,
+        **type_opts: Any,
+    ) -> Self:
+        """Add an object to the folio (the single write entry point).
+
+        The object's type selects the storage format automatically:
+
+        - pandas / polars DataFrame, polars LazyFrame → Parquet table
+        - numpy array → ``.npy``
+        - dict / list / scalar (int, float, str, bool, None) → JSON
+        - timezone-aware datetime (or Unix timestamp via add()'s datetime
+          detection is not applied to bare numbers — those store as JSON)
+          → timestamp
+        - scikit-learn estimator → model (joblib)
+
+        For anything else, use the explicit verbs: :meth:`add_model` for
+        arbitrary picklable model-like objects, :meth:`add_file` to copy a
+        file into the folio, or :meth:`reference_table` to link external
+        table data without copying it.
+
+        Strings are always stored as JSON data — a string that happens to be
+        a path is never interpreted as a file (use :meth:`add_file`).
+
+        JSON caveat: non-finite floats (``nan``/``inf``) have no JSON
+        representation and are serialized as ``null``; they come back as
+        ``None``. Store numeric arrays with NaNs as numpy arrays or tables
+        instead.
+
+        Args:
+            name: Unique item name. May be namespaced with '/'
+                (e.g. ``'examples/weights'``).
+            obj: The object to store.
+            description: Optional description. On overwrite, ``None``
+                preserves the existing description and ``""`` clears it.
+            inputs: Optional lineage — names of items this was derived from.
+            overwrite: Must be True to replace an existing item. A prior
+                version pinned by a snapshot is preserved via copy-on-write.
+            code: Optional code snippet that created this item.
+            **type_opts: Type-specific options. Tables: ``models`` (model
+                lineage), ``preserve_index`` (keep a non-default pandas
+                index). Models: ``custom`` (skops format), ``hyperparameters``.
+                Files: ``category``. Unknown options raise ``TypeError``.
+
+        Returns:
+            Self for method chaining.
+
+        Raises:
+            ValueError: If the name already exists (and ``overwrite=False``)
+                or violates the name grammar.
+            TypeError: If no handler supports the object's type, or an
+                unknown type option was passed.
+
+        Examples:
+            >>> folio.add('results', df)                     # table
+            >>> folio.add('embeddings', np.zeros((10, 8)))   # numpy
+            >>> folio.add('config', {'lr': 0.01})            # JSON
+            >>> folio.add('accuracy', 0.95)                  # JSON scalar
+            >>> folio.add('trained', clf, inputs=['results'])  # sklearn model
+            >>> folio.add('results', df2, overwrite=True)    # replace
+        """
+        self._check_read_only()
+        validate_item_name(name)
+
+        from datafolio.base.registry import detect_handler
+
+        handler = detect_handler(obj)
+        item_type = handler.item_type if handler is not None else None
+
+        # Primitives don't auto-detect (keeps handler detection unambiguous)
+        # but are valid JSON payloads.
+        if item_type is None and isinstance(obj, (int, float, str, bool, type(None))):
+            item_type = "json_data"
+
+        if item_type is None:
+            raise TypeError(
+                f"Unsupported data type: {type(obj).__name__}. add() accepts "
+                f"DataFrames/LazyFrames, numpy arrays, dicts/lists/scalars, "
+                f"timezone-aware datetimes, and scikit-learn estimators. For "
+                f"arbitrary picklable objects use add_model(); for files use "
+                f"add_file(); for external tables use reference_table()."
+            )
+
+        return self._add_item(
+            name,
+            obj,
+            item_type,
+            description=description,
+            inputs=inputs,
+            overwrite=overwrite,
+            code=code,
+            **type_opts,
+        )
+
+    def _add_item(
+        self,
+        name: str,
+        obj: Any,
+        item_type: str,
+        *,
+        description: Optional[str] = None,
+        inputs: Optional[list[str]] = None,
+        overwrite: bool = False,
+        code: Optional[str] = None,
+        **type_opts: Any,
+    ) -> Self:
+        """Shared guarded commit for every owned item type.
+
+        All write invariants live here exactly once: read-only check, name
+        validation, the uniform overwrite rule, snapshot copy-on-write,
+        the mutation guard, description preservation, and the atomic
+        manifest publish (via :meth:`_commit_owned_item`).
+        """
+        self._check_read_only()
+        validate_item_name(name)
+
+        if name in self._items and not overwrite:
+            raise ValueError(
+                f"Item '{name}' already exists in this DataFolio. "
+                f"Use overwrite=True to replace it."
+            )
+
+        handler_kwargs: Dict[str, Any] = {}
+        extras: Dict[str, Any] = {}
+
+        if item_type == "included_table":
+            from datafolio.utils import get_file_extension
+
+            extension = get_file_extension("parquet")
+            models = type_opts.pop("models", None)
+            if models is not None:
+                extras["models"] = models
+            if type_opts.pop("preserve_index", False):
+                handler_kwargs["preserve_index"] = True
+        elif item_type == "numpy_array":
+            extension = ".npy"
+        elif item_type == "json_data":
+            extension = ".json"
+        elif item_type == "timestamp":
+            extension = ".json"
+        elif item_type == "model":
+            handler_kwargs["custom"] = bool(type_opts.pop("custom", False))
+            hyperparameters = type_opts.pop("hyperparameters", None)
+            if hyperparameters is not None:
+                extras["hyperparameters"] = hyperparameters
+            extension = ".skops" if handler_kwargs["custom"] else ".joblib"
+        elif item_type == "artifact":
+            extension = Path(str(obj)).suffix
+            category = type_opts.pop("category", None)
+            if category is not None:
+                extras["category"] = category
+            obj = str(obj)
+        else:
+            raise TypeError(f"No add() path for item type '{item_type}'.")
+
+        if type_opts:
+            raise TypeError(
+                f"Unknown option(s) for item type '{item_type}': {sorted(type_opts)}"
+            )
+
+        def _build(filename: str, version_id: str) -> Dict[str, Any]:
+            metadata = (
+                get_registry()
+                .get(item_type)
+                .add(
+                    self,
+                    name,
+                    obj,
+                    description=description,
+                    inputs=inputs,
+                    _filename=filename,
+                    **handler_kwargs,
+                )
+            )
+            metadata.update(extras)
+            if code is not None:
+                metadata["code"] = code
+            return metadata
+
+        self._commit_owned_item(name, item_type, extension, description, _build)
+        return self
+
+    def get(self, name: str, **type_opts: Any) -> Any:
+        """Get any item by name (the single read entry point).
+
+        Returns the natural object for the item's type: tables come back as
+        pandas DataFrames by default (``frame='polars'`` for polars), numpy
+        arrays as arrays, JSON data as dicts/lists/scalars, timestamps as
+        UTC-aware datetimes, models as loaded model objects, and files
+        (artifacts) as the path to the payload — the only type whose "value"
+        is a file.
+
+        Eager table reads are subject to the folio's ``max_eager_bytes``
+        guard; use :meth:`scan_table` for a lazy scan of large tables.
+
+        Args:
+            name: Item name.
+            **type_opts: Type-specific options. Tables: ``frame``
+                ('pandas'/'polars'), ``allow_full_load``, plus reader options
+                (``columns``, ``filters``, ...). Timestamps: ``as_unix``.
+                Models: ``trusted`` (skops-format models only). Unknown
+                options raise ``TypeError``.
+
+        Returns:
+            The item's content (or path, for files).
+
+        Raises:
+            KeyError: If the item doesn't exist.
+            TypeError: If an unknown type option was passed.
+            ValueError: If a table exceeds the eager-load guard.
+
+        Examples:
+            >>> df = folio.get('results')
+            >>> pl_df = folio.get('results', frame='polars')
+            >>> cfg = folio.get('config')
+            >>> path = folio.get('plot')  # artifact -> file path
+        """
+        self._refresh_if_needed()
+
+        if name not in self._items:
+            raise KeyError(f"Item '{name}' not found in DataFolio")
+
+        item = self._items[name]
+        item_type = item.get("item_type")
+        registry = get_registry()
+
+        if item_type in ("included_table", "referenced_table"):
+            frame = type_opts.pop("frame", "pandas")
+            allow_full_load = type_opts.pop("allow_full_load", False)
+            return self._get_table(
+                name, frame=frame, allow_full_load=allow_full_load, **type_opts
+            )
+        if item_type == "timestamp":
+            as_unix = type_opts.pop("as_unix", False)
+            self._reject_unknown_opts(item_type, type_opts)
+            dt = registry.get("timestamp").get(self, name, as_unix=False)
+            return dt.timestamp() if as_unix else dt
+        if item_type == "model":
+            trusted = type_opts.pop("trusted", False)
+            self._reject_unknown_opts(item_type, type_opts)
+            return registry.get("model").get(self, name, trusted=trusted)
+        if item_type == "artifact":
+            self._reject_unknown_opts(item_type, type_opts)
+            return self.item_path(name)
+        if item_type in ("numpy_array", "json_data"):
+            self._reject_unknown_opts(item_type, type_opts)
+            return registry.get(item_type).get(self, name)
+
+        raise ValueError(f"Item '{name}' has unknown type '{item_type}'.")
+
+    @staticmethod
+    def _reject_unknown_opts(item_type: str, type_opts: Dict[str, Any]) -> None:
+        """Raise TypeError for leftover get()/add() options (never swallow)."""
+        if type_opts:
+            raise TypeError(
+                f"Unknown option(s) for item type '{item_type}': {sorted(type_opts)}"
+            )
+
+    def _get_table(
+        self,
+        name: str,
+        frame: str = "pandas",
+        allow_full_load: bool = False,
+        **kwargs: Any,
+    ) -> Any:
+        """Eager table read (pandas or polars) with the shared guards."""
+        item = self._items[name]
+        item_type = item.get("item_type")
+
+        if item_type not in ("included_table", "referenced_table"):
+            raise ValueError(f"Item '{name}' is not a table (type: {item_type})")
+
+        # Guard against accidentally materializing a huge table
+        self._check_eager_size(name, item, allow_full_load)
+
+        handler = get_registry().get(item_type)
+
+        if frame == "polars":
+            # Eager polars: scan lazily then collect.
+            return handler.get_lazy(self, name, **kwargs).collect()
+        elif frame == "pandas":
+            # Sharded/partitioned (polars-only) tables can't be materialized
+            # as pandas — raise a clear, actionable error.
+            if item.get("polars_only"):
+                raise _polars_only_error(name)
+            return handler.get(self, name, **kwargs)
+        else:
+            raise ValueError(f"Unknown frame '{frame}'. Use 'pandas' or 'polars'.")
+
+    def get_model(self, name: str, trusted: bool = False) -> Any:
+        """Get a model by name (the one explicit typed getter).
+
+        SECURITY: loading a joblib-format model executes pickle — never load
+        models from folios you don't trust. Models saved with ``custom=True``
+        use the skops format, which refuses unknown types unless you pass
+        ``trusted=True`` after reviewing the error's type list.
+
+        Args:
+            name: Model name.
+            trusted: For skops-format models, trust the non-standard types
+                found in the file (required to load custom pipelines).
+
+        Returns:
+            The loaded model object.
+
+        Raises:
+            KeyError: If no item has this name.
+            ValueError: If the named item is not a model.
+
+        Examples:
+            >>> clf = folio.get_model('classifier')
+            >>> pipe = folio.get_model('custom_pipeline', trusted=True)
+        """
+        self._refresh_if_needed()
+
+        if name not in self._items:
+            raise KeyError(f"Model '{name}' not found in DataFolio")
+
+        item = self._items[name]
+        if item.get("item_type") != "model":
+            raise ValueError(
+                f"Item '{name}' is not a model (type: {item.get('item_type')})"
+            )
+
+        return get_registry().get("model").get(self, name, trusted=trusted)
+
+    def add_model(
+        self,
+        name: str,
+        model: Any,
+        *,
+        description: Optional[str] = None,
+        inputs: Optional[list[str]] = None,
+        overwrite: bool = False,
+        code: Optional[str] = None,
+        custom: bool = False,
+        hyperparameters: Optional[Dict[str, Any]] = None,
+    ) -> Self:
+        """Add a model-like object to the bundle (explicit verb).
+
+        Unlike :meth:`add`, which only auto-detects scikit-learn estimators,
+        this stores *any* picklable object as a model — storing arbitrary
+        objects with pickle is an explicit act.
+
+        Args:
+            name: Unique name for this model.
+            model: The model object to serialize.
+            description: Optional description.
+            inputs: Optional lineage (e.g. training data item names).
+            overwrite: Must be True to replace an existing item.
+            code: Optional code snippet that trained this model.
+            custom: If True, use the skops format (portable pipelines with
+                custom transformers; safer loading). Default joblib.
+            hyperparameters: Optional dict of hyperparameters to record.
+
+        Returns:
+            Self for method chaining.
+
+        Examples:
+            >>> folio.add_model('classifier', clf,
+            ...     hyperparameters={'n_estimators': 100})
+            >>> folio.add_model('pipeline', custom_pipeline, custom=True)
+        """
+        return self._add_item(
+            name,
+            model,
+            "model",
+            description=description,
+            inputs=inputs,
+            overwrite=overwrite,
+            code=code,
+            custom=custom,
+            hyperparameters=hyperparameters,
+        )
+
+    def add_file(
+        self,
+        path: Union[str, Path],
+        name: Optional[str] = None,
+        *,
+        category: Optional[str] = None,
+        description: Optional[str] = None,
+        overwrite: bool = False,
+    ) -> Self:
+        """Copy a file into the bundle (explicit verb for file payloads).
+
+        The file's extension is preserved. Retrieve the stored file's path
+        with ``get(name)`` or :meth:`item_path`.
+
+        Args:
+            path: Path to the file to copy in.
+            name: Optional item name (default: the filename without extension).
+            category: Optional grouping label ('plots', 'configs', ...).
+            description: Optional description.
+            overwrite: Must be True to replace an existing item.
+
+        Returns:
+            Self for method chaining.
+
+        Raises:
+            FileNotFoundError: If the file doesn't exist.
+            ValueError: If the name already exists (and overwrite=False).
+
+        Examples:
+            >>> folio.add_file('plots/loss.png', category='plots')
+            >>> folio.add_file('config.yaml', name='model_config')
+            >>> open(folio.get('loss'), 'rb')  # stored file path
+        """
+        if name is None:
+            name = Path(path).stem
+        return self._add_item(
+            name,
+            str(path),
+            "artifact",
+            description=description,
+            overwrite=overwrite,
+            category=category,
+        )
+
+    def item_path(self, name: str) -> str:
+        """Get the path to an item's payload file.
+
+        For items stored in the bundle, returns the full path to the payload
+        (a cloud URI for cloud folios — shareable with collaborators who
+        don't use datafolio). For external references, returns the external
+        path recorded at reference time.
+
+        Args:
+            name: Item name.
+
+        Returns:
+            Full path to the item's data file.
+
+        Raises:
+            KeyError: If the item doesn't exist.
+            ValueError: If the item has no associated file.
+
+        Examples:
+            >>> folio.item_path('results')
+            '/abs/path/bundle/tables/results--r2.parquet'
+            >>> folio.item_path('raw')  # external reference
+            's3://data-lake/raw.parquet'
+        """
+        self._refresh_if_needed()
+
+        if name not in self._items:
+            raise KeyError(f"Item '{name}' not found in DataFolio")
+
+        item = self._items[name]
+        item_type = item.get("item_type")
+
+        if item_type == "referenced_table":
+            return self._resolve_reference_path(item["path"])
+
+        if "filename" not in item:
+            raise ValueError(
+                f"Item '{name}' (type: {item_type}) has no associated file path"
+            )
+
+        handler = get_registry().get(item_type)
+        subdir = handler.get_storage_subdir()
+        return self._storage.join_paths(self._bundle_dir, subdir, item["filename"])
+
+    def item_info(self, name: str) -> Dict[str, Any]:
+        """Get an item's manifest entry (a defensive copy).
+
+        Contains the item's type, payload location, creation time, lineage,
+        and type-specific fields (columns/dtypes/num_rows for tables, etc.).
+        Mutating the returned dict does not change the manifest — use
+        :meth:`update_item` for that.
+
+        Args:
+            name: Item name.
+
+        Returns:
+            A copy of the manifest entry.
+
+        Raises:
+            KeyError: If the item doesn't exist.
+
+        Examples:
+            >>> info = folio.item_info('results')
+            >>> info['num_rows'], info['columns']
+        """
+        import copy
+
+        self._refresh_if_needed()
+
+        if name not in self._items:
+            raise KeyError(f"Item '{name}' not found in DataFolio")
+
+        return copy.deepcopy(dict(self._items[name]))
+
     def list_contents(self, include_archived: bool = False) -> Dict[str, list[str]]:
         """List all contents in the DataFolio.
 
@@ -3626,185 +3795,6 @@ For more information, see the [datafolio documentation](https://github.com/ceese
 
         return self
 
-    def add_table(
-        self,
-        name: str,
-        data: Any,  # pandas or Polars DataFrame
-        description: Optional[str] = None,
-        overwrite: bool = False,
-        inputs: Optional[list[str]] = None,
-        models: Optional[list[str]] = None,
-        code: Optional[str] = None,
-    ) -> Self:
-        """Add a table to be included in the bundle.
-
-        Writes immediately to tables/ directory and updates items.json.
-
-        Args:
-            name: Unique name for this table
-            data: pandas or Polars DataFrame to include
-            description: Optional description
-            overwrite: If True, allow overwriting existing table (default: False)
-            inputs: Optional list of table names used to create this table
-            models: Optional list of model names used to create this table
-            code: Optional code snippet that created this table
-
-        Returns:
-            Self for method chaining
-
-        Raises:
-            ValueError: If name already exists and overwrite=False
-            TypeError: If data is not a DataFrame
-
-        Examples:
-            >>> import pandas as pd
-            >>> folio = DataFolio('experiments', prefix='test')
-            >>> df = pd.DataFrame({'a': [1, 2, 3], 'b': [4, 5, 6]})
-            >>> folio.add_table('summary', df)
-            >>> # With lineage
-            >>> pred_df = pd.DataFrame({'pred': [0, 1, 0]})
-            >>> folio.add_table('predictions', pred_df,
-            ...     inputs=['test_data'],
-            ...     models=['classifier'],
-            ...     code='pred = model.predict(X_test)')
-        """
-        self._check_read_only()
-
-        # Validate item name
-
-        validate_item_name(name)
-
-        # Overwriting an existing, non-snapshotted item requires overwrite=True.
-        # A snapshotted item is always preserved via copy-on-write inside the
-        # guarded commit below.
-        if name in self._items and not self._is_in_snapshots(name) and not overwrite:
-            raise ValueError(
-                f"Item '{name}' already exists in this DataFolio. "
-                f"Use overwrite=True to replace it."
-            )
-
-        from datafolio.utils import get_file_extension
-
-        def _build(filename: str, version_id: str) -> Dict[str, Any]:
-            metadata = (
-                get_registry()
-                .get("included_table")
-                .add(
-                    self,
-                    name,
-                    data,
-                    description=description,
-                    inputs=inputs,
-                    _filename=filename,
-                )
-            )
-            if models is not None:
-                metadata["models"] = models
-            if code is not None:
-                metadata["code"] = code
-            return metadata
-
-        self._commit_owned_item(
-            name, "included_table", get_file_extension("parquet"), description, _build
-        )
-        return self
-
-    def get_table(
-        self,
-        name: str,
-        frame: str = "pandas",
-        allow_full_load: bool = False,
-        **kwargs: Any,
-    ) -> Any:  # Returns pandas.DataFrame or polars.DataFrame
-        """Get a table by name (works for both included and referenced).
-
-        For included tables, reads from bundle directory.
-        For referenced tables, reads from the specified external path.
-
-        The ``frame`` argument selects the returned DataFrame flavor. With
-        ``frame='pandas'`` (default), supports all pandas.read_parquet() arguments
-        for filtering and optimization:
-        - `columns`: List of column names to read (column pruning)
-        - `filters`: Row filtering predicates (row filtering)
-        - `engine`: Parquet engine ('pyarrow' or 'fastparquet')
-
-        This is an *eager* read: it materializes the whole table. For large
-        (especially referenced) tables, use :meth:`get_lazy` instead. The eager
-        read is subject to the folio's ``max_eager_bytes`` guard.
-
-        Args:
-            name: Name of the table
-            frame: Output flavor — ``'pandas'`` (default) or ``'polars'`` for an
-                eager polars DataFrame.
-            allow_full_load: Bypass the ``max_eager_bytes`` guard for this call.
-            **kwargs: Additional arguments passed to the reader
-                     (pandas: columns, filters, engine)
-
-        Returns:
-            pandas DataFrame (``frame='pandas'``) or polars DataFrame (``frame='polars'``)
-
-        Raises:
-            KeyError: If table name doesn't exist
-            ValueError: If the table exceeds ``max_eager_bytes`` (and isn't
-                flagged ``allow_full_load``), or if ``frame`` is invalid
-            ImportError: If reading from cloud requires missing dependencies
-            FileNotFoundError: If referenced file doesn't exist
-
-        Examples:
-            Basic usage:
-            >>> folio = DataFolio('experiments', prefix='test')
-            >>> import pandas as pd
-            >>> df = pd.DataFrame({'a': [1, 2, 3], 'b': [4, 5, 6]})
-            >>> folio.add_table('test', df)
-            >>> retrieved = folio.get_table('test')
-            >>> assert len(retrieved) == 3
-
-            Eager polars DataFrame:
-            >>> pdf = folio.get_table('test', frame='polars')
-
-            Column selection (read only specific columns):
-            >>> df_subset = folio.get_table('test', columns=['a'])
-            >>> assert list(df_subset.columns) == ['a']
-
-            Row filtering (requires pyarrow engine):
-            >>> df_filtered = folio.get_table('test',
-            ...     filters=[('a', '>', 1)],
-            ...     engine='pyarrow')
-            >>> assert len(df_filtered) == 2
-        """
-        # Auto-refresh if bundle was updated externally
-        self._refresh_if_needed()
-
-        # Check if item exists
-        if name not in self._items:
-            raise KeyError(f"Table '{name}' not found in DataFolio")
-
-        item = self._items[name]
-        item_type = item.get("item_type")
-
-        # Validate it's a table
-        if item_type not in ("included_table", "referenced_table"):
-            raise ValueError(f"Item '{name}' is not a table (type: {item_type})")
-
-        # Guard against accidentally materializing a huge table
-        self._check_eager_size(name, item, allow_full_load)
-
-        # Get handler and delegate to it
-        registry = get_registry()
-        handler = registry.get(item_type)
-
-        if frame == "polars":
-            # Eager polars: scan lazily then collect.
-            return handler.get_lazy(self, name, **kwargs).collect()
-        elif frame == "pandas":
-            # Sharded/partitioned (polars-only) tables can't be materialized as
-            # pandas — raise a clear, actionable error instead of a cryptic one.
-            if item.get("polars_only"):
-                raise _polars_only_error(name)
-            return handler.get(self, name, **kwargs)
-        else:
-            raise ValueError(f"Unknown frame '{frame}'. Use 'pandas' or 'polars'.")
-
     def _check_eager_size(
         self, name: str, item: Dict[str, Any], allow_full_load: bool
     ) -> None:
@@ -3901,105 +3891,6 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         handler = registry.get(item_type)
         return handler.get_lazy(self, name, **kwargs)
 
-    def get_lazy(self, name: str, **kwargs: Any) -> Any:  # Returns polars.LazyFrame
-        """Alias for :meth:`scan_table` (a genuinely lazy polars scan).
-
-        Kept for backward compatibility; prefer :meth:`scan_table`, whose name
-        makes the lazy contract explicit.
-        """
-        return self.scan_table(name, **kwargs)
-
-    def get_data_path(self, name: str) -> str:
-        """Get the path to any stored item, delegating to the appropriate type-specific method.
-
-        Automatically detects the item type and calls the appropriate path getter:
-        - Tables (included or referenced): delegates to get_table_path()
-        - Artifacts: delegates to get_artifact_path()
-        - All other bundled items (numpy arrays, JSON, timestamps): returns the bundle file path
-
-        Args:
-            name: Name of the item
-
-        Returns:
-            Path to the item file
-
-        Raises:
-            KeyError: If item name doesn't exist
-
-        Examples:
-            >>> folio = DataFolio('experiments', prefix='test')
-            >>> folio.add_table('results', df)
-            >>> folio.get_data_path('results')  # returns path to parquet file
-            >>> folio.reference_table('data', path='s3://bucket/file.parquet')
-            >>> folio.get_data_path('data')  # returns 's3://bucket/file.parquet'
-        """
-        if name not in self._items:
-            raise KeyError(f"Item '{name}' not found in DataFolio")
-
-        item_type = self._items[name].get("item_type")
-
-        dispatch = {
-            "included_table": self.get_table_path,
-            "referenced_table": self.get_table_path,
-            "artifact": self.get_artifact_path,
-            "model": self.get_model_path,
-            "numpy_array": self.get_numpy_path,
-            "json_data": self.get_json_path,
-            "timestamp": self.get_timestamp_path,
-        }
-
-        if item_type not in dispatch:
-            raise ValueError(
-                f"Item '{name}' has unknown type '{item_type}' with no path method."
-            )
-
-        return dispatch[item_type](name)
-
-    def get_table_path(self, name: str) -> str:
-        """Get the path to a table file, whether included in the bundle or referenced externally.
-
-        For included tables, returns the full path to the parquet file inside the bundle.
-        For referenced tables, returns the external path recorded at reference time.
-
-        Args:
-            name: Name of the table
-
-        Returns:
-            Path to the table file
-
-        Raises:
-            KeyError: If table name doesn't exist
-            ValueError: If named item is not a table
-
-        Examples:
-            >>> folio = DataFolio('experiments/my-run')
-            >>> folio.add_table('results', df)
-            >>> path = folio.get_table_path('results')
-            >>> print(path)
-            'experiments/my-run/tables/results.parquet'
-
-            >>> folio.reference_table('raw', path='s3://data-lake/raw.parquet')
-            >>> folio.get_table_path('raw')
-            's3://data-lake/raw.parquet'
-        """
-        self._refresh_if_needed()
-
-        if name not in self._items:
-            raise KeyError(f"Table '{name}' not found in DataFolio")
-
-        item = self._items[name]
-        item_type = item.get("item_type")
-
-        if item_type == "referenced_table":
-            return self._resolve_reference_path(item["path"])
-        elif item_type == "included_table":
-            registry = get_registry()
-            handler = registry.get(item_type)
-            subdir = handler.get_storage_subdir()
-            return self._storage.join_paths(self._bundle_dir, subdir, item["filename"])
-        else:
-            raise ValueError(f"Item '{name}' is not a table (type: {item_type})")
-
     def _resolve_reference_path(self, path: str) -> str:
         """Resolve a stored reference path to an accessible location.
 
@@ -4019,45 +3910,6 @@ For more information, see the [datafolio documentation](https://github.com/ceese
         if is_cloud_path(path) or path.startswith("file://") or os.path.isabs(path):
             return path
         return self._storage.join_paths(self._bundle_dir, path)
-
-    def get_table_info(self, name: str) -> Union[TableReference, IncludedTable]:
-        """Get metadata about a table (referenced or included).
-
-        Returns the manifest entry containing information like:
-        - For referenced tables: path, table_format, is_directory, num_rows, version, description
-        - For included tables: filename, table_format, is_directory, num_rows, num_cols, columns, dtypes, description
-
-        Args:
-            name: Name of the table
-
-        Returns:
-            Dictionary with table metadata
-
-        Raises:
-            KeyError: If table name doesn't exist
-
-        Examples:
-            >>> folio = DataFolio('experiments', prefix='test')
-            >>> folio.reference_table('data', path='s3://bucket/data.parquet', num_rows=1000000)
-            >>> info = folio.get_table_info('data')
-            >>> info['num_rows']
-            1000000
-            >>> info['table_format']
-            'parquet'
-        """
-        # Auto-refresh if bundle was updated externally
-        self._refresh_if_needed()
-
-        if name not in self._items:
-            raise KeyError(f"Table '{name}' not found in DataFolio")
-
-        item = self._items[name]
-        item_type = item.get("item_type")
-
-        if item_type in ("referenced_table", "included_table"):
-            return item
-        else:
-            raise ValueError(f"Item '{name}' is not a table (type: {item_type})")
 
     def inspect_table(self, name: str) -> Union[TableReference, IncludedTable]:
         """Read a table's source and enrich its manifest entry.
@@ -4107,1120 +3959,6 @@ For more information, see the [datafolio documentation](https://github.com/ceese
             self._save_items()
 
         return self._items[name]
-
-    def get_model_info(self, name: str) -> IncludedItem:
-        """Get metadata about a model.
-
-        Returns the manifest entry containing information like:
-        - filename, item_type, description
-
-        Args:
-            name: Name of the model
-
-        Returns:
-            Dictionary with model metadata
-
-        Raises:
-            KeyError: If model name doesn't exist
-            ValueError: If named item is not a model
-
-        Examples:
-            >>> folio = DataFolio('experiments', prefix='test')
-            >>> folio.add_model('classifier', model, description='Random forest classifier')
-            >>> info = folio.get_model_info('classifier')
-            >>> info['description']
-            'Random forest classifier'
-        """
-        # Auto-refresh if bundle was updated externally
-        self._refresh_if_needed()
-
-        if name not in self._items:
-            raise KeyError(f"Model '{name}' not found in DataFolio")
-
-        item = self._items[name]
-        if item.get("item_type") != "model":
-            raise ValueError(
-                f"Item '{name}' is not a model (type: {item.get('item_type')})"
-            )
-
-        return item
-
-    def get_artifact_info(self, name: str) -> IncludedItem:
-        """Get metadata about an artifact.
-
-        Returns the manifest entry containing information like:
-        - filename, item_type, category, description
-
-        Args:
-            name: Name of the artifact
-
-        Returns:
-            Dictionary with artifact metadata
-
-        Raises:
-            KeyError: If artifact name doesn't exist
-            ValueError: If named item is not an artifact
-
-        Examples:
-            >>> folio = DataFolio('experiments', prefix='test')
-            >>> folio.add_artifact('plot', 'plot.png', category='plots', description='Loss curve')
-            >>> info = folio.get_artifact_info('plot')
-            >>> info['category']
-            'plots'
-            >>> info['description']
-            'Loss curve'
-        """
-        # Auto-refresh if bundle was updated externally
-        self._refresh_if_needed()
-
-        if name not in self._items:
-            raise KeyError(f"Artifact '{name}' not found in DataFolio")
-
-        item = self._items[name]
-        if item.get("item_type") != "artifact":
-            raise ValueError(
-                f"Item '{name}' is not an artifact (type: {item.get('item_type')})"
-            )
-
-        return item
-
-    def add_sklearn(
-        self,
-        name: str,
-        model: Any,
-        description: Optional[str] = None,
-        overwrite: bool = False,
-        inputs: Optional[list[str]] = None,
-        hyperparameters: Optional[Dict[str, Any]] = None,
-        code: Optional[str] = None,
-        custom: bool = False,
-    ) -> Self:
-        """Add a scikit-learn style model to the bundle.
-
-        Writes immediately to models/ directory and updates items.json.
-
-        Args:
-            name: Unique name for this model
-            model: Trained model to include
-            description: Optional description
-            overwrite: If True, allow overwriting existing model (default: False)
-            inputs: Optional list of table names used for training
-            hyperparameters: Optional dict of hyperparameters
-            code: Optional code snippet that trained this model
-            custom: If True, use skops format for portable pipelines with custom
-                transformers. If False (default), use joblib format.
-
-        Returns:
-            Self for method chaining
-
-        Raises:
-            ValueError: If name already exists and overwrite=False
-
-        Examples:
-            >>> from sklearn.ensemble import RandomForestClassifier
-            >>> folio = DataFolio('experiments', prefix='test')
-            >>> model = RandomForestClassifier(n_estimators=100, max_depth=10)
-            >>> # ... train model ...
-            >>> folio.add_sklearn('classifier', model,
-            ...     description='Random forest classifier',
-            ...     inputs=['training_data', 'validation_data'],
-            ...     hyperparameters={'n_estimators': 100, 'max_depth': 10},
-            ...     code='model.fit(X_train, y_train)')
-            >>>
-            >>> # Portable pipeline with custom transformer (skops)
-            >>> folio.add_sklearn('pipeline', custom_pipeline, custom=True)
-        """
-        self._check_read_only()
-
-        validate_item_name(name)
-
-        if name in self._items and not overwrite:
-            raise ValueError(
-                f"Item '{name}' already exists in this DataFolio. "
-                f"Use overwrite=True to replace it."
-            )
-
-        extension = ".skops" if custom else ".joblib"
-
-        def _build(filename: str, version_id: str) -> Dict[str, Any]:
-            metadata = (
-                get_registry()
-                .get("model")
-                .add(
-                    self,
-                    name,
-                    model,
-                    description=description,
-                    inputs=inputs,
-                    custom=custom,
-                    _filename=filename,
-                )
-            )
-            if hyperparameters is not None:
-                metadata["hyperparameters"] = hyperparameters
-            if code is not None:
-                metadata["code"] = code
-            return metadata
-
-        self._commit_owned_item(name, "model", extension, description, _build)
-        return self
-
-    def add_model(
-        self,
-        name: str,
-        model: Any,
-        description: Optional[str] = None,
-        overwrite: bool = False,
-        custom: bool = False,
-        **kwargs: Any,
-    ) -> Self:
-        """Add a scikit-learn style model to the bundle.
-
-        This is a convenience method that delegates to add_sklearn().
-
-        Args:
-            name: Unique name for this model
-            model: Trained sklearn-style model
-            description: Optional description
-            overwrite: If True, allow overwriting existing model (default: False)
-            custom: If True use skops format for portability (required for custom transformers)
-            **kwargs: Additional arguments passed to add_sklearn()
-                (e.g., hyperparameters, inputs, code)
-
-        Returns:
-            Self for method chaining
-
-        Raises:
-            ValueError: If name already exists and overwrite=False
-
-        Examples:
-            >>> from sklearn.ensemble import RandomForestClassifier
-            >>> model = RandomForestClassifier()
-            >>> folio.add_model('clf', model, hyperparameters={'n_estimators': 100})
-
-            With custom transformer (portable):
-            >>> folio.add_model('pipeline', custom_pipeline, custom=True)
-        """
-        return self.add_sklearn(
-            name,
-            model,
-            description=description,
-            overwrite=overwrite,
-            custom=custom,
-            **kwargs,
-        )
-
-    def get_sklearn(self, name: str) -> Any:
-        """Get a scikit-learn style model by name.
-
-
-        Args:
-            name: Name of the model
-
-        Returns:
-            The model object
-
-        Raises:
-            KeyError: If model name doesn't exist
-            ValueError: If named item is not a sklearn model
-
-        Examples:
-            >>> folio = DataFolio('experiments/test')
-            >>> model = folio.get_sklearn('classifier')
-        """
-        if name not in self._items:
-            raise KeyError(f"Model '{name}' not found in DataFolio")
-
-        item = self._items[name]
-        if item.get("item_type") != "model":
-            raise ValueError(
-                f"Item '{name}' is not a sklearn model (type: {item.get('item_type')})"
-            )
-
-        # Delegate to handler
-
-        registry = get_registry()
-        handler = registry.get("model")
-        return handler.get(self, name)
-
-    def get_model(self, name: str, **kwargs: Any) -> Any:
-        """Get a scikit-learn style model by name.
-
-        This is a convenience method that delegates to get_sklearn().
-
-
-        Args:
-            name: Name of the model
-            **kwargs: Additional arguments (currently unused, kept for backward compatibility)
-
-        Returns:
-            The model object
-
-        Raises:
-            KeyError: If model name doesn't exist
-            ValueError: If named item is not a model
-
-        Examples:
-            >>> folio = DataFolio('experiments/test')
-            >>> model = folio.get_model('classifier')
-        """
-        # Auto-refresh if bundle was updated externally
-        self._refresh_if_needed()
-
-        if name not in self._items:
-            raise KeyError(f"Model '{name}' not found in DataFolio")
-
-        item = self._items[name]
-        item_type = item.get("item_type")
-
-        # Dispatch based on item type
-        if item_type == "model":
-            return self.get_sklearn(name)
-        else:
-            raise ValueError(f"Item '{name}' is not a model (type: {item_type})")
-
-    def get_model_path(self, name: str) -> str:
-        """Get the path to a model file stored in the bundle.
-
-        Args:
-            name: Name of the model
-
-        Returns:
-            Path to the model file
-
-        Raises:
-            KeyError: If model name doesn't exist
-            ValueError: If named item is not a model
-
-        Examples:
-            >>> folio = DataFolio('experiments/my-run')
-            >>> folio.add_sklearn('classifier', model)
-            >>> path = folio.get_model_path('classifier')
-            >>> print(path)
-            'experiments/my-run/models/classifier.joblib'
-        """
-        self._refresh_if_needed()
-
-        if name not in self._items:
-            raise KeyError(f"Model '{name}' not found in DataFolio")
-
-        item = self._items[name]
-        if item.get("item_type") != "model":
-            raise ValueError(
-                f"Item '{name}' is not a model (type: {item.get('item_type')})"
-            )
-
-        handler = get_registry().get("model")
-        subdir = handler.get_storage_subdir()
-        return self._storage.join_paths(self._bundle_dir, subdir, item["filename"])
-
-    def add_artifact(
-        self,
-        name: str,
-        path: Union[str, Path],
-        category: Optional[str] = None,
-        description: Optional[str] = None,
-        overwrite: bool = False,
-    ) -> Self:
-        """Add an artifact file to the bundle.
-
-        Copies file immediately to artifacts/ directory and updates included_items.json.
-
-        Args:
-            name: Unique name for this artifact
-            path: Path to the file to include
-            category: Optional category ('plots', 'configs', etc.)
-            description: Optional description
-            overwrite: If True, allow overwriting existing artifact (default: False)
-
-        Returns:
-            Self for method chaining
-
-        Raises:
-            ValueError: If name already exists and overwrite=False
-            FileNotFoundError: If file doesn't exist
-
-        Examples:
-            >>> folio = DataFolio('experiments', prefix='test')
-            >>> folio.add_artifact('loss_curve', 'plots/training_loss.png', category='plots')
-            >>> # Update with overwrite
-            >>> folio.add_artifact('loss_curve', 'plots/updated_loss.png', category='plots', overwrite=True)
-        """
-        self._check_read_only()
-
-        validate_item_name(name)
-
-        if name in self._items and not overwrite:
-            raise ValueError(
-                f"Item '{name}' already exists in this DataFolio. "
-                f"Use overwrite=True to replace it."
-            )
-
-        # Owned payload filename preserves the source file's extension.
-        extension = Path(str(path)).suffix
-
-        def _build(filename: str, version_id: str) -> Dict[str, Any]:
-            metadata = (
-                get_registry()
-                .get("artifact")
-                .add(self, name, str(path), description=description, _filename=filename)
-            )
-            if category is not None:
-                metadata["category"] = category
-            return metadata
-
-        self._commit_owned_item(name, "artifact", extension, description, _build)
-        return self
-
-    def add_file(
-        self,
-        path: Union[str, Path],
-        name: Optional[str] = None,
-        category: Optional[str] = None,
-        description: Optional[str] = None,
-        overwrite: bool = False,
-    ) -> Self:
-        """Add a file to the bundle (convenience wrapper for add_artifact).
-
-        This is a file-centric interface that makes it easy to include
-        arbitrary files like code, documentation, configs, etc.
-
-        Args:
-            path: Path to the file to include
-            name: Optional name for this file (default: uses filename from path)
-            category: Optional category ('code', 'docs', 'configs', etc.)
-            description: Optional description
-            overwrite: If True, allow overwriting existing file (default: False)
-
-        Returns:
-            Self for method chaining
-
-        Raises:
-            ValueError: If name already exists and overwrite=False
-            FileNotFoundError: If file doesn't exist
-
-        Examples:
-            Add files using their filenames as names:
-            >>> folio = DataFolio('experiments/test')
-            >>> folio.add_file('path/to/readme.md', description='Project README')
-            >>> folio.add_file('src/train.py', category='code')
-
-            Add with custom name:
-            >>> folio.add_file('path/to/config.yaml', name='model_config')
-
-            Add and overwrite:
-            >>> folio.add_file('update.md', overwrite=True)
-
-            Method chaining:
-            >>> folio.add_file('readme.md').add_file('train.py').add_file('config.yaml')
-        """
-        # Use filename as name if not provided
-        if name is None:
-            # Use filename without extension as the name
-            # (artifact handler will add the extension back)
-            name = Path(path).stem
-
-        # Delegate to add_artifact
-        return self.add_artifact(
-            name=name,
-            path=path,
-            category=category,
-            description=description,
-            overwrite=overwrite,
-        )
-
-    def get_artifact_path(self, name: str) -> str:
-        """Get the path to an artifact file.
-
-        Args:
-            name: Name of the artifact
-
-        Returns:
-            Path to the artifact file
-
-        Raises:
-            KeyError: If artifact name doesn't exist
-            ValueError: If named item is not an artifact
-
-        Examples:
-            >>> folio = DataFolio('experiments/test-blue-happy-falcon')
-            >>> path = folio.get_artifact_path('plot')
-        """
-        # Auto-refresh if bundle was updated externally
-        self._refresh_if_needed()
-
-        if name not in self._items:
-            raise KeyError(f"Artifact '{name}' not found in DataFolio")
-
-        item = self._items[name]
-        if item.get("item_type") != "artifact":
-            raise ValueError(
-                f"Item '{name}' is not an artifact (type: {item.get('item_type')})"
-            )
-
-        # Delegate to handler
-
-        registry = get_registry()
-        handler = registry.get("artifact")
-        return handler.get(self, name)
-
-    def get_item_path(self, name: str) -> str:
-        """Get the path to any item stored in the folio.
-
-        For items stored within the bundle (included tables, models, artifacts,
-        arrays, JSON data, timestamps), returns the full path to the data file.
-        For referenced tables, returns the external path recorded at reference time.
-
-        This is especially useful for cloud-hosted folios where collaborators can
-        directly access or download underlying files without using datafolio.
-
-        Args:
-            name: Name of the item
-
-        Returns:
-            Full path to the item's data file. For cloud folios this will be a
-            cloud URI (e.g. ``s3://bucket/.../results.parquet``). For local folios
-            this will be an absolute file-system path.
-
-        Raises:
-            KeyError: If item name doesn't exist
-            ValueError: If item has no associated file path
-
-        Examples:
-            >>> folio = DataFolio('s3://bucket/experiments/my-run')
-            >>> path = folio.get_item_path('results')
-            >>> print(path)
-            's3://bucket/experiments/my-run/tables/results.parquet'
-
-            >>> path = folio.get_item_path('classifier')
-            >>> print(path)
-            's3://bucket/experiments/my-run/models/classifier.joblib'
-
-            >>> # For referenced tables the external path is returned
-            >>> folio.reference_table('raw', path='s3://data-lake/raw.parquet')
-            >>> folio.get_item_path('raw')
-            's3://data-lake/raw.parquet'
-        """
-        self._refresh_if_needed()
-
-        if name not in self._items:
-            raise KeyError(f"Item '{name}' not found in DataFolio")
-
-        item = self._items[name]
-        item_type = item.get("item_type")
-
-        # Referenced tables point to external data — return that path directly
-        if item_type == "referenced_table":
-            return item["path"]
-
-        # All bundled items store their filename in metadata
-        if "filename" not in item:
-            raise ValueError(
-                f"Item '{name}' (type: {item_type}) has no associated file path"
-            )
-
-        registry = get_registry()
-        handler = registry.get(item_type)
-        subdir = handler.get_storage_subdir()
-        return self._storage.join_paths(self._bundle_dir, subdir, item["filename"])
-
-    def add_numpy(
-        self,
-        name: str,
-        array: Any,
-        description: Optional[str] = None,
-        overwrite: bool = False,
-        inputs: Optional[list[str]] = None,
-        code: Optional[str] = None,
-    ) -> Self:
-        """Add a numpy array to the bundle.
-
-        Saves array to artifacts/ directory as .npy file and updates items.json.
-
-        Args:
-            name: Unique name for this array
-            array: numpy array to save
-            description: Optional description
-            overwrite: If True, allow overwriting existing array (default: False)
-            inputs: Optional list of items this was derived from
-            code: Optional code snippet that created this array
-
-        Returns:
-            Self for method chaining
-
-        Raises:
-            ValueError: If name already exists and overwrite=False
-            ImportError: If numpy is not installed
-            TypeError: If data is not a numpy array
-
-        Examples:
-            >>> import numpy as np
-            >>> folio = DataFolio('experiments/test')
-            >>> embeddings = np.random.randn(100, 128)
-            >>> folio.add_numpy('embeddings', embeddings, description='Model embeddings')
-            >>> # With lineage
-            >>> predictions = np.array([0, 1, 0, 1])
-            >>> folio.add_numpy('predictions', predictions,
-            ...     inputs=['test_data'],
-            ...     code='predictions = model.predict(X)')
-        """
-        self._check_read_only()
-
-        validate_item_name(name)
-
-        # Overwriting any existing item requires overwrite=True; a snapshotted
-        # prior version is then preserved via copy-on-write in the commit.
-        if name in self._items and not overwrite:
-            raise ValueError(
-                f"Item '{name}' already exists in this DataFolio. "
-                f"Use overwrite=True to replace it."
-            )
-
-        def _build(filename: str, version_id: str) -> Dict[str, Any]:
-            metadata = (
-                get_registry()
-                .get("numpy_array")
-                .add(
-                    self,
-                    name,
-                    array,
-                    description=description,
-                    inputs=inputs,
-                    _filename=filename,
-                )
-            )
-            if code is not None:
-                metadata["code"] = code
-            return metadata
-
-        self._commit_owned_item(name, "numpy_array", ".npy", description, _build)
-        return self
-
-    def get_numpy(self, name: str) -> Any:
-        """Get a numpy array by name.
-
-
-        Args:
-            name: Name of the array
-
-        Returns:
-            numpy array
-
-        Raises:
-            KeyError: If array name doesn't exist
-            ValueError: If named item is not a numpy array
-            ImportError: If numpy is not installed
-
-        Examples:
-            >>> folio = DataFolio('experiments/test')
-            >>> embeddings = folio.get_numpy('embeddings')
-            >>> print(embeddings.shape)
-        """
-        # Auto-refresh if bundle was updated externally
-        self._refresh_if_needed()
-
-        if name not in self._items:
-            raise KeyError(f"Array '{name}' not found in DataFolio")
-
-        item = self._items[name]
-        if item.get("item_type") != "numpy_array":
-            raise ValueError(
-                f"Item '{name}' is not a numpy array (type: {item.get('item_type')})"
-            )
-
-        # Get handler and delegate to it
-        registry = get_registry()
-        handler = registry.get("numpy_array")
-        return handler.get(self, name)
-
-    def get_numpy_path(self, name: str) -> str:
-        """Get the path to a numpy array file stored in the bundle.
-
-        Args:
-            name: Name of the array
-
-        Returns:
-            Path to the .npy file
-
-        Raises:
-            KeyError: If array name doesn't exist
-            ValueError: If named item is not a numpy array
-
-        Examples:
-            >>> folio = DataFolio('experiments/my-run')
-            >>> folio.add_numpy('embeddings', arr)
-            >>> path = folio.get_numpy_path('embeddings')
-            >>> print(path)
-            'experiments/my-run/artifacts/embeddings.npy'
-        """
-        self._refresh_if_needed()
-
-        if name not in self._items:
-            raise KeyError(f"Array '{name}' not found in DataFolio")
-
-        item = self._items[name]
-        if item.get("item_type") != "numpy_array":
-            raise ValueError(
-                f"Item '{name}' is not a numpy array (type: {item.get('item_type')})"
-            )
-
-        handler = get_registry().get("numpy_array")
-        subdir = handler.get_storage_subdir()
-        return self._storage.join_paths(self._bundle_dir, subdir, item["filename"])
-
-    def add_json(
-        self,
-        name: str,
-        data: Union[dict, list, int, float, str, bool, None],
-        description: Optional[str] = None,
-        overwrite: bool = False,
-        inputs: Optional[list[str]] = None,
-        code: Optional[str] = None,
-    ) -> Self:
-        """Add JSON-serializable data to the bundle.
-
-        Saves data to artifacts/ directory as .json file and updates items.json.
-        Supports dicts, lists, scalars, and other JSON-serializable types.
-
-        Args:
-            name: Unique name for this data
-            data: JSON-serializable data (dict, list, scalar, etc.)
-            description: Optional description
-            overwrite: If True, allow overwriting existing data (default: False)
-            inputs: Optional list of items this was derived from
-            code: Optional code snippet that created this data
-
-        Returns:
-            Self for method chaining
-
-        Raises:
-            ValueError: If name already exists and overwrite=False, or data not JSON-serializable
-            TypeError: If data cannot be serialized to JSON
-
-        Examples:
-            >>> folio = DataFolio('experiments/test')
-            >>> config = {'learning_rate': 0.01, 'batch_size': 32}
-            >>> folio.add_json('config', config, description='Model config')
-            >>> # With list data
-            >>> class_names = ['cat', 'dog', 'bird']
-            >>> folio.add_json('classes', class_names)
-            >>> # With scalar
-            >>> folio.add_json('best_accuracy', 0.95)
-        """
-        self._check_read_only()
-
-        validate_item_name(name)
-
-        if name in self._items and not overwrite:
-            raise ValueError(
-                f"Item '{name}' already exists in this DataFolio. "
-                f"Use overwrite=True to replace it."
-            )
-
-        def _build(filename: str, version_id: str) -> Dict[str, Any]:
-            metadata = (
-                get_registry()
-                .get("json_data")
-                .add(
-                    self,
-                    name,
-                    data,
-                    description=description,
-                    inputs=inputs,
-                    _filename=filename,
-                )
-            )
-            if code is not None:
-                metadata["code"] = code
-            return metadata
-
-        self._commit_owned_item(name, "json_data", ".json", description, _build)
-        return self
-
-    def get_json(self, name: str) -> Any:
-        """Get JSON data by name.
-
-
-        Args:
-            name: Name of the JSON data
-
-        Returns:
-            Deserialized JSON data (dict, list, scalar, etc.)
-
-        Raises:
-            KeyError: If data name doesn't exist
-            ValueError: If named item is not JSON data
-
-        Examples:
-            >>> folio = DataFolio('experiments/test')
-            >>> config = folio.get_json('config')
-            >>> print(config['learning_rate'])
-        """
-        # Auto-refresh if bundle was updated externally
-        self._refresh_if_needed()
-
-        if name not in self._items:
-            raise KeyError(f"JSON data '{name}' not found in DataFolio")
-
-        item = self._items[name]
-        if item.get("item_type") != "json_data":
-            raise ValueError(
-                f"Item '{name}' is not JSON data (type: {item.get('item_type')})"
-            )
-
-        # Delegate to handler
-        registry = get_registry()
-        handler = registry.get("json_data")
-        return handler.get(self, name)
-
-    def get_json_path(self, name: str) -> str:
-        """Get the path to a JSON data file stored in the bundle.
-
-        Args:
-            name: Name of the JSON data
-
-        Returns:
-            Path to the .json file
-
-        Raises:
-            KeyError: If data name doesn't exist
-            ValueError: If named item is not JSON data
-
-        Examples:
-            >>> folio = DataFolio('experiments/my-run')
-            >>> folio.add_json('config', {'lr': 0.01})
-            >>> path = folio.get_json_path('config')
-            >>> print(path)
-            'experiments/my-run/artifacts/config.json'
-        """
-        self._refresh_if_needed()
-
-        if name not in self._items:
-            raise KeyError(f"JSON data '{name}' not found in DataFolio")
-
-        item = self._items[name]
-        if item.get("item_type") != "json_data":
-            raise ValueError(
-                f"Item '{name}' is not JSON data (type: {item.get('item_type')})"
-            )
-
-        handler = get_registry().get("json_data")
-        subdir = handler.get_storage_subdir()
-        return self._storage.join_paths(self._bundle_dir, subdir, item["filename"])
-
-    def add_timestamp(
-        self,
-        name: str,
-        timestamp: Union[datetime, int, float],
-        description: Optional[str] = None,
-        overwrite: bool = False,
-        inputs: Optional[list[str]] = None,
-        code: Optional[str] = None,
-    ) -> Self:
-        """Add a timestamp to the bundle.
-
-        Saves timestamp to artifacts/ directory as .json file and updates items.json.
-        Accepts timezone-aware datetime objects or Unix timestamps (int/float).
-        All timestamps are stored in UTC as ISO 8601 strings.
-
-        Args:
-            name: Unique name for this timestamp
-            timestamp: Timezone-aware datetime object or Unix timestamp (int/float).
-                      Naive datetimes will raise ValueError.
-            description: Optional description
-            overwrite: If True, allow overwriting existing timestamp (default: False)
-            inputs: Optional list of items this was derived from
-            code: Optional code snippet that created this timestamp
-
-        Returns:
-            Self for method chaining
-
-        Raises:
-            ValueError: If name already exists and overwrite=False, or if datetime is naive
-            TypeError: If timestamp is not a datetime or numeric type
-
-        Examples:
-            >>> from datetime import datetime, timezone
-            >>> folio = DataFolio('experiments/test')
-            >>>
-            >>> # Add timezone-aware datetime
-            >>> event_time = datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
-            >>> folio.add_timestamp('event_time', event_time, description='Event occurred')
-            >>>
-            >>> # Add Unix timestamp
-            >>> folio.add_timestamp('start_time', 1705318200, description='Start time')
-            >>>
-            >>> # With lineage
-            >>> from datetime import datetime, timezone
-            >>> import pytz
-            >>> eastern = pytz.timezone('US/Eastern')
-            >>> local_time = eastern.localize(datetime(2024, 1, 15, 10, 30, 0))
-            >>> folio.add_timestamp('local_event', local_time,
-            ...     inputs=['event_log'],
-            ...     code='timestamp = event_log.iloc[0]["timestamp"]')
-        """
-        self._check_read_only()
-
-        validate_item_name(name)
-
-        if name in self._items and not overwrite:
-            raise ValueError(
-                f"Item '{name}' already exists in this DataFolio. "
-                f"Use overwrite=True to replace it."
-            )
-
-        def _build(filename: str, version_id: str) -> Dict[str, Any]:
-            metadata = (
-                get_registry()
-                .get("timestamp")
-                .add(
-                    self,
-                    name,
-                    timestamp,
-                    description=description,
-                    inputs=inputs,
-                    _filename=filename,
-                )
-            )
-            if code is not None:
-                metadata["code"] = code
-            return metadata
-
-        self._commit_owned_item(name, "timestamp", ".json", description, _build)
-        return self
-
-    def get_timestamp(self, name: str, as_unix: bool = False) -> Union[datetime, float]:
-        """Get a timestamp by name.
-
-
-        Args:
-            name: Name of the timestamp
-            as_unix: If True, return Unix timestamp (float); if False, return datetime (default)
-
-        Returns:
-            UTC-aware datetime object (default) or Unix timestamp (if as_unix=True)
-
-        Raises:
-            KeyError: If timestamp name doesn't exist
-            ValueError: If named item is not a timestamp
-
-        Examples:
-            >>> folio = DataFolio('experiments/test')
-            >>>
-            >>> # Get as datetime (default)
-            >>> event_time = folio.get_timestamp('event_time')
-            >>> print(event_time.isoformat())
-            '2024-01-15T10:30:00+00:00'
-            >>>
-            >>> # Get as Unix timestamp
-            >>> unix_time = folio.get_timestamp('event_time', as_unix=True)
-            >>> print(unix_time)
-            1705318200.0
-        """
-        # Auto-refresh if bundle was updated externally
-        self._refresh_if_needed()
-
-        if name not in self._items:
-            raise KeyError(f"Timestamp '{name}' not found in DataFolio")
-
-        item = self._items[name]
-        if item.get("item_type") != "timestamp":
-            raise ValueError(
-                f"Item '{name}' is not a timestamp (type: {item.get('item_type')})"
-            )
-
-        # Delegate to handler
-        registry = get_registry()
-        handler = registry.get("timestamp")
-        dt = handler.get(self, name, as_unix=False)
-        return dt.timestamp() if as_unix else dt
-
-    def get_timestamp_path(self, name: str) -> str:
-        """Get the path to a timestamp file stored in the bundle.
-
-        Args:
-            name: Name of the timestamp
-
-        Returns:
-            Path to the timestamp file
-
-        Raises:
-            KeyError: If timestamp name doesn't exist
-            ValueError: If named item is not a timestamp
-
-        Examples:
-            >>> folio = DataFolio('experiments/my-run')
-            >>> folio.add_timestamp('event_time', dt)
-            >>> path = folio.get_timestamp_path('event_time')
-            >>> print(path)
-            'experiments/my-run/artifacts/event_time.json'
-        """
-        self._refresh_if_needed()
-
-        if name not in self._items:
-            raise KeyError(f"Timestamp '{name}' not found in DataFolio")
-
-        item = self._items[name]
-        if item.get("item_type") != "timestamp":
-            raise ValueError(
-                f"Item '{name}' is not a timestamp (type: {item.get('item_type')})"
-            )
-
-        handler = get_registry().get("timestamp")
-        subdir = handler.get_storage_subdir()
-        return self._storage.join_paths(self._bundle_dir, subdir, item["filename"])
-
-    def add_data(
-        self,
-        name: str,
-        data: Any = None,
-        reference: Optional[Union[str, Path]] = None,
-        description: Optional[str] = None,
-        **kwargs: Any,
-    ) -> Self:
-        """Generic data addition with automatic type detection.
-
-        Convenience method that dispatches to the appropriate specific method
-        based on data type. For fine-grained control, use the specific methods:
-        add_table(), add_numpy(), add_json(), or reference_table().
-
-        Args:
-            name: Unique name for this data
-            data: Data to save (DataFrame, numpy array, dict, list, scalar)
-            reference: If provided, creates a reference to external data instead
-            description: Optional description
-            **kwargs: Additional arguments passed to the specific method
-
-        Returns:
-            Self for method chaining
-
-        Raises:
-            ValueError: If neither data nor reference is provided, or both are provided
-            TypeError: If data type is not supported
-
-        Examples:
-            DataFrame (saves as parquet):
-            >>> folio.add_data('results', df)
-
-            Numpy array (saves as .npy):
-            >>> folio.add_data('embeddings', np.array([1, 2, 3]))
-
-            JSON data (saves as .json):
-            >>> folio.add_data('config', {'lr': 0.01})
-            >>> folio.add_data('classes', ['cat', 'dog'])
-            >>> folio.add_data('accuracy', 0.95)
-
-            External reference:
-            >>> folio.add_data('raw', reference='s3://bucket/data.parquet')
-        """
-        self._check_read_only()
-
-        # Validate inputs
-        if data is None and reference is None:
-            raise ValueError("Must provide either 'data' or 'reference' parameter")
-        if data is not None and reference is not None:
-            raise ValueError("Cannot provide both 'data' and 'reference' parameters")
-
-        # Handle reference
-        if reference is not None:
-            return self.reference_table(
-                name, reference, description=description, **kwargs
-            )
-
-        # Type detection only. We then delegate to the type-specific public
-        # method so that duplicate-name checks, overwrite semantics, snapshot
-        # copy-on-write, and type-specific metadata are enforced identically to
-        # the explicit APIs (add_data must not bypass those invariants).
-        from datafolio.base.registry import detect_handler
-
-        handler = detect_handler(data)
-        item_type = handler.item_type if handler is not None else None
-
-        # Fallback: primitives (int, float, str, bool, None) -> JSON.
-        # These don't auto-detect (to avoid conflicts), but add_data accepts them.
-        if item_type is None and isinstance(data, (int, float, str, bool, type(None))):
-            item_type = "json_data"
-
-        if item_type is None:
-            raise TypeError(
-                f"Unsupported data type: {type(data).__name__}. "
-                f"No handler found for this type. "
-                f"Supported types: pandas.DataFrame, Polars DataFrame, numpy.ndarray, "
-                f"sklearn models, dict, list, datetime, file paths, or JSON scalars. "
-                f"Use explicit add_*() methods for more control."
-            )
-
-        # Delegate to the corresponding public method (value arg name varies).
-        if item_type == "included_table":
-            return self.add_table(name, data, description=description, **kwargs)
-        elif item_type == "numpy_array":
-            return self.add_numpy(name, data, description=description, **kwargs)
-        elif item_type == "json_data":
-            return self.add_json(name, data, description=description, **kwargs)
-        elif item_type == "timestamp":
-            return self.add_timestamp(name, data, description=description, **kwargs)
-        elif item_type == "model":
-            return self.add_model(name, data, description=description, **kwargs)
-        elif item_type == "artifact":
-            return self.add_artifact(name, data, description=description, **kwargs)
-        else:
-            raise TypeError(
-                f"Detected item type '{item_type}' has no generic add path. "
-                f"Use the corresponding explicit add_*() method."
-            )
-
-    def get_data(self, name: str) -> Any:
-        """Generic data getter that returns any data type.
-
-        Automatically detects the item type and calls the appropriate getter.
-        For fine-grained control, use the specific methods: get_table(),
-        get_numpy(), or get_json().
-
-        Args:
-            name: Name of the data item
-
-        Returns:
-            The data (DataFrame, numpy array, dict, list, or scalar)
-
-        Raises:
-            KeyError: If item name doesn't exist
-            ValueError: If item is not a data type (e.g., is a model or artifact)
-
-        Examples:
-            >>> folio.add_data('results', df)
-            >>> folio.add_data('embeddings', np_array)
-            >>> folio.add_data('config', {'lr': 0.01})
-            >>> # Later, retrieve without knowing the type
-            >>> results = folio.get_data('results')  # Returns DataFrame
-            >>> embeddings = folio.get_data('embeddings')  # Returns numpy array
-            >>> config = folio.get_data('config')  # Returns dict
-        """
-        # Auto-refresh so a freshly-written item from another writer is visible.
-        self._refresh_if_needed()
-
-        if name not in self._items:
-            raise KeyError(f"Item '{name}' not found in DataFolio")
-
-        item = self._items[name]
-        item_type = item.get("item_type")
-
-        # Delegate to the type-specific public getter so eager-size guards,
-        # polars_only handling, and refresh behave identically to the
-        # explicit APIs (get_data must not bypass those).
-        if item_type in ("referenced_table", "included_table"):
-            return self.get_table(name)
-        elif item_type == "numpy_array":
-            return self.get_numpy(name)
-        elif item_type == "json_data":
-            return self.get_json(name)
-        elif item_type == "timestamp":
-            return self.get_timestamp(name)
-        else:
-            # Not a "data" type (e.g. model or artifact), or unknown.
-            raise ValueError(
-                f"Item '{name}' is not a data item (type: {item_type}). "
-                f"Use get_model() for models or get_artifact_path() for artifacts."
-            )
 
     def update_item(
         self,

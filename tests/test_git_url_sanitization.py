@@ -184,7 +184,7 @@ class TestGitUrlSanitizationIntegration:
         # Create folio first (this creates the directory structure)
         folio = DataFolio(bundle_dir)
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
 
         # Now setup git repo in the bundle directory
         subprocess.run(["git", "init"], cwd=bundle_dir, capture_output=True, check=True)
@@ -248,7 +248,7 @@ class TestGitUrlSanitizationIntegration:
         # Create folio first
         folio = DataFolio(bundle_dir)
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
 
         # Setup git repo
         subprocess.run(["git", "init"], cwd=bundle_dir, capture_output=True, check=True)
@@ -308,7 +308,7 @@ class TestGitUrlSanitizationIntegration:
         # Create folio first
         folio = DataFolio(bundle_dir)
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
 
         # Setup git repo
         subprocess.run(["git", "init"], cwd=bundle_dir, capture_output=True, check=True)
@@ -362,7 +362,7 @@ class TestGitUrlSanitizationIntegration:
         # Create folio first
         folio = DataFolio(bundle_dir)
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
 
         # Setup git repo
         subprocess.run(["git", "init"], cwd=bundle_dir, capture_output=True, check=True)

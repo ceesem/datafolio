@@ -23,7 +23,7 @@ class TestDataAccessor:
         """Test accessing items via attribute syntax."""
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("results", df)
+        folio.add("results", df)
 
         # Access via attribute
         item = folio.data.results
@@ -34,7 +34,7 @@ class TestDataAccessor:
         """Test accessing items via dictionary syntax."""
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("results", df)
+        folio.add("results", df)
 
         # Access via dictionary
         item = folio.data["results"]
@@ -45,7 +45,7 @@ class TestDataAccessor:
         """Test that both access methods return equivalent proxies."""
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("results", df)
+        folio.add("results", df)
 
         # Both should work the same
         attr_item = folio.data.results
@@ -72,9 +72,9 @@ class TestDataAccessor:
         """Test that __dir__ returns all item names for autocomplete."""
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("table1", df)
-        folio.add_table("table2", df)
-        folio.add_numpy("array1", np.array([1, 2, 3]))
+        folio.add("table1", df)
+        folio.add("table2", df)
+        folio.add("array1", np.array([1, 2, 3]))
 
         # __dir__ should include all item names
         items = dir(folio.data)
@@ -86,7 +86,7 @@ class TestDataAccessor:
         """Test DataAccessor repr shows organized summary."""
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("results", df)
+        folio.add("results", df)
         model = DummyModel()
         folio.add_model("classifier", model)
 
@@ -110,7 +110,7 @@ class TestItemProxy:
         """Test .content returns DataFrame for tables."""
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("results", df)
+        folio.add("results", df)
 
         # Get content via proxy
         result_df = folio.data.results.content
@@ -120,7 +120,7 @@ class TestItemProxy:
         """Test .content returns numpy array for numpy items."""
         folio = DataFolio(tmp_path / "test")
         arr = np.array([1, 2, 3, 4, 5])
-        folio.add_numpy("embeddings", arr)
+        folio.add("embeddings", arr)
 
         # Get content via proxy
         result_arr = folio.data.embeddings.content
@@ -130,7 +130,7 @@ class TestItemProxy:
         """Test .content returns dict/list for JSON items."""
         folio = DataFolio(tmp_path / "test")
         config = {"lr": 0.01, "batch_size": 32}
-        folio.add_json("config", config)
+        folio.add("config", config)
 
         # Get content via proxy
         result_config = folio.data.config.content
@@ -153,7 +153,7 @@ class TestItemProxy:
         artifact_file.write_bytes(b"fake image data")
 
         folio = DataFolio(tmp_path / "test")
-        folio.add_artifact("plot", artifact_file)
+        folio.add_file(artifact_file, name="plot")
 
         # Get content (should be file path)
         result_path = folio.data.plot.content
@@ -168,7 +168,7 @@ class TestItemProxy:
         """Test .description property."""
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("results", df, description="Test results")
+        folio.add("results", df, description="Test results")
 
         assert folio.data.results.description == "Test results"
 
@@ -176,7 +176,7 @@ class TestItemProxy:
         """Test .description returns None when not set."""
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("results", df)
+        folio.add("results", df)
 
         assert folio.data.results.description is None
 
@@ -184,8 +184,8 @@ class TestItemProxy:
         """Test .type property returns item type."""
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("results", df)
-        folio.add_numpy("embeddings", np.array([1, 2, 3]))
+        folio.add("results", df)
+        folio.add("embeddings", np.array([1, 2, 3]))
         model = DummyModel()
         folio.add_model("classifier", model)
 
@@ -213,7 +213,7 @@ class TestItemProxy:
         artifact_file.write_text("fake image")
 
         folio = DataFolio(tmp_path / "test")
-        folio.add_artifact("plot", artifact_file)
+        folio.add_file(artifact_file, name="plot")
 
         path = folio.data.plot.path
         assert path is not None
@@ -225,26 +225,26 @@ class TestItemProxy:
         """Test .path returns the bundle parquet path for included tables."""
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("results", df)
+        folio.add("results", df)
 
         path = folio.data.results.path
         assert path is not None
         assert path.endswith("tables/" + folio._items["results"]["filename"])
 
-    def test_item_proxy_path_none_for_non_tables(self, tmp_path):
-        """Test .path returns None for non-table, non-artifact items."""
+    def test_item_proxy_path_for_non_tables(self, tmp_path):
+        """.path returns the payload path for every stored item type."""
         folio = DataFolio(tmp_path / "test")
-        folio.add_json("config", {"lr": 0.01})
+        folio.add("config", {"lr": 0.01})
 
-        assert folio.data.config.path is None
+        assert folio.data.config.path.endswith(".json")
 
     def test_item_proxy_inputs(self, tmp_path):
         """Test .inputs property returns lineage inputs."""
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
 
-        folio.add_table("raw", df)
-        folio.add_table("processed", df, inputs=["raw"])
+        folio.add("raw", df)
+        folio.add("processed", df, inputs=["raw"])
 
         inputs = folio.data.processed.inputs
         assert inputs == ["raw"]
@@ -253,7 +253,7 @@ class TestItemProxy:
         """Test .inputs returns empty list when no inputs."""
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("raw", df)
+        folio.add("raw", df)
 
         inputs = folio.data.raw.inputs
         assert inputs == []
@@ -263,8 +263,8 @@ class TestItemProxy:
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
 
-        folio.add_table("raw", df)
-        folio.add_table("processed", df, inputs=["raw"])
+        folio.add("raw", df)
+        folio.add("processed", df, inputs=["raw"])
 
         dependents = folio.data.raw.dependents
         assert "processed" in dependents
@@ -273,7 +273,7 @@ class TestItemProxy:
         """Test .dependents returns empty list when no dependents."""
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("raw", df)
+        folio.add("raw", df)
 
         dependents = folio.data.raw.dependents
         assert dependents == []
@@ -282,7 +282,7 @@ class TestItemProxy:
         """Test .metadata property returns full metadata dict."""
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("results", df, description="Test results", inputs=["raw"])
+        folio.add("results", df, description="Test results", inputs=["raw"])
 
         metadata = folio.data.results.metadata
         assert isinstance(metadata, dict)
@@ -295,7 +295,7 @@ class TestItemProxy:
         """Test ItemProxy repr."""
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("results", df, description="Test results")
+        folio.add("results", df, description="Test results")
 
         repr_str = repr(folio.data.results)
         assert "ItemProxy" in repr_str
@@ -311,7 +311,7 @@ class TestDataAccessorWorkflows:
         """Test workflow: explore available data then load it."""
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("results", df, description="Analysis results")
+        folio.add("results", df, description="Analysis results")
 
         # Explore what's available
         items = dir(folio.data)
@@ -330,8 +330,8 @@ class TestDataAccessorWorkflows:
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
 
-        folio.add_table("raw", df, description="Raw data")
-        folio.add_table("processed", df, description="Processed", inputs=["raw"])
+        folio.add("raw", df, description="Raw data")
+        folio.add("processed", df, description="Processed", inputs=["raw"])
 
         # Check what processed depends on
         inputs = folio.data.processed.inputs
@@ -347,9 +347,9 @@ class TestDataAccessorWorkflows:
 
         # Add different types
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
-        folio.add_numpy("embeddings", np.array([1, 2, 3]))
-        folio.add_json("config", {"lr": 0.01})
+        folio.add("data", df)
+        folio.add("embeddings", np.array([1, 2, 3]))
+        folio.add("config", {"lr": 0.01})
         model = DummyModel()
         folio.add_model("clf", model)
 
@@ -371,7 +371,7 @@ class TestDataAccessorWorkflows:
         artifact_file.write_text("Hello, DataFolio!")
 
         folio = DataFolio(tmp_path / "test")
-        folio.add_artifact("textfile", artifact_file)
+        folio.add_file(artifact_file, name="textfile")
 
         # Use the path with open()
         with open(folio.data.textfile.content, "r") as f:

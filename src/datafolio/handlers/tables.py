@@ -72,20 +72,21 @@ class DataframeHandler(BaseHandler):
     # ── Arrow conversion ──────────────────────────────────────────────────────
 
     @staticmethod
-    def _pandas_to_arrow(data: Any) -> Any:
+    def _pandas_to_arrow(data: Any, preserve_index: bool = False) -> Any:
         import pyarrow as pa
 
-        return pa.Table.from_pandas(data, preserve_index=False)
+        return pa.Table.from_pandas(data, preserve_index=preserve_index)
 
     @staticmethod
     def _polars_to_arrow(data: Any) -> Any:
         return data.to_arrow()
 
     @classmethod
-    def _to_arrow(cls, data: Any) -> Any:
+    def _to_arrow(cls, data: Any, preserve_index: bool = False) -> Any:
         """Convert a supported DataFrame to a PyArrow Table.
 
         Each library has its own conversion path to preserve exact column types.
+        ``preserve_index`` applies to pandas only (Polars has no index).
 
         Raises:
             TypeError: If data is not a supported DataFrame type.
@@ -93,7 +94,7 @@ class DataframeHandler(BaseHandler):
         if cls._is_polars(data):
             return cls._polars_to_arrow(data)
         if cls._is_pandas(data):
-            return cls._pandas_to_arrow(data)
+            return cls._pandas_to_arrow(data, preserve_index=preserve_index)
         raise TypeError(
             f"Expected a pandas or Polars DataFrame, got {type(data).__name__}"
         )
@@ -153,8 +154,33 @@ class DataframeHandler(BaseHandler):
             # Eager frame -> Arrow -> Parquet. Pass the original data so the
             # backend can use the native writer (Polars' own writer emits
             # parquet statistics its predicate-pushdown engine can parse).
-            arrow_table = self._to_arrow(data)
-            folio._storage.write_parquet(filepath, data)
+            preserve_index = bool(kwargs.get("preserve_index", False))
+            if self._is_pandas(data) and not preserve_index:
+                # A non-default index is silently dropped by the parquet
+                # write; make that visible and offer the escape hatch.
+                import pandas as pd
+
+                default_index = isinstance(
+                    data.index, pd.RangeIndex
+                ) and data.index.equals(pd.RangeIndex(len(data)))
+                if not default_index:
+                    import warnings
+
+                    warnings.warn(
+                        f"Table '{name}' has a non-default pandas index that "
+                        f"will NOT be stored (parquet keeps columns only). "
+                        f"Call reset_index() first to keep it as a column, or "
+                        f"pass preserve_index=True to store it.",
+                        UserWarning,
+                        stacklevel=4,
+                    )
+            arrow_table = self._to_arrow(data, preserve_index=preserve_index)
+            if preserve_index and self._is_pandas(data):
+                # Write the Arrow table (which carries the index columns);
+                # pandas restores the index on read via parquet metadata.
+                folio._storage.write_parquet(filepath, arrow_table)
+            else:
+                folio._storage.write_parquet(filepath, data)
             arrow_schema = arrow_table.schema
             num_rows = arrow_table.num_rows
 
@@ -176,6 +202,8 @@ class DataframeHandler(BaseHandler):
         }
         if size_bytes is not None:
             metadata["size_bytes"] = size_bytes
+        if kwargs.get("preserve_index"):
+            metadata["preserve_index"] = True
 
         if description:
             metadata["description"] = description
