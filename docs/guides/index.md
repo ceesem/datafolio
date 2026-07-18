@@ -17,7 +17,6 @@ Complete guide to working with machine learning models in DataFolio:
 - Custom transformers with sklearn mixins
 - Joblib vs. skops serialization formats
 - When and how to use `custom=True` for portability
-- PyTorch models overview
 - Model metadata and lineage tracking
 - Common patterns (A/B testing, hyperparameter tuning)
 - Best practices and FAQ

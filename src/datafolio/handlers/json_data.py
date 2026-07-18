@@ -47,7 +47,7 @@ class JsonHandler(BaseHandler):
         """
         # Only handle dict and list explicitly
         # Exclude primitives (int, float, str, bool, None) to avoid conflicts with other handlers
-        # These can still be stored via add_json() explicitly
+        # DataFolio.add() routes primitives to this handler directly as JSON
         if isinstance(data, (dict, list)):
             try:
                 import orjson

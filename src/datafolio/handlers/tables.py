@@ -353,7 +353,7 @@ class ReferenceTableHandler(BaseHandler):
             inputs: Optional lineage inputs
             table_format: Format of the table (default: 'parquet')
             allow_full_load: If True, this reference bypasses the folio's
-                ``max_eager_bytes`` guard on eager ``get_table`` reads.
+                ``max_eager_bytes`` guard on eager ``get`` reads.
             polars_only: If True, the reference can only be read lazily/via
                 polars (``scan_table`` / ``frame='polars'``); eager pandas reads
                 raise a clear error. If None (default), this is inferred: a

@@ -132,7 +132,10 @@ info = folio.inspect_table("raw")
 info["columns"], info["num_rows"], info["size_bytes"], info["source_identity"]
 ```
 
-Use `validate()` to check existence.
+Use `validate()` to check existence. Note that `validate()` reports `False`
+for a reference that is unreachable (e.g. missing credentials or network
+issues), not only for one that no longer exists — a `False` result means the
+item could not be verified from here.
 
 ### Sharded / partitioned datasets are polars-only
 

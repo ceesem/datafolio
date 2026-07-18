@@ -89,7 +89,7 @@ Owned items carry a `filename` relative to a subdirectory derived from
 | `model` | `models/` | `joblib.load` (or `skops` if `serialization_format == "skops"`) |
 | `numpy_array` | `artifacts/` | `numpy.load` |
 | `json_data` | `artifacts/` | any JSON reader |
-| `timestamp` | `artifacts/` | JSON reader (ISO 8601 string + unix timestamp) |
+| `timestamp` | `artifacts/` | JSON reader (payload is `{"iso_string": ...}`; the unix timestamp lives in the manifest entry, not the payload) |
 | `artifact` | `artifacts/` | open by extension (image, text, csv, ...) |
 
 ```python

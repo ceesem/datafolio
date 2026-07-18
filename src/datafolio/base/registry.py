@@ -16,12 +16,12 @@ class HandlerRegistry:
     """Global registry of data type handlers.
 
     The registry maintains a mapping of item_type -> handler and provides
-    auto-detection capabilities for the add_data() generic API.
+    auto-detection capabilities for the add() generic API.
 
     Examples:
         Create and use a registry:
         >>> registry = HandlerRegistry()
-        >>> registry.register(PandasHandler())
+        >>> registry.register(DataframeHandler())
         >>> handler = registry.get('included_table')
         >>> handler = registry.detect(pd.DataFrame())
     """
@@ -41,7 +41,7 @@ class HandlerRegistry:
 
         Examples:
             >>> registry = HandlerRegistry()
-            >>> registry.register(PandasHandler())
+            >>> registry.register(DataframeHandler())
             >>> registry.register(NumpyHandler())
         """
         item_type = handler.item_type
@@ -66,9 +66,9 @@ class HandlerRegistry:
 
         Examples:
             >>> registry = HandlerRegistry()
-            >>> registry.register(PandasHandler())
+            >>> registry.register(DataframeHandler())
             >>> handler = registry.get('included_table')
-            >>> isinstance(handler, PandasHandler)
+            >>> isinstance(handler, DataframeHandler)
             True
         """
         if item_type not in self._handlers:
@@ -93,10 +93,10 @@ class HandlerRegistry:
 
         Examples:
             >>> registry = HandlerRegistry()
-            >>> registry.register(PandasHandler())
+            >>> registry.register(DataframeHandler())
             >>> registry.register(NumpyHandler())
             >>> handler = registry.detect(pd.DataFrame())
-            >>> isinstance(handler, PandasHandler)
+            >>> isinstance(handler, DataframeHandler)
             True
             >>> handler = registry.detect(np.array([1, 2, 3]))
             >>> isinstance(handler, NumpyHandler)
@@ -118,7 +118,7 @@ class HandlerRegistry:
 
         Examples:
             >>> registry = HandlerRegistry()
-            >>> registry.register(PandasHandler())
+            >>> registry.register(DataframeHandler())
             >>> registry.register(NumpyHandler())
             >>> sorted(registry.list_types())
             ['included_table', 'numpy_array']
@@ -136,7 +136,7 @@ class HandlerRegistry:
 
         Examples:
             >>> registry = HandlerRegistry()
-            >>> registry.register(PandasHandler())
+            >>> registry.register(DataframeHandler())
             >>> registry.is_registered('included_table')
             True
             >>> registry.is_registered('unknown_type')
@@ -176,7 +176,7 @@ def register_handler(handler: BaseHandler) -> None:
         ValueError: If item_type already registered
 
     Examples:
-        >>> register_handler(PandasHandler())
+        >>> register_handler(DataframeHandler())
         >>> register_handler(NumpyHandler())
     """
     _registry.register(handler)
@@ -199,7 +199,7 @@ def get_handler(item_type: str) -> BaseHandler:
 
     Examples:
         >>> handler = get_handler('included_table')
-        >>> isinstance(handler, PandasHandler)
+        >>> isinstance(handler, DataframeHandler)
         True
     """
     return _registry.get(item_type)
@@ -219,7 +219,7 @@ def detect_handler(data: Any) -> Optional[BaseHandler]:
 
     Examples:
         >>> handler = detect_handler(pd.DataFrame())
-        >>> isinstance(handler, PandasHandler)
+        >>> isinstance(handler, DataframeHandler)
         True
         >>> handler = detect_handler("unknown")
         >>> handler is None

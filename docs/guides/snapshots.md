@@ -89,8 +89,8 @@ folio.create_snapshot(
     description='Baseline random forest model',
     tags=['baseline', 'production', 'paper'],
     capture_git=True,           # Capture git info (default: True)
-    capture_environment=True,   # Capture Python env (default: True)
-    capture_execution=True      # Capture execution info (default: True)
+    capture_environment=True,   # Capture Python env (default: False)
+    capture_execution=True      # Capture execution info (default: False)
 )
 ```
 
@@ -231,8 +231,11 @@ snapshots = folio.list_snapshots()
 for snap in snapshots:
     print(f"{snap['name']}: {snap['description']}")
 
-# Filter by tags
-production_snaps = folio.list_snapshots(tags=['production'])
+# Filter by tags (list_snapshots() returns plain dicts — filter in Python)
+production_snaps = [
+    snap for snap in folio.list_snapshots()
+    if 'production' in snap.get('tags', [])
+]
 ```
 
 ### Get Snapshot Info
@@ -323,7 +326,9 @@ folio.create_snapshot('v1.2')
 # Replacing any existing item requires overwrite=True; only when the item is
 # pinned by a snapshot does this create a new version file
 folio.add('big_data', modified_df, overwrite=True)
-# Now we have: big_data.parquet (5GB) and big_data_v2.parquet (5GB)
+# Now we have two versioned payload files (filenames embed the manifest
+# revision, <name>--r<rev>.parquet), e.g.:
+# big_data--r1.parquet (5GB) and big_data--r5.parquet (5GB)
 
 folio.create_snapshot('v2.0')
 
@@ -686,4 +691,3 @@ A: Snapshots are complementary to git. Git tracks code; a snapshot preserves fol
 
 - See the [API Reference](../reference/api.md) for complete snapshot method documentation
 - Check out the [changelog](../changelog.md) for what's new
-- Read the [full design document](https://github.com/caseysm/datafolio/blob/main/snapshots.md) for implementation details

@@ -71,8 +71,8 @@ config = folio.data.config.content
 # View names, descriptions, formats, and relationships
 folio.describe()
 
-# Clean up temporary items
-folio.delete('temp_data')
+# Clean up items you no longer need
+folio.delete('accuracy')
 ```
 
 ## Installation
@@ -303,7 +303,7 @@ datafolio snapshot delete experimental-v5 --cleanup
 
 **Production Deployment**: Tag production-ready snapshots and deploy specific versions with confidence.
 
-For complete snapshot documentation, see [snapshots.md](snapshots.md).
+For complete snapshot documentation, see [docs/guides/snapshots.md](docs/guides/snapshots.md).
 
 ## Examples
 

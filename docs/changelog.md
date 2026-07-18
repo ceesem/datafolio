@@ -49,6 +49,13 @@
 - Git context for snapshots is captured from the working directory (the
   running code), not the bundle directory.
 
+### Changed
+
+- `add(..., preserve_index=True)` (still supported) now stores the index as
+  plain columns recorded in the manifest (`index_columns`) and restores them
+  on pandas reads — the parquet file stays readable as ordinary columns by
+  any tool.
+
 ### Removed
 
 - The caching subsystem (`cache_enabled`/`cache_dir`/`cache_ttl` and the
@@ -62,10 +69,6 @@
   capture (uv.lock hash kept), the `.polars` accessor property, and
   reader kwargs on `get()` (use `scan_table()` or
   `pd.read_parquet(folio.item_path(name), ...)`).
-- `add(..., preserve_index=True)` now stores the index as plain columns
-  recorded in the manifest (`index_columns`) and restores them on pandas
-  reads — the parquet file stays readable as ordinary columns by any
-  tool.
 
 ## 1.3.0
 

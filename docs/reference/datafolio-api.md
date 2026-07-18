@@ -267,13 +267,6 @@ Bundle-level metadata dictionary.
 print(folio.metadata)  # e.g., {'project': 'analysis', 'version': '1.0'}
 ```
 
-#### `items`
-Dictionary of all items in the bundle with their metadata.
-
-```python
-print(folio.items)  # e.g., {'table1': {...}, 'model1': {...}}
-```
-
 ### Item Lists
 
 #### `tables`
@@ -373,7 +366,7 @@ print(folio.list_contents())
 print(folio.tables)  # Property access
 
 # Use data accessor with autocomplete
-df_via_accessor = folio.data.results
+df_via_accessor = folio.data.results.content
 ```
 
 ### With Snapshots
@@ -382,7 +375,7 @@ df_via_accessor = folio.data.results
 folio.create_snapshot('v1.0', description='Release 1.0')
 
 # Load a snapshot (read-only mode)
-folio_snapshot = datafolio.DataFolio.load_snapshot('v1.0')
+folio_snapshot = datafolio.DataFolio.load_snapshot('my_analysis', 'v1.0')
 
 # List all snapshots
 snapshots = folio.list_snapshots()
@@ -422,7 +415,7 @@ path = folio.item_path('classifier')
 path = folio.item_path('raw_data')      # → 's3://data-lake/raw.parquet' 
 
 # Share with a colleague who doesn't use datafolio:
-# import pandas as pd; pd.read_parquet('s3://my-bucket/.../results.parquet')
+# import pandas as pd; pd.read_parquet('s3://my-bucket/.../results--r2.parquet')
 
 # Or browse all paths at once with describe()
 folio.describe(show_paths=True)
@@ -430,8 +423,8 @@ folio.describe(show_paths=True)
 #   • raw_data (reference): Input dataset
 #     ↳ path: s3://data-lake/raw.parquet
 #   • results: Model results
-#     ↳ path: s3://my-bucket/experiments/run-42/tables/results.parquet
+#     ↳ path: s3://my-bucket/experiments/run-42/tables/results--r2.parquet
 # Models (1):
 #   • classifier: Trained model
-#     ↳ path: s3://my-bucket/experiments/run-42/models/classifier.joblib
+#     ↳ path: s3://my-bucket/experiments/run-42/models/classifier--r3.joblib
 ```

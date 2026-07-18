@@ -1538,8 +1538,14 @@ For more information, see the [datafolio documentation](https://github.com/casey
         2. Referenced items exist at their external path
         3. Checksums match (for included single files)
 
+        Per-item failures never raise: an item whose check errors (e.g. an
+        unreachable reference or an unreadable payload) is reported as False
+        rather than aborting the report.
+
         Returns:
-            Dict mapping item names to validation status (True if valid)
+            Dict mapping item names to validation status. True means the
+            item's payload exists (and its checksum matches, where recorded);
+            False means it is missing, unreachable, or unreadable.
 
         Examples:
             >>> status = folio.validate()
@@ -2141,7 +2147,7 @@ For more information, see the [datafolio documentation](https://github.com/casey
             each containing a list of names
 
         Examples:
-            >>> folio = DataFolio('experiments', prefix='test')
+            >>> folio = DataFolio('experiments/my-exp')
             >>> folio.reference_table('data1', path='s3://bucket/data.parquet')
             >>> folio.add('embeddings', np.array([1, 2, 3]))
             >>> folio.list_contents()
@@ -2209,7 +2215,7 @@ For more information, see the [datafolio documentation](https://github.com/casey
             List of all table names (strings)
 
         Examples:
-            >>> folio = DataFolio('experiments', prefix='test')
+            >>> folio = DataFolio('experiments/my-exp')
             >>> folio.reference_table('training', path='s3://bucket/data.parquet')
             >>> folio.add('results', df)
             >>> folio.tables
@@ -2230,7 +2236,7 @@ For more information, see the [datafolio documentation](https://github.com/casey
             List of model names (strings)
 
         Examples:
-            >>> folio = DataFolio('experiments', prefix='test')
+            >>> folio = DataFolio('experiments/my-exp')
             >>> folio.add_model('classifier', model)
             >>> folio.models
             ['classifier']
@@ -2250,8 +2256,8 @@ For more information, see the [datafolio documentation](https://github.com/casey
             List of artifact names (strings)
 
         Examples:
-            >>> folio = DataFolio('experiments', prefix='test')
-            >>> folio.add_artifact('plot', 'plot.png')
+            >>> folio = DataFolio('experiments/my-exp')
+            >>> folio.add_file('plot.png', name='plot')
             >>> folio.artifacts
             ['plot']
         """
@@ -2505,7 +2511,7 @@ For more information, see the [datafolio documentation](https://github.com/casey
             inputs: Optional list of items this was derived from
             overwrite: If True, allow replacing an existing table (default: False)
             allow_full_load: If True, this reference bypasses the folio's
-                ``max_eager_bytes`` guard on eager ``get_table`` reads.
+                ``max_eager_bytes`` guard on eager ``get`` reads.
             polars_only: If True, this reference is readable only lazily / via
                 polars (``scan_table`` / ``frame='polars'``); eager pandas reads
                 raise a clear error. If None (default), inferred from the
@@ -2518,7 +2524,7 @@ For more information, see the [datafolio documentation](https://github.com/casey
             ValueError: If name already exists (and overwrite=False) or format is invalid
 
         Examples:
-            >>> folio = DataFolio('experiments', prefix='test')
+            >>> folio = DataFolio('experiments/my-exp')
             >>> folio.reference_table(
             ...     'raw_data',
             ...     path='s3://bucket/data.parquet',
@@ -2653,7 +2659,7 @@ For more information, see the [datafolio documentation](https://github.com/casey
         This is guaranteed lazy: if the table's location cannot be scanned
         lazily (an unsupported scheme, or a non-scannable format), it raises a
         clear error rather than silently downloading the object. For an eager
-        read that does download, use ``get_table(name, frame='polars')``.
+        read that does download, use ``get(name, frame='polars')``.
 
         Args:
             name: Name of the table
@@ -2951,8 +2957,8 @@ For more information, see the [datafolio documentation](https://github.com/casey
     def archive(self, name: Union[str, list[str]]) -> Self:
         """Mark item(s) as archived (hidden from default views, not deleted).
 
-        Archived items remain on disk and are still accessible via get_data() /
-        get_table() etc., but are excluded from list_contents(), describe(), and
+        Archived items remain on disk and are still accessible via get(),
+        but are excluded from list_contents(), describe(), and
         copy() by default.  Pass include_archived=True to those methods to reveal
         them again, or call unarchive() to restore them permanently.
 
@@ -3074,7 +3080,7 @@ For more information, see the [datafolio documentation](https://github.com/casey
             KeyError: If item doesn't exist
 
         Examples:
-            >>> folio = DataFolio('experiments', prefix='test')
+            >>> folio = DataFolio('experiments/my-exp')
             >>> # After adding items with lineage...
             >>> inputs = folio.get_inputs('predictions')
             >>> # Returns: ['test_data', 'classifier']
@@ -3109,7 +3115,7 @@ For more information, see the [datafolio documentation](https://github.com/casey
             KeyError: If item doesn't exist
 
         Examples:
-            >>> folio = DataFolio('experiments', prefix='test')
+            >>> folio = DataFolio('experiments/my-exp')
             >>> # After adding items with lineage...
             >>> dependents = folio.get_dependents('classifier')
             >>> # Returns items that used 'classifier' as input
@@ -3139,7 +3145,7 @@ For more information, see the [datafolio documentation](https://github.com/casey
             Dictionary mapping item names to their input item names
 
         Examples:
-            >>> folio = DataFolio('experiments', prefix='test')
+            >>> folio = DataFolio('experiments/my-exp')
             >>> graph = folio.get_lineage_graph()
             >>> # Returns: {'predictions': ['test_data', 'classifier'], ...}
         """

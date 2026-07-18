@@ -404,6 +404,7 @@ param_grid = {
 }
 
 # Try all combinations
+scores = {}
 for params in ParameterGrid(param_grid):
     model = RandomForestClassifier(**params)
     model.fit(X_train, y_train)
@@ -414,15 +415,17 @@ for params in ParameterGrid(param_grid):
     folio.add_model(name, model,
         description=f"RF with {params['n_estimators']} trees, depth {params['max_depth']}")
 
-    # Track score in metadata
-    folio._items[name]['test_score'] = score
+    scores[name] = score
+
+# Persist the scores as a JSON item so they survive reloads
+folio.add('tuning_scores', scores, description='Test scores per model')
 
 # Find best model
-best_name = max(folio.models,
-    key=lambda name: folio._items[name].get('test_score', 0))
+scores = folio.get('tuning_scores')
+best_name = max(scores, key=scores.get)
 best_model = folio.get_model(best_name)
 print(f"Best model: {best_name}")
-print(f"Score: {folio._items[best_name]['test_score']}")
+print(f"Score: {scores[best_name]}")
 ```
 
 ## FAQ
@@ -453,10 +456,11 @@ A: Skops serialization will fail. Always inherit from these classes for custom t
 
 **Q: How do I know which format a model uses?**
 
-A: Check the metadata:
+A: Check the item's manifest entry:
 ```python
-print(folio._items['model_name']['serialization_format'])  # 'joblib' or 'skops'
-print(folio._items['model_name']['filename'])  # ends in .joblib or .skops
+info = folio.item_info('model_name')
+print(info['serialization_format'])  # 'joblib' or 'skops'
+print(info['filename'])  # ends in .joblib or .skops
 ```
 
 ## Next Steps

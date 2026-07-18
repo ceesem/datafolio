@@ -87,8 +87,9 @@ _mutation_guard()                 reentrant per-folio lock (local lock file)
        └─ snapshot in-memory state (one deep copy of the small collections)
             └─ [build payload FIRST, then mutate state, then _save_items()]
                  │                 atomic single-file publish; revision += 1
-                 ├─ on ANY exception: restore the state snapshot — no partial
-                 │                 mutation can leak into a later commit
+                 ├─ on an exception escaping the guard: restore the state
+                 │                 snapshot — no partial mutation can leak
+                 │                 into a later commit
                  └─ [best-effort delete newly unreferenced payloads]
 ```
 
@@ -120,10 +121,12 @@ in-memory dict changes) and commits through `_save_items()`, so metadata-only
 writes advance the same bundle revision other notebooks check.
 
 **`batch()`** holds the guard for the whole block and publishes once at exit.
-An exception inside the block aborts the batch as a unit — the guard's state
-snapshot restores everything (staged items, metadata, copy-on-write moves,
-deferred deletions), leaving only orphan payload files. Nested batches raise;
-snapshot creation/deletion and restore/cleanup inside a batch raise.
+An exception that *escapes* the block aborts the batch as a unit — the guard's
+state snapshot restores everything (staged items, metadata, copy-on-write
+moves, deferred deletions), leaving only orphan payload files. An exception
+caught and handled *inside* the block does not abort: the batch continues and
+publishes normally at exit. Nested batches raise; snapshot creation/deletion
+and restore/cleanup inside a batch raise.
 
 ## 4. Snapshots
 
@@ -155,7 +158,10 @@ preserve or guarantee the contents of referenced data.**
 ## 5. Concurrency model
 
 - Readers never take the lock; every read entry point calls
-  `_refresh_if_needed()` (cheap metadata timestamp comparison).
+  `_refresh_if_needed()` (a cheap comparison of the on-disk `items.json`
+  revision against the loaded one).
+- Payload checksums are computed at write time and verified only by
+  `validate()` — `get()` never verifies them on read.
 - Local writers serialize on `items.json.lock` (a `filelock` reentrant lock)
   and check the manifest revision before any change. The lock file lives in
   the bundle; sync tools that delete remote-absent files should exclude it,

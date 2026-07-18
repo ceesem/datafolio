@@ -63,7 +63,7 @@ class BaseHandler(ABC):
             Item type string (e.g., 'included_table', 'numpy_array', 'pytorch_model')
 
         Examples:
-            >>> handler = PandasHandler()
+            >>> handler = DataframeHandler()
             >>> handler.item_type
             'included_table'
         """
@@ -84,7 +84,7 @@ class BaseHandler(ABC):
             True if this handler supports this data type
 
         Examples:
-            >>> handler = PandasHandler()
+            >>> handler = DataframeHandler()
             >>> handler.can_handle(pd.DataFrame())
             True
             >>> handler.can_handle(np.array([1, 2, 3]))
@@ -227,7 +227,7 @@ class BaseHandler(ABC):
             StorageCategory enum value
 
         Examples:
-            >>> handler = PandasHandler()
+            >>> handler = DataframeHandler()
             >>> handler.get_storage_category()
             <StorageCategory.TABLES: 'tables'>
 
@@ -248,7 +248,7 @@ class BaseHandler(ABC):
             Subdirectory name: 'tables', 'models', or 'artifacts'
 
         Examples:
-            >>> handler = PandasHandler()
+            >>> handler = DataframeHandler()
             >>> handler.get_storage_subdir()
             'tables'
 

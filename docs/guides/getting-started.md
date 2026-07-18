@@ -69,7 +69,7 @@ DataFolio: experiments/my_first_experiment
 
 Tables (1):
   • training_data: Three-row example table used by the introductory notebook
-    ↳ shape: [3, 3]
+    ↳ size: 2.1 KB
 ```
 
 ### What Just Happened?
@@ -452,15 +452,15 @@ folio.describe()
 
 Output shows the dependency chain:
 ```
-Tables (2):
+Tables (3):
   • raw_data (reference): Original raw data from database
     ↳ path: s3://bucket/raw_data.parquet
   • cleaned_data: Cleaned and preprocessed
+    ↳ size: 1.5 MB
     ↳ inputs: raw_data
-    ↳ shape: [10000, 25]
   • features: Engineered features
+    ↳ size: 3.2 MB
     ↳ inputs: cleaned_data
-    ↳ shape: [10000, 50]
 
 Models (1):
   • classifier: Trained classifier
@@ -523,6 +523,12 @@ folio.describe()  # Shows metadata section
 
 The `describe()` method automatically formats and displays your custom metadata.
 
+!!! note "NaN/inf in metadata values"
+    Metadata is persisted as JSON, which has no representation for non-finite
+    floats — the same NaN/inf → `null` conversion that applies to JSON items
+    also applies to metadata values (`folio.metadata['score'] = float('nan')`
+    reads back as `None`).
+
 ## Describing Your Folio
 
 Get a comprehensive overview of the directory and its contents:
@@ -551,8 +557,8 @@ Tables (2):
   • raw_data (reference): Original raw data
     ↳ path: s3://bucket/raw.parquet
   • features: Engineered features
+    ↳ size: 3.2 MB
     ↳ inputs: cleaned_data
-    ↳ shape: [10000, 50]
 
 Numpy Arrays (1):
   • embeddings: Model embeddings

@@ -26,7 +26,7 @@ class TimestampHandler(BaseHandler):
         >>> # Handler is used automatically by DataFolio
         >>> from datetime import datetime, timezone
         >>> event_time = datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
-        >>> folio.add_timestamp('event_time', event_time)
+        >>> folio.add('event_time', event_time)
     """
 
     @property
@@ -37,8 +37,8 @@ class TimestampHandler(BaseHandler):
     def can_handle(self, data: Any) -> bool:
         """Check if data is a datetime object.
 
-        Only auto-detects datetime objects for add().
-        Unix timestamps (int/float) can still be stored via explicit add_timestamp() calls.
+        Only auto-detects datetime objects for add(). Bare numbers
+        (int/float) passed to add() are stored as JSON, not as timestamps.
 
         Args:
             data: Data to check

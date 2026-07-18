@@ -43,6 +43,15 @@ Or specify it explicitly:
 datafolio -f /path/to/my/bundle describe
 ```
 
+!!! note "Limitation: local paths only"
+    The `-f/--folio` flag and `DATAFOLIO_PATH` only accept **local** filesystem
+    paths — the CLI checks that the path exists on disk, so cloud URIs like
+    `gs://bucket/experiment` fail with `Folio not found`. This is a known,
+    deliberate limitation in v2.0. To work with a cloud-hosted folio, use the
+    Python API (`DataFolio('gs://bucket/experiment')`) instead.
+    (`datafolio init` is the one exception: it accepts a cloud URI as its
+    `PATH` argument to create a new cloud bundle.)
+
 ---
 
 ## Commands
@@ -52,11 +61,17 @@ datafolio -f /path/to/my/bundle describe
 Create a new DataFolio bundle.
 
 ```bash
-datafolio init [PATH]
+datafolio init [OPTIONS] [PATH]
 ```
 
 **Arguments:**
 - `PATH` (optional): Directory to create bundle in (default: current directory)
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-d, --description TEXT` | Bundle description |
+| `-n, --name TEXT` | Bundle name (default: directory name) |
 
 **Examples:**
 
@@ -64,23 +79,35 @@ datafolio init [PATH]
 # Create bundle in current directory
 datafolio init
 
-# Create bundle in specific directory
-datafolio init my_analysis
+# Create bundle in specific directory, with a description
+datafolio init my_folio -d "Demo analysis bundle"
 
-# Create with custom path
-datafolio init /data/experiments/exp_001
+# Create a cloud bundle (init only; other commands can't target cloud paths)
+datafolio init gs://my-bucket/experiment -d "Cloud experiment"
 ```
 
 **Output:**
 ```
-✓ Initialized new DataFolio at: /data/experiments/exp_001
+Initializing bundle in: /data/experiments/my_folio
+
+✓ Initialized DataFolio bundle: my_folio
+  Path: /data/experiments/my_folio
+  Description: Demo analysis bundle
+
+Next steps:
+  # Add data to your bundle
+  cd /data/experiments/my_folio
+  python -c "from datafolio import DataFolio; folio = DataFolio('.'); ..."
+
+  # Create a snapshot when ready
+  datafolio snapshot create v1.0 -d 'Initial version'
 ```
 
 ---
 
 ### `describe` - Show Bundle Information
 
-Display detailed information about a bundle including items, metadata, and lineage.
+Display detailed information about a bundle including items, metadata, and snapshots.
 
 ```bash
 datafolio describe [OPTIONS]
@@ -89,8 +116,8 @@ datafolio describe [OPTIONS]
 **Options:**
 | Option | Description |
 |--------|-------------|
-| `--json` | Output in JSON format |
-| `--verbose, -v` | Show detailed item information |
+| `--max-metadata INTEGER` | Maximum metadata fields to show (default: 10) |
+| `-s, --snapshot TEXT` | Describe a specific snapshot instead of the full bundle |
 
 **Examples:**
 
@@ -98,11 +125,8 @@ datafolio describe [OPTIONS]
 # Basic description
 datafolio describe
 
-# Detailed output
-datafolio describe --verbose
-
-# JSON output for scripting
-datafolio describe --json > bundle_info.json
+# Describe a specific snapshot's state
+datafolio describe --snapshot v1.0
 
 # Describe specific bundle
 datafolio -f /path/to/bundle describe
@@ -110,38 +134,61 @@ datafolio -f /path/to/bundle describe
 
 **Output:**
 ```
-DataFolio: my_analysis
-Path: /data/experiments/exp_001
+DataFolio: ./my_folio
+=====================
 
-Bundle Metadata:
-  project: analysis
-  created: 2024-01-15
+Created: Today at 8:09 PM EDT
+Updated: Today at 8:10 PM EDT
 
-Items (5):
+Metadata (2 fields):
+  • description: Demo analysis bundle
+  • project: demo
+
+Snapshots (1):
+  • v1.0: Initial baseline
+    ↳ created: Today at 8:10 PM EDT, items: 2
+    ↳ tags: baseline
+
+Tables (2):
+  • raw_data: Raw measurements
+    ↳ size: 3.5 KB
+  • results: Group means
+    ↳ size: 1.6 KB
+```
+
+With `--snapshot`, the description covers the bundle as it existed at snapshot time:
+
+```
+Snapshot: v1.1
+==============
+
+Description: Added validation data
+
+Created: Today at 8:10 PM EDT
+Tags: validated
+
+Items (3):
+
   Tables (3):
-    - raw_data (100 rows, 5 cols)
-    - processed_data (100 rows, 8 cols)
-    - results (50 rows, 3 cols)
-
-  Models (1):
-    - classifier (sklearn_model)
-
-  Artifacts (1):
-    - config.yaml
+    • raw_data: Raw measurements
+    • results: Group means with counts
+    • validation_data: Held-out validation set
 ```
 
 ---
 
 ### `validate` - Validate Bundle
 
-Check if a directory is a valid DataFolio bundle.
+Check that a directory is a valid DataFolio bundle. This runs a real integrity
+check: every item's payload must exist, and for locally-owned items the stored
+checksum must match.
 
 ```bash
 datafolio validate [PATH]
 ```
 
 **Arguments:**
-- `PATH` (optional): Directory to validate (default: current directory)
+- `PATH` (optional): Directory to validate (default: current directory or `DATAFOLIO_PATH`)
 
 **Examples:**
 
@@ -150,53 +197,58 @@ datafolio validate [PATH]
 datafolio validate
 
 # Validate specific path
-datafolio validate /data/experiments/exp_001
+datafolio validate /data/experiments/my_folio
 ```
 
 **Output:**
 
 ✅ Valid bundle:
 ```
-✓ Valid DataFolio bundle
-  - items.json: valid
-  - 5 items found
-  - No issues detected
+✓ Valid DataFolio bundle: ./my_folio
+  Items: 2 (all payloads verified)
+  Snapshots: 1
+  Description: Demo analysis bundle
 ```
 
-❌ Invalid bundle:
+❌ Not a bundle:
 ```
-✗ Not a valid DataFolio bundle
-  - Missing items.json
-  - Directory structure incomplete
+Error: Not a DataFolio bundle: /tmp
+Missing required files: items.json and metadata.json
+Tip: Use 'datafolio init' to create a new folio, or use --folio/-f to specify the correct path.
 ```
 
 **Exit Codes:**
 - `0`: Valid bundle
-- `1`: Invalid bundle
+- `1`: Invalid bundle (not a folio, or one or more items have missing/corrupt payloads)
 
 ---
 
 ## Snapshot Commands
 
-Manage snapshots (read-only copies) of your bundle state.
+Manage snapshots (read-only records) of your bundle state.
 
 ### `snapshot create` - Create Snapshot
 
 Create a new snapshot of the current bundle state.
+
+By default, only git information is captured (with credentials automatically
+removed from remote URLs). Environment and execution context are opt-in via flags.
 
 ```bash
 datafolio snapshot create NAME [OPTIONS]
 ```
 
 **Arguments:**
-- `NAME`: Unique name for the snapshot (e.g., 'v1.0', 'baseline', '2024-01-15')
+- `NAME`: Unique name for the snapshot (e.g., 'v1.0', 'baseline', '2024-01-15'). Letters, numbers, hyphens, underscores, and dots only.
 
 **Options:**
 | Option | Description |
 |--------|-------------|
 | `-d, --description TEXT` | Description of this snapshot |
-| `--tags TEXT` | Comma-separated tags |
-| `--metadata KEY=VALUE` | Additional metadata (can be used multiple times) |
+| `-t, --tag TEXT` | Tag for the snapshot (can be used multiple times) |
+| `--no-git` | Don't capture git information |
+| `--env` | Capture environment information (Python version, packages) |
+| `--exec` | Capture execution context (entry point, working dir) |
 
 **Examples:**
 
@@ -207,21 +259,19 @@ datafolio snapshot create v1.0
 # With description
 datafolio snapshot create baseline -d "Initial baseline results"
 
-# With tags
-datafolio snapshot create exp_001 --tags "experiment,baseline,validated"
+# With tags (repeat -t for each tag)
+datafolio snapshot create exp_001 -t experiment -t baseline -t validated
 
-# With custom metadata
-datafolio snapshot create v2.0 \
-  -d "Improved model" \
-  --metadata accuracy=0.95 \
-  --metadata model=transformer
+# Include environment and execution info
+datafolio snapshot create v2.0 -d "Improved model" --env --exec
 ```
 
 **Output:**
 ```
 ✓ Created snapshot 'v1.0'
-  Items: 5 tables, 1 model, 1 artifact
-  Time: 2024-01-15 14:30:00 UTC
+  Items: 2
+  Description: Initial baseline
+  Tags: baseline
 ```
 
 ---
@@ -237,8 +287,7 @@ datafolio snapshot list [OPTIONS]
 **Options:**
 | Option | Description |
 |--------|-------------|
-| `--json` | Output in JSON format |
-| `--verbose, -v` | Show detailed information |
+| `-t, --tag TEXT` | Filter by tag |
 
 **Examples:**
 
@@ -246,31 +295,19 @@ datafolio snapshot list [OPTIONS]
 # List all snapshots
 datafolio snapshot list
 
-# Detailed listing
-datafolio snapshot list --verbose
-
-# JSON output
-datafolio snapshot list --json
+# Only snapshots with a given tag
+datafolio snapshot list --tag baseline
 ```
 
 **Output:**
 ```
-Snapshots (3):
-
-  v1.0
-    Created: 2024-01-15 14:30:00
-    Items: 7
-    Description: Initial baseline
-
-  v1.1
-    Created: 2024-01-16 10:15:00
-    Items: 8
-    Description: Added validation data
-
-  v2.0
-    Created: 2024-01-17 15:45:00
-    Items: 9
-    Description: Improved model (accuracy=0.95)
+                               Snapshots (2)
+┏━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━┓
+┃ Name ┃ Description           ┃ Items ┃ Created              ┃ Tags      ┃
+┡━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━┩
+│ v1.1 │ Added validation data │     3 │ 2026-07-17 20:10 EDT │ validated │
+│ v1.0 │ Initial baseline      │     2 │ 2026-07-17 20:10 EDT │ baseline  │
+└──────┴───────────────────────┴───────┴──────────────────────┴───────────┘
 ```
 
 ---
@@ -295,27 +332,23 @@ datafolio snapshot show v1.0
 **Output:**
 ```
 Snapshot: v1.0
-Created: 2024-01-15 14:30:00 UTC
-Description: Initial baseline results
+============================================================
 
-Items (7):
-  Tables (5):
-    - raw_data (v1)
-    - processed_data (v1)
-    - train_data (v1)
-    - test_data (v1)
-    - results (v1)
+Description: Initial baseline
+Tags: baseline
+Timestamp: 2026-07-17 20:10:01 EDT
 
-  Models (1):
-    - classifier (v1)
+Items (2):
+  • raw_data
+  • results
 
-  Artifacts (1):
-    - config.yaml (v1)
-
-Metadata:
-  accuracy: 0.92
-  model_type: random_forest
+Metadata (2 fields):
+  • description: Demo analysis bundle
+  • project: demo
 ```
+
+If the snapshot captured git or environment information, those sections
+(commit, branch, dirty status; Python version) are shown as well.
 
 ---
 
@@ -334,31 +367,38 @@ datafolio snapshot compare SNAPSHOT1 SNAPSHOT2
 **Examples:**
 
 ```bash
-datafolio snapshot compare v1.0 v2.0
+datafolio snapshot compare v1.0 v1.1
 ```
 
 **Output:**
 ```
-Comparing v1.0 → v2.0
+Comparing v1.0 → v1.1
+============================================================
 
-Added (2):
-  + new_features (table)
-  + updated_model (model)
+Added (1):
+  + validation_data
 
 Modified (1):
-  ~ results (table): rows changed 50 → 75
+  ~ results
 
-Removed (0):
+Unchanged (1):
+  = raw_data
+
+Metadata Changes (1):
+  updated_at: 2026-07-18T00:09:50.364141+00:00 → 2026-07-18T00:10:19.543277+00:00
 
 Summary:
-  2 additions, 1 modification, 0 deletions
+  Added: 1
+  Removed: 0
+  Modified: 1
+  Unchanged: 1
 ```
 
 ---
 
 ### `snapshot diff` - Diff Against Snapshot
 
-Show changes between current state and a snapshot.
+Show changes between the current state and a snapshot.
 
 ```bash
 datafolio snapshot diff [SNAPSHOT]
@@ -379,29 +419,30 @@ datafolio snapshot diff v1.0
 
 **Output:**
 ```
-Changes since v1.0:
-
-Modified (2):
-  ~ results (table): updated
-  ~ classifier (model): updated
+Comparing current state to snapshot 'v1.0'
+============================================================
 
 Added (1):
-  + validation_results (table)
+  + validation_data
 
-Current state has 3 changes from snapshot v1.0
+Modified (1):
+  ~ results
+
+Unchanged (1):
+  = raw_data
+
+Summary:
+  Added: 1
+  Removed: 0
+  Modified: 1
+  Unchanged: 1
 ```
 
 ---
 
 ### `snapshot status` - Show Bundle Status
 
-Show current bundle state compared to the last snapshot.
-
-```bash
-datafolio snapshot status
-```
-
-**Examples:**
+Show current bundle state compared to the last snapshot. Similar to `git status`.
 
 ```bash
 datafolio snapshot status
@@ -409,21 +450,22 @@ datafolio snapshot status
 
 **Output:**
 ```
-Current Status:
+Current bundle: ./my_folio
+Last snapshot: v1.0 (2026-07-17)
 
-Last snapshot: v2.0 (2024-01-17 15:45:00)
+Changes since last snapshot:
 
-Changes since v2.0:
-  Modified: 1 item
-  Added: 0 items
-  Deleted: 0 items
+Added (1):
+  + validation_data
 
-Modified items:
-  ~ results (table): 75 → 100 rows
+Modified (1):
+  ~ results
 
-💡 Tip: Create a new snapshot to save current state
-      datafolio snapshot create v2.1
+Unchanged: 1 items
 ```
+
+If no snapshots exist yet, it suggests creating your first one. If nothing
+changed, it prints `✓ No changes since last snapshot`.
 
 ---
 
@@ -441,34 +483,34 @@ datafolio snapshot delete NAME [OPTIONS]
 **Options:**
 | Option | Description |
 |--------|-------------|
-| `--force` | Skip confirmation prompt |
-| `--cleanup-orphans` | Also remove orphaned item versions |
+| `-y, --yes` | Skip confirmation prompt |
+| `--cleanup / --no-cleanup` | Cleanup orphaned versions after deletion (default: no cleanup) |
 
 **Examples:**
 
 ```bash
-# Delete with confirmation
+# Delete with confirmation prompt
 datafolio snapshot delete old_experiment
 
-# Force delete without confirmation
-datafolio snapshot delete old_experiment --force
+# Delete without confirmation
+datafolio snapshot delete old_experiment -y
 
-# Delete and cleanup orphaned versions
-datafolio snapshot delete old_experiment --cleanup-orphans
+# Delete and clean up orphaned item versions
+datafolio snapshot delete old_experiment --cleanup
 ```
 
 **Output:**
 ```
-⚠ Warning: This will permanently delete snapshot 'old_experiment'
-Continue? [y/N]: y
-✓ Deleted snapshot 'old_experiment'
+Delete snapshot 'v1.0'? [y/N]: y
+✓ Deleted snapshot 'v1.0'
 ```
 
 ---
 
 ### `snapshot gc` - Garbage Collection
 
-Clean up orphaned item versions that are no longer referenced by any snapshot.
+Clean up orphaned item versions that are no longer referenced by any snapshot
+or by the current bundle state.
 
 ```bash
 datafolio snapshot gc [OPTIONS]
@@ -478,7 +520,6 @@ datafolio snapshot gc [OPTIONS]
 | Option | Description |
 |--------|-------------|
 | `--dry-run` | Show what would be deleted without actually deleting |
-| `--verbose, -v` | Show detailed information |
 
 **Examples:**
 
@@ -488,27 +529,20 @@ datafolio snapshot gc --dry-run
 
 # Actually perform cleanup
 datafolio snapshot gc
-
-# Verbose output
-datafolio snapshot gc --verbose
 ```
 
 **Output:**
+
+Dry run:
 ```
-Scanning for orphaned versions...
-
-Would delete (3):
-  - results.v1.parquet (orphaned since v1.0 deleted)
-  - old_model.v2.pkl (no longer referenced)
-  - temp_data.v1.parquet (orphaned)
-
-Total space to free: 45.2 MB
-
-Run without --dry-run to perform cleanup
+Would delete 1 orphaned version(s):
+  • results--r3.parquet
 ```
 
----
-
+Real run:
+```
+✓ Deleted 1 orphaned version(s)
+```
 
 ---
 
@@ -520,7 +554,7 @@ Run without --dry-run to perform cleanup
 
 ```bash
 # Initialize new bundle
-datafolio init my_analysis
+datafolio init my_analysis -d "My analysis"
 
 # Work with Python to add data...
 # (see Python API documentation)
@@ -553,11 +587,11 @@ datafolio snapshot diff
 #### 3. Validate and Inspect Bundles
 
 ```bash
-# Validate bundle structure
+# Validate bundle structure and payload integrity
 datafolio validate /path/to/bundle
 
 # View detailed description
-datafolio -f /path/to/bundle describe --verbose
+datafolio -f /path/to/bundle describe
 
 # List all snapshots
 datafolio -f /path/to/bundle snapshot list
@@ -570,7 +604,7 @@ datafolio -f /path/to/bundle snapshot list
 datafolio snapshot list
 
 # Delete old experiments
-datafolio snapshot delete old_experiment
+datafolio snapshot delete old_experiment -y
 
 # Clean up orphaned versions
 datafolio snapshot gc
@@ -604,8 +638,8 @@ datafolio -f my_analysis describe
 ```
 
 ```python
-# Python: Load snapshot later
-folio = datafolio.DataFolio.load_snapshot('v1.0')
+# Python: Load snapshot later (path first, then snapshot name)
+folio = datafolio.DataFolio.load_snapshot('my_analysis', 'v1.0')
 results = folio.get('results')
 ```
 
@@ -615,7 +649,7 @@ results = folio.get('results')
 
 | Variable | Description |
 |----------|-------------|
-| `DATAFOLIO_PATH` | Default path for folio operations |
+| `DATAFOLIO_PATH` | Default path for folio operations (local paths only) |
 
 **Example:**
 
@@ -648,27 +682,20 @@ fi
 DATE=$(date +%Y-%m-%d)
 datafolio -f /data/bundle snapshot create "daily_$DATE" \
     -d "Daily backup" \
-    --tags "automated,backup"
-
-# Cleanup old snapshots (keep last 7 days)
-# ... (custom logic to delete old snapshots)
+    -t automated -t backup
 
 echo "Backup complete: daily_$DATE"
 ```
 
-### JSON Output for Processing
+### Structured Output for Processing
+
+The CLI prints human-readable output only. For machine-readable data, use the
+Python API, which returns plain dicts and lists:
 
 ```bash
-# Get bundle info as JSON
-INFO=$(datafolio describe --json)
-
-# Extract item count using jq
-TABLE_COUNT=$(echo "$INFO" | jq '.tables | length')
-echo "Bundle has $TABLE_COUNT tables"
-
-# List snapshots as JSON
-SNAPSHOTS=$(datafolio snapshot list --json)
-LATEST=$(echo "$SNAPSHOTS" | jq -r '.[0].name')
+# Name of the most recent snapshot
+LATEST=$(python -c "from datafolio import DataFolio; \
+    print(DataFolio('/data/bundle', read_only=True).list_snapshots()[0]['name'])")
 echo "Latest snapshot: $LATEST"
 ```
 
@@ -679,8 +706,7 @@ echo "Latest snapshot: $LATEST"
 | Code | Meaning |
 |------|---------|
 | 0 | Success |
-| 1 | Error (invalid arguments, bundle not found, operation failed) |
-| 2 | Validation failed (for `validate` command) |
+| 1 | Error (invalid arguments, bundle not found, validation failed, operation failed) |
 
 ---
 

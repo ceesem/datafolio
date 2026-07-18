@@ -24,9 +24,9 @@ class ArtifactHandler(BaseHandler):
         >>> handler = ArtifactHandler()
         >>> register_handler(handler)
         >>>
-        >>> # Handler is used automatically by DataFolio
-        >>> folio.add_artifact('config', '/path/to/config.yaml')
-        >>> path = folio.get_artifact_path('config')
+        >>> # Files enter the folio via the explicit add_file() verb
+        >>> folio.add_file('/path/to/config.yaml', name='config')
+        >>> path = folio.get('config')
     """
 
     @property
