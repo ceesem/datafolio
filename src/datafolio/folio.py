@@ -1,6 +1,7 @@
 """Main DataFolio class for bundling analysis artifacts."""
 
 import contextlib
+import copy
 import fnmatch
 from datetime import datetime, timezone
 from pathlib import Path
@@ -322,8 +323,11 @@ class DataFolio(SnapshotMixin, ContextCaptureMixin):
             self._bundle_path = Path(self._bundle_dir)
             self._is_new = True
 
-            # Initialize metadata with timestamps and version info
-            self._metadata_raw = metadata or {}
+            # Initialize metadata with timestamps and version info. Deep-copy
+            # the caller's dict: the folio owns its state, so neither the
+            # stamps added below nor later caller mutations of nested values
+            # may cross the boundary.
+            self._metadata_raw = copy.deepcopy(metadata) if metadata else {}
             now = datetime.now(timezone.utc).isoformat()
             if "created_at" not in self._metadata_raw:
                 self._metadata_raw["created_at"] = now
@@ -767,13 +771,15 @@ For more information, see the [datafolio documentation](https://github.com/casey
             → verify the committed manifest revision ONCE (fail closed)
             → snapshot the committed in-memory state
             → [caller mutates state and publishes via _save_items()]
-            → on ANY exception: restore the committed in-memory state
+            → on an exception before publication: restore the committed
+              in-memory state (after a successful publish, memory matches
+              disk and stays — post-publish steps are best-effort)
             → release the lock
 
-        The state snapshot is taken at entry and restored on any failure —
-        payload errors, mid-loop exceptions, failed publishes — so no
-        partially applied mutation can ever leak into a later commit, and no
-        per-method rollback handling is needed. (Under the single-writer
+        The state snapshot is taken at entry and restored when a failure
+        precedes the manifest publish — payload errors, mid-loop exceptions,
+        failed publishes — so no partially applied mutation can ever leak
+        into a later commit, and no per-method rollback handling is needed. (Under the single-writer
         contract this is equivalent to mutating a private working copy and
         installing it after publication; restore-on-failure keeps intra-
         mutation reads, e.g. lineage checks during delete, trivially
@@ -996,7 +1002,20 @@ For more information, see the [datafolio documentation](https://github.com/casey
             ConcurrentWriteError: If the on-disk manifest is newer than ours.
         """
         if self._manifest_revision is None:
-            return  # nothing loaded/written yet (fresh bundle)
+            # Fresh creator: nothing loaded/written yet. The initial publish
+            # is only legitimate while items.json is still absent — if one
+            # appeared while this constructor waited for the lock, another
+            # creator won the race and overwriting would destroy their
+            # committed state. (A crash husk has no items.json, so husk
+            # recovery still passes.)
+            if self._storage.exists(path):
+                raise ConcurrentWriteError(
+                    f"items.json appeared at {self._bundle_dir} while this "
+                    f"folio was being created — another process created the "
+                    f"same folio concurrently. Open the existing folio "
+                    f"instead (or create with random_suffix=True)."
+                )
+            return
 
         # FAIL CLOSED from here on: we have loaded a committed manifest, so a
         # missing/unreadable/malformed one at write time means we cannot rule
@@ -1397,7 +1416,14 @@ For more information, see the [datafolio documentation](https://github.com/casey
                 disk_revision = int(on_disk.get("revision", 0) or 0)
             else:
                 disk_revision = 0  # legacy pre-versioning manifest
-            return disk_revision != (self._manifest_revision or 0)
+            # Only a HIGHER on-disk revision triggers auto-refresh (the
+            # normal another-writer-advanced case). A LOWER one means the
+            # manifest was replaced, rolled back, or externally edited —
+            # adopting it silently would launder the replacement past the
+            # exact-revision write check, so reads keep serving committed
+            # memory and the next write fails closed. Explicit refresh()
+            # or reopening accepts the replacement deliberately.
+            return disk_revision > (self._manifest_revision or 0)
         except Exception:
             # If we can't read/parse the manifest, keep serving what we have
             return False
@@ -1423,8 +1449,10 @@ For more information, see the [datafolio documentation](https://github.com/casey
     def refresh(self) -> Self:
         """Explicitly refresh manifests from disk/cloud.
 
-        This reloads items.json and metadata.json from the bundle directory,
-        syncing the in-memory state with any external updates.
+        This reloads the manifest (items.json) from the bundle directory,
+        syncing the in-memory state with any external updates — including
+        deliberately accepting a manifest that was replaced or rolled back
+        (which auto-refresh never adopts).
 
         Useful when working with multiple DataFolio instances pointing to
         the same bundle, or when the bundle is updated by another process.
@@ -1556,7 +1584,6 @@ For more information, see the [datafolio documentation](https://github.com/casey
         results = {}
         for name, item in self._items.items():
             item_type = item.get("item_type")
-            is_valid = False
             try:
                 results[name] = self._validate_one(item_type, item)
             except Exception:
@@ -1566,34 +1593,33 @@ For more information, see the [datafolio documentation](https://github.com/casey
                 results[name] = False
         return results
 
-    def _validate_one(self, item_type, item) -> bool:
+    def _validate_one(self, item_type: Optional[str], item: Dict[str, Any]) -> bool:
         """Validate a single item (existence + checksum where available)."""
-        if True:
-            is_valid = False
+        is_valid = False
 
-            if item_type == "referenced_table":
-                # For references, just check existence (resolve relative paths
-                # against the bundle so portable references validate correctly).
-                path = item.get("path")
-                if path:
-                    is_valid = self._storage.exists(self._resolve_reference_path(path))
-            elif "filename" in item:
-                # For included items, check existence in bundle
-                # Get handler to find subdir
-                handler = get_registry().get(item_type)
-                subdir = handler.get_storage_subdir()
-                filepath = self._storage.join_paths(
-                    self._bundle_dir, subdir, item["filename"]
-                )
-                is_valid = self._storage.exists(filepath)
+        if item_type == "referenced_table":
+            # For references, just check existence (resolve relative paths
+            # against the bundle so portable references validate correctly).
+            path = item.get("path")
+            if path:
+                is_valid = self._storage.exists(self._resolve_reference_path(path))
+        elif "filename" in item:
+            # For included items, check existence in bundle
+            # Get handler to find subdir
+            handler = get_registry().get(item_type)
+            subdir = handler.get_storage_subdir()
+            filepath = self._storage.join_paths(
+                self._bundle_dir, subdir, item["filename"]
+            )
+            is_valid = self._storage.exists(filepath)
 
-                # Check checksum if available and file exists
-                if is_valid and "checksum" in item:
-                    current_checksum = self._storage.calculate_checksum(filepath)
-                    if current_checksum != item["checksum"]:
-                        is_valid = False
+            # Check checksum if available and file exists
+            if is_valid and "checksum" in item:
+                current_checksum = self._storage.calculate_checksum(filepath)
+                if current_checksum != item["checksum"]:
+                    is_valid = False
 
-            return is_valid
+        return is_valid
 
     def is_valid(self) -> bool:
         """Check if the entire bundle is valid.
@@ -2852,7 +2878,9 @@ For more information, see the [datafolio documentation](https://github.com/casey
                     # Empty list removes the field
                     item.pop("inputs", None)
                 else:
-                    item["inputs"] = inputs
+                    # Own the list: later caller mutations must not reach
+                    # the manifest through a retained alias.
+                    item["inputs"] = list(inputs)
 
             # Save updated manifest; a failed publish must not leave the
             # edit (or its copy-on-write) to leak via a later mutation.

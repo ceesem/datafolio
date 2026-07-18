@@ -26,8 +26,8 @@ class MetadataDict(dict):
     Examples:
         >>> folio = DataFolio('experiment')
         >>> folio.metadata['experiment_name'] = 'test'
-        # Automatically commits to metadata.json (and advances the bundle
-        # revision in items.json)
+        # Automatically commits to the items.json manifest (advancing the
+        # bundle revision other instances detect)
 
         >>> folio.metadata.update({'author': 'Alice', 'version': '1.0'})
         # One commit for the whole update
@@ -97,10 +97,18 @@ class MetadataDict(dict):
             self._touch()
 
     def __ior__(self, other: Any) -> "MetadataDict":
-        """Support ``metadata |= other`` with commit and read-only semantics."""
+        """Support ``metadata |= other`` with commit and read-only semantics.
+
+        Same staging contract as :meth:`update`: the input is materialized
+        BEFORE the live dict is touched, so an iterator that raises partway
+        through cannot leave partial keys behind (even when the caller
+        catches the exception inside a batch).
+        """
         self._check_writable()
+        staged: dict = {}
+        staged.update(other)
         with self._mutation():
-            super().update(other)
+            super().update(staged)
             self._touch()
         return self
 

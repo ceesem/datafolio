@@ -159,7 +159,11 @@ preserve or guarantee the contents of referenced data.**
 
 - Readers never take the lock; every read entry point calls
   `_refresh_if_needed()` (a cheap comparison of the on-disk `items.json`
-  revision against the loaded one).
+  revision against the loaded one). Auto-refresh only adopts a *higher*
+  on-disk revision; a lower one means the manifest was replaced or rolled
+  back, so reads keep serving committed memory, the next write fails
+  closed, and only an explicit `refresh()` (or reopening) accepts the
+  replacement.
 - Payload checksums are computed at write time and verified only by
   `validate()` — `get()` never verifies them on read.
 - Local writers serialize on `items.json.lock` (a `filelock` reentrant lock)

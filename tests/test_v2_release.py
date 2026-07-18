@@ -352,3 +352,141 @@ class TestBehavioralLows:
         folio = DataFolio(husk)
         folio.add("x", 1)
         assert DataFolio(husk).get("x") == 1
+
+
+# ============================================================================
+# Audit round 5 (post-release-round review)
+# ============================================================================
+
+
+class TestRollbackNotLaundered:
+    def test_read_does_not_adopt_lower_revision(self, tmp_path):
+        """Auto-refresh must not adopt a LOWER on-disk revision: reading
+        first would otherwise launder a rolled-back/replaced manifest past
+        the exact-revision write check."""
+        from datafolio import ManifestReadError
+
+        path = tmp_path / "b"
+        folio = DataFolio(path)
+        folio.add("x", 1)
+        folio.add("z", 3)
+        loaded_rev = folio._manifest_revision
+
+        manifest = json.loads((path / "items.json").read_text())
+        manifest["revision"] = 0
+        (path / "items.json").write_text(json.dumps(manifest))
+
+        # Reads keep serving committed memory, not the replaced manifest
+        _ = folio.tables
+        _ = folio.list_contents()
+        assert folio._manifest_revision == loaded_rev
+
+        # And the next write still fails closed
+        with pytest.raises((ConcurrentWriteError, ManifestReadError)):
+            folio.add("y", 2)
+
+    def test_explicit_refresh_accepts_replacement(self, tmp_path):
+        """refresh() remains the deliberate way to adopt a replaced manifest."""
+        path = tmp_path / "b"
+        folio = DataFolio(path)
+        folio.add("x", 1)
+
+        manifest = json.loads((path / "items.json").read_text())
+        manifest["revision"] = 0
+        (path / "items.json").write_text(json.dumps(manifest))
+
+        folio.refresh()
+        assert folio._manifest_revision == 0
+
+    def test_higher_revision_still_auto_refreshes(self, tmp_path):
+        path = tmp_path / "b"
+        a = DataFolio(path)
+        a.add("x", 1)
+        b = DataFolio(path)
+        a.add("y", 2)
+        assert "y" in b.list_contents()["json_data"] or "y" in str(b.list_contents())
+
+
+class TestConcurrentCreationRace:
+    def test_second_creator_fails_instead_of_overwriting(self, tmp_path, monkeypatch):
+        """Two constructors racing to create the same new folio: the loser
+        must raise ConcurrentWriteError, not overwrite the winner."""
+        target = tmp_path / "shared"
+        state = {"raced": False}
+        original_save = DataFolio._save_items
+
+        def racing_save(self):
+            # On the loser's initial publish, simulate another process
+            # completing creation of the same folio between the loser's
+            # existence check and its first manifest write.
+            if not state["raced"] and self._manifest_revision is None:
+                state["raced"] = True
+                winner = DataFolio(target)
+                winner.metadata["owner"] = "first"
+            return original_save(self)
+
+        monkeypatch.setattr(DataFolio, "_save_items", racing_save)
+        with pytest.raises(ConcurrentWriteError):
+            DataFolio(target)
+
+        survivor = DataFolio(target)
+        assert survivor.metadata["owner"] == "first"
+
+
+class TestCallerInputOwnership:
+    def test_constructor_metadata_not_mutated_or_aliased(self, tmp_path):
+        meta = {"params": {"lr": 0.1}}
+        folio = DataFolio(tmp_path / "b", metadata=meta)
+
+        # The caller's dict must not grow timestamps/version stamps
+        assert "created_at" not in meta
+        assert "_datafolio" not in meta
+
+        # ...and later caller mutations must not leak into a folio save
+        meta["params"]["lr"] = 999
+        folio.add("x", 1)
+        again = DataFolio(tmp_path / "b")
+        assert again.metadata["params"]["lr"] == 0.1
+
+    def test_add_inputs_list_copied(self, tmp_path):
+        folio = DataFolio(tmp_path / "b")
+        folio.add("a", 1)
+        ins = ["a"]
+        folio.add("b", pd.DataFrame({"v": [1]}), inputs=ins)
+        ins.append("evil")
+        folio.metadata["note"] = "unrelated save"
+        again = DataFolio(tmp_path / "b")
+        assert again.get_inputs("b") == ["a"]
+
+    def test_update_item_inputs_list_copied(self, tmp_path):
+        folio = DataFolio(tmp_path / "b")
+        folio.add("a", 1)
+        folio.add("b", 2)
+        ins = ["a"]
+        folio.update_item("b", inputs=ins)
+        ins.append("evil")
+        folio.metadata["note"] = "unrelated save"
+        again = DataFolio(tmp_path / "b")
+        assert again.get_inputs("b") == ["a"]
+
+
+class TestIorPoisonedIterator:
+    def test_ior_partial_keys_not_committed(self, tmp_path):
+        """metadata |= <iterator that raises midway>, caught inside a batch,
+        must not commit the partially inserted keys (same staging contract
+        as update())."""
+        folio = DataFolio(tmp_path / "b")
+
+        def pairs():
+            yield ("good", 1)
+            raise RuntimeError("boom")
+
+        with folio.batch():
+            try:
+                folio.metadata |= pairs()
+            except RuntimeError:
+                pass
+            folio.add("x", 1)
+
+        again = DataFolio(tmp_path / "b")
+        assert "good" not in again.metadata

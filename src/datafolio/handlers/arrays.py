@@ -137,7 +137,7 @@ class NumpyHandler(BaseHandler):
         if description:
             metadata["description"] = description
         if inputs:
-            metadata["inputs"] = inputs
+            metadata["inputs"] = list(inputs)
 
         return metadata
 
