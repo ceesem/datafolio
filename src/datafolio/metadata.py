@@ -33,16 +33,18 @@ class MetadataDict(dict):
         # One commit for the whole update
     """
 
-    def __init__(self, parent: "DataFolio", *args, **kwargs):
+    def __init__(self, parent: "DataFolio", data: "dict | None" = None):
         """Initialize MetadataDict with parent reference.
 
         Args:
             parent: Parent DataFolio instance for callbacks
-            *args: Positional arguments for dict
-            **kwargs: Keyword arguments for dict
+            data: Optional initial contents (a mapping). Passed positionally
+                — NEVER as **kwargs, so user metadata keys named 'parent',
+                'self', or 'data' cannot collide with parameter names (a
+                collision here used to make the folio unopenable).
         """
         # Initialize parent AFTER super().__init__() to avoid triggering saves during initialization
-        super().__init__(*args, **kwargs)
+        super().__init__(data or {})
         self._parent = parent
 
     def _check_writable(self) -> None:
@@ -81,10 +83,17 @@ class MetadataDict(dict):
             self._touch()
 
     def update(self, *args, **kwargs) -> None:
-        """Update dict and commit once."""
+        """Update dict and commit once.
+
+        The input is materialized BEFORE the live dict is touched, so an
+        iterator that raises partway through cannot leave partial keys
+        behind (even when the caller catches the exception inside a batch).
+        """
         self._check_writable()
+        staged: dict = {}
+        staged.update(*args, **kwargs)
         with self._mutation():
-            super().update(*args, **kwargs)
+            super().update(staged)
             self._touch()
 
     def __ior__(self, other: Any) -> "MetadataDict":

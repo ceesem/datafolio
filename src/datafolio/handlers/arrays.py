@@ -91,6 +91,16 @@ class NumpyHandler(BaseHandler):
         if not isinstance(data, np.ndarray):
             raise TypeError(f"Expected numpy array, got {type(data).__name__}")
 
+        if isinstance(data, np.ma.MaskedArray):
+            # np.save either fails deep in numpy or silently drops the mask
+            # depending on version — refuse clearly instead.
+            raise ValueError(
+                f"Cannot store array '{name}': masked arrays are not "
+                f"supported by the .npy round-trip (the mask would be lost). "
+                f"Store data and mask separately (e.g. arr.data and "
+                f"arr.mask), or use arr.filled(fill_value)."
+            )
+
         if data.dtype.hasobject:
             # np.save writes object arrays with pickle, but np.load refuses
             # them by default — the write would succeed and every read fail.

@@ -144,6 +144,12 @@ class DataframeHandler(BaseHandler):
 
         index_columns = []
         index_names: list = []
+        if kwargs.get("preserve_index") and not self._is_pandas(data):
+            raise TypeError(
+                f"preserve_index=True is only meaningful for pandas "
+                f"DataFrames (table '{name}' is "
+                f"{type(data).__name__}; polars frames have no index)."
+            )
         if self._is_polars_lazy(data):
             # Streaming, bounded-memory materialization. The footer is read from
             # the local staging file, so a cloud write never re-downloads the

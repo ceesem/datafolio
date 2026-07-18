@@ -287,10 +287,12 @@ class SnapshotAccessor:
 
     def values(self):
         """Get SnapshotView objects for all snapshots."""
+        self._folio._refresh_if_needed()
         return [SnapshotView(self._folio, name) for name in self._folio._snapshots]
 
     def items(self):
         """Get (name, SnapshotView) pairs."""
+        self._folio._refresh_if_needed()
         return [
             (name, SnapshotView(self._folio, name)) for name in self._folio._snapshots
         ]
@@ -387,69 +389,72 @@ class SnapshotMixin:
         # Validate snapshot name
         validate_snapshot_name(name)
 
-        # Check if snapshot already exists
-        if name in self._snapshots:
-            raise ValueError(f"Snapshot '{name}' already exists")
+        # Sync with other writers BEFORE the guard (refresh is suppressed
+        # inside it): an up-to-date instance snapshots the current committed
+        # state; a stale one (auto-refresh disabled) fails in the guard.
+        self._refresh_if_needed()
 
-        # Capture current item versions by their stable ``version_id``. Every
-        # version persisted by this build has one; it works uniformly for owned
-        # items (checksummed) and external references (no checksum), so the
-        # snapshot pins the exact descriptor and reopening resolves it again.
-        # Legacy items lacking a version_id get one assigned now (from their
-        # checksum where available) and it is persisted with this snapshot.
-        # NOTE: this backfill mutates legacy descriptors in memory; on a
-        # failed publication the mutation guard's spine discards it.
-        item_versions: Dict[str, str] = {}
-        for item_name, item_meta in self._items.items():
-            version_id = item_meta.get("version_id")
-            if not version_id:
-                version_id = item_meta.get("checksum") or self._next_version_id(
-                    item_name
-                )
-                item_meta["version_id"] = version_id
-            item_versions[item_name] = version_id
-
-        # Capture current metadata state (DEEP copy: later nested edits of
-        # the live metadata must not rewrite what the snapshot recorded)
-        import copy as _copy
-
-        metadata_snapshot = (
-            _copy.deepcopy(dict(self.metadata)) if hasattr(self, "metadata") else {}
-        )
-
-        # Build snapshot metadata
-        snapshot_meta: Dict[str, Any] = {
-            "name": name,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "item_versions": item_versions,
-            "metadata_snapshot": metadata_snapshot,
-        }
-
-        # Add optional fields
-        if description:
-            snapshot_meta["description"] = description
-        if tags:
-            snapshot_meta["tags"] = tags
-        else:
-            snapshot_meta["tags"] = []
-
-        # Capture context
+        # Slow external context capture happens OUTSIDE the write lock (git
+        # subprocesses, filesystem probes). It reads no folio state.
+        context: Dict[str, Any] = {}
         if capture_git:
             git_info = self._capture_git_info()
             if git_info:
-                snapshot_meta["git"] = git_info
-
+                context["git"] = git_info
         if capture_environment:
-            snapshot_meta["environment"] = self._capture_environment_info()
-
+            context["environment"] = self._capture_environment_info()
         if capture_execution:
-            snapshot_meta["execution"] = self._capture_execution_info()
+            context["execution"] = self._capture_execution_info()
 
-        # Publish under the mutation guard: a stale notebook fails here,
-        # BEFORE any in-memory state or the manifest is touched. The registry
-        # entry and any backfilled version_ids commit in ONE atomic manifest
-        # write (membership is derived from the registry — no markers).
+        # EVERYTHING that reads or mutates folio state happens inside the
+        # guard: the duplicate-name check, the item-version capture (with its
+        # legacy version_id backfill), and the metadata copy. Capturing any
+        # of it before the guard would let auto-refresh replace the state
+        # mid-capture — a stale notebook could launder its staleness through
+        # a metadata read and commit a snapshot pinning versions that no
+        # longer exist. Inside the guard, refresh is suppressed and the
+        # stale-writer check has already run, so the capture is one
+        # consistent revision.
         with self._mutation_guard():
+            if name in self._snapshots:
+                raise ValueError(f"Snapshot '{name}' already exists")
+
+            # Capture current item versions by their stable ``version_id``.
+            # Legacy items lacking one get it assigned now (from their
+            # checksum where available); the guard's spine discards the
+            # backfill on a failed publication.
+            item_versions: Dict[str, str] = {}
+            for item_name, item_meta in self._items.items():
+                version_id = item_meta.get("version_id")
+                if not version_id:
+                    version_id = item_meta.get("checksum") or self._next_version_id(
+                        item_name
+                    )
+                    item_meta["version_id"] = version_id
+                item_versions[item_name] = version_id
+
+            # Capture current metadata state (DEEP copy: later nested edits
+            # of the live metadata must not rewrite the snapshot's record)
+            import copy as _copy
+
+            md = getattr(self, "_metadata_dict", None)
+            metadata_snapshot = _copy.deepcopy(dict(md)) if md is not None else {}
+
+            snapshot_meta: Dict[str, Any] = {
+                "name": name,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "item_versions": item_versions,
+                "metadata_snapshot": metadata_snapshot,
+                # Defensive copy: the caller's list must not stay live-wired
+                # into the registry
+                "tags": list(tags) if tags else [],
+            }
+            if description:
+                snapshot_meta["description"] = description
+            snapshot_meta.update(context)
+
+            # The registry entry and any backfilled version_ids commit in ONE
+            # atomic manifest write (membership derived from the registry).
             self._snapshots[name] = snapshot_meta
             self._save_items()
 
@@ -489,13 +494,14 @@ class SnapshotMixin:
             >>> for snap in snapshots:
             ...     print(f"{snap['name']}: {snap['description']}")
         """
+        self._refresh_if_needed()
         result = []
         for name, meta in self._snapshots.items():
             snapshot_info = {
                 "name": name,
                 "timestamp": meta.get("timestamp", ""),
                 "description": meta.get("description"),
-                "tags": meta.get("tags", []),
+                "tags": list(meta.get("tags", [])),
                 "num_items": len(meta.get("item_versions", {})),
             }
             result.append(snapshot_info)
@@ -578,6 +584,7 @@ class SnapshotMixin:
             >>> print(diff['metadata_changes']['accuracy'])
             (0.89, 0.91)
         """
+        self._refresh_if_needed()
         if snapshot1 not in self._snapshots:
             raise KeyError(f"Snapshot '{snapshot1}' not found")
         if snapshot2 not in self._snapshots:
@@ -661,6 +668,8 @@ class SnapshotMixin:
             >>> print(f"Added since v1.0: {diff['added_items']}")
             ['new_feature']
         """
+        self._refresh_if_needed()
+
         # Get snapshot to compare to
         if snapshot is None:
             # Use most recent snapshot (list_snapshots() sorts newest-first)
@@ -1210,6 +1219,7 @@ class SnapshotMixin:
             >>> print(info['metadata_snapshot']['accuracy'])
             0.89
         """
+        self._refresh_if_needed()
         if snapshot not in self._snapshots:
             raise KeyError(f"Snapshot '{snapshot}' not found")
 

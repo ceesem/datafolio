@@ -334,6 +334,7 @@ class DataAccessor:
             ("Models", contents["models"]),
             ("Numpy Arrays", contents["numpy_arrays"]),
             ("JSON Data", contents["json_data"]),
+            ("Timestamps", contents["timestamps"]),
             ("Artifacts", contents["artifacts"]),
         ]:
             if item_list:

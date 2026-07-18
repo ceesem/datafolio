@@ -241,6 +241,9 @@ class DataFolio(SnapshotMixin, ContextCaptureMixin):
         self._lock_timeout: float = DEFAULT_LOCK_TIMEOUT
         # Depth of the active mutation guard (reentrancy counter).
         self._mutation_depth: int = 0
+        # Whether the current transaction has committed its manifest write
+        # (set by _save_items; consulted by the guard's rollback).
+        self._tx_published: bool = False
         # Version ids / payload filenames reserved during this instance's
         # lifetime, so repeated replacements of the same logical item (e.g.
         # within a single batch, before the revision advances) never collide.
@@ -259,6 +262,11 @@ class DataFolio(SnapshotMixin, ContextCaptureMixin):
 
         # Check if path is an existing bundle (has metadata.json or items.json)
         path_str = str(path)
+        # A file:// URI is a LOCAL path wearing a scheme: strip it so the
+        # bundle gets the local lock and atomic manifest writes (treating it
+        # as "cloud" silently dropped both on the same physical directory).
+        if path_str.startswith("file://"):
+            path_str = path_str[len("file://") :]
         metadata_path = self._storage.join_paths(path_str, METADATA_FILE)
         items_path = self._storage.join_paths(path_str, ITEMS_FILE)
 
@@ -284,7 +292,7 @@ class DataFolio(SnapshotMixin, ContextCaptureMixin):
             self._is_new = False
             self._load_manifests()
             # Initialize metadata from file
-            self.metadata = MetadataDict(self, **self._metadata_raw)
+            self.metadata = MetadataDict(self, self._metadata_raw)
         else:
             # Create new bundle
             if random_suffix:
@@ -331,7 +339,7 @@ class DataFolio(SnapshotMixin, ContextCaptureMixin):
                     "created_by": "datafolio",
                 }
 
-            self.metadata = MetadataDict(self, **self._metadata_raw)
+            self.metadata = MetadataDict(self, self._metadata_raw)
 
             # Create directory structure with retries on collision
             self._initialize_bundle()
@@ -370,10 +378,13 @@ class DataFolio(SnapshotMixin, ContextCaptureMixin):
                 f"folio.metadata['key'] = value or folio.metadata.update()."
             )
         self._check_read_only()
-        replacement = MetadataDict(self)
-        dict.update(replacement, value)
-        self._metadata_dict = replacement
+        # Install INSIDE the guard: the transaction spine's backup must
+        # capture the previous metadata, so a failed publish restores the
+        # committed state (not the rejected replacement).
         with self._metadata_mutation():
+            replacement = MetadataDict(self)
+            dict.update(replacement, value)
+            self._metadata_dict = replacement
             replacement._touch()
 
     def _sync_data_accessor(self) -> None:
@@ -557,7 +568,22 @@ For more information, see the [datafolio documentation](https://github.com/casey
         prefixes with no objects already read as nonexistent)."""
         try:
             p = Path(path)
-            return p.is_dir() and not any(p.iterdir())
+            if not p.is_dir():
+                return False
+            for child in p.iterdir():
+                # A crash between subdirectory creation and the first
+                # manifest write leaves only empty standard subdirs (and
+                # possibly a lock file) — that husk must reopen cleanly.
+                if (
+                    child.name in (TABLES_DIR, MODELS_DIR, ARTIFACTS_DIR)
+                    and child.is_dir()
+                    and not any(child.iterdir())
+                ):
+                    continue
+                if child.name == ITEMS_FILE + ".lock":
+                    continue
+                return False
+            return True
         except OSError:
             return False
 
@@ -791,6 +817,7 @@ For more information, see the [datafolio documentation](https://github.com/casey
                     f"one writer per bundle."
                 ) from exc
         self._mutation_depth = 1
+        self._tx_published = False
         try:
             # Reject a stale writer BEFORE any payload is written or replaced.
             self._raise_if_manifest_stale(path)
@@ -798,10 +825,16 @@ For more information, see the [datafolio documentation](https://github.com/casey
             try:
                 yield
             except BaseException:
-                self._restore_state(backup)
+                # Publication is the point of no return: restore only if the
+                # manifest was NOT committed. After a successful publish, the
+                # in-memory state matches disk and must stay (post-publish
+                # steps are best-effort and must not unwind the commit).
+                if not self._tx_published:
+                    self._restore_state(backup)
                 raise
         finally:
             self._mutation_depth = 0
+            self._tx_published = False
             if lock is not None:
                 lock.release()
 
@@ -838,7 +871,10 @@ For more information, see the [datafolio documentation](https://github.com/casey
             dict.update(md, metadata)
         else:
             self._metadata_raw = metadata
-        self._sync_data_accessor()
+        try:
+            self._sync_data_accessor()
+        except Exception:
+            pass  # accessor sync is a convenience, never a rollback blocker
 
     @contextlib.contextmanager
     def _metadata_mutation(self):
@@ -916,6 +952,9 @@ For more information, see the [datafolio documentation](https://github.com/casey
                 }
                 self._storage.write_json(path, items_data)
                 self._manifest_revision = next_revision
+                # The commit happened: the transaction spine must never roll
+                # memory back behind this point.
+                self._tx_published = True
 
             # Migration: drop legacy sidecars now embedded in the manifest
             # (best-effort; a leftover sidecar is stale but harmless because
@@ -933,7 +972,12 @@ For more information, see the [datafolio documentation](https://github.com/casey
             self._write_contents()
 
             # Sync data accessor to update autocomplete immediately
-            self._sync_data_accessor()
+            # (best-effort — everything after the publish must be
+            # non-fatal; the commit already happened)
+            try:
+                self._sync_data_accessor()
+            except Exception:
+                pass
         finally:
             # Always clear the flag
             self._in_save_operation = False
@@ -990,12 +1034,21 @@ For more information, see the [datafolio documentation](https://github.com/casey
                 f"manifest (got {type(on_disk).__name__}); refusing to write "
                 f"over a malformed manifest."
             )
-        if disk_revision > self._manifest_revision:
-            raise ConcurrentWriteError(
-                f"items.json was modified by another writer (on-disk revision "
-                f"{disk_revision} > loaded {self._manifest_revision}). Call "
-                f"refresh() and re-apply your change (datafolio supports many "
-                f"readers but one writer per bundle)."
+        if disk_revision != self._manifest_revision:
+            if disk_revision > self._manifest_revision:
+                raise ConcurrentWriteError(
+                    f"items.json was modified by another writer (on-disk "
+                    f"revision {disk_revision} > loaded "
+                    f"{self._manifest_revision}). Call refresh() and re-apply "
+                    f"your change (datafolio supports many readers but one "
+                    f"writer per bundle)."
+                )
+            raise ManifestReadError(
+                f"items.json at {self._bundle_dir} has revision "
+                f"{disk_revision}, but this folio loaded revision "
+                f"{self._manifest_revision} — the manifest was replaced or "
+                f"externally edited. Refusing to overwrite an unverifiable "
+                f"manifest; reopen the folio to accept the on-disk state."
             )
 
     # ==================== Item version / payload naming ====================
@@ -1020,9 +1073,18 @@ For more information, see the [datafolio documentation](https://github.com/casey
         """
         next_rev = (self._manifest_revision or 0) + 1
         base = f"{name}--r{next_rev}"
+        # Never mint an id already present ANYWHERE in the manifest: ids
+        # travel verbatim through copy()/export_snapshot() into folios whose
+        # revision counter restarts, so the per-instance reservation set
+        # alone cannot prevent collisions (a duplicated id would make a
+        # snapshot resolve to the wrong descriptor).
+        existing = {
+            d.get("version_id")
+            for d in list(self._items.values()) + self._snapshot_versions
+        }
         candidate = base
         counter = 1
-        while candidate in self._reserved_version_ids:
+        while candidate in self._reserved_version_ids or candidate in existing:
             candidate = f"{base}-{counter}"
             counter += 1
         self._reserved_version_ids.add(candidate)
@@ -1228,6 +1290,28 @@ For more information, see the [datafolio documentation](https://github.com/casey
         fresh["is_current"] = True
         return fresh
 
+    def _cow_if_pinned(self, name: str) -> Dict[str, Any]:
+        """Return the current descriptor, copy-on-writing it first if a
+        snapshot pins it.
+
+        Metadata-only edits (descriptions, archive flags) must not rewrite a
+        pinned version's recorded state. The new working version shares the
+        payload file (the bytes didn't change); every payload-deletion path
+        checks ``_payload_is_shared`` before removing a file.
+        """
+        item = self._items[name]
+        if not self._is_in_snapshots(name):
+            return item
+        import copy
+
+        new_item = copy.deepcopy(dict(item))
+        self._handle_copy_on_write(name)
+        new_item.pop("in_snapshots", None)  # legacy field
+        new_item["is_current"] = True
+        new_item["version_id"] = self._next_version_id(name)
+        self._items[name] = new_item
+        return new_item
+
     def _commit_owned_item(
         self,
         name: str,
@@ -1386,7 +1470,7 @@ For more information, see the [datafolio documentation](https://github.com/casey
             dict.update(md, self._metadata_raw)
         else:
             # Initial creation (shouldn't happen in refresh, but defensive)
-            self._metadata_dict = MetadataDict(self, **self._metadata_raw)
+            self._metadata_dict = MetadataDict(self, self._metadata_raw)
 
         self._pending_obsolete_payloads = []
         self._sync_data_accessor()
@@ -1462,9 +1546,23 @@ For more information, see the [datafolio documentation](https://github.com/casey
             >>> if not all(status.values()):
             ...     print("Bundle corrupted!")
         """
+        self._refresh_if_needed()
         results = {}
         for name, item in self._items.items():
             item_type = item.get("item_type")
+            is_valid = False
+            try:
+                results[name] = self._validate_one(item_type, item)
+            except Exception:
+                # An unreachable reference or unreadable payload is a
+                # validation FAILURE for that item, not a crash for the
+                # whole report.
+                results[name] = False
+        return results
+
+    def _validate_one(self, item_type, item) -> bool:
+        """Validate a single item (existence + checksum where available)."""
+        if True:
             is_valid = False
 
             if item_type == "referenced_table":
@@ -1489,9 +1587,7 @@ For more information, see the [datafolio documentation](https://github.com/casey
                     if current_checksum != item["checksum"]:
                         is_valid = False
 
-            results[name] = is_valid
-
-        return results
+            return is_valid
 
     def is_valid(self) -> bool:
         """Check if the entire bundle is valid.
@@ -1777,7 +1873,13 @@ For more information, see the [datafolio documentation](https://github.com/casey
             return registry.get("model").get(self, name, trusted=trusted)
         if item_type == "artifact":
             self._reject_unknown_opts(item_type, type_opts)
-            return self.item_path(name)
+            path = self.item_path(name)
+            if not self._storage.exists(path):
+                raise FileNotFoundError(
+                    f"File item '{name}' points at a payload that no longer "
+                    f"exists: {path}"
+                )
+            return path
         if item_type in ("numpy_array", "json_data"):
             self._reject_unknown_opts(item_type, type_opts)
             return registry.get(item_type).get(self, name)
@@ -2113,6 +2215,7 @@ For more information, see the [datafolio documentation](https://github.com/casey
             >>> folio.tables
             ['training', 'results']
         """
+        self._refresh_if_needed()
         return [
             name
             for name, item in self._items.items()
@@ -2132,6 +2235,7 @@ For more information, see the [datafolio documentation](https://github.com/casey
             >>> folio.models
             ['classifier']
         """
+        self._refresh_if_needed()
         return [
             name
             for name, item in self._items.items()
@@ -2151,6 +2255,7 @@ For more information, see the [datafolio documentation](https://github.com/casey
             >>> folio.artifacts
             ['plot']
         """
+        self._refresh_if_needed()
         return [
             name
             for name, item in self._items.items()
@@ -2428,6 +2533,17 @@ For more information, see the [datafolio documentation](https://github.com/casey
 
         validate_table_format(table_format)
 
+        # Delta/Iceberg layouts are rejected explicitly by table_format; also
+        # catch the obvious path spellings so a defaulted format can't
+        # silently record a Delta table as "parquet".
+        lowered = str(path).rstrip("/").lower()
+        if lowered.endswith((".delta", ".iceberg")) or lowered.endswith("_delta_log"):
+            raise ValueError(
+                f"Path '{path}' looks like a Delta/Iceberg table, which "
+                f"datafolio does not support. Convert it to plain Parquet "
+                f"first, then reference that."
+            )
+
         # Uniform overwrite rule (same as add()): replacing ANY existing
         # item requires overwrite=True; a snapshotted prior version is then
         # preserved via copy-on-write.
@@ -2512,11 +2628,13 @@ For more information, see the [datafolio documentation](https://github.com/casey
             except Exception:
                 size = None
         if size is not None and size > limit:
-            size_mb = size / (1024 * 1024)
-            limit_mb = limit / (1024 * 1024)
+
+            def _human(n: float) -> str:
+                return f"~{n / 1048576:.1f} MB" if n >= 1048576 else f"{n:.0f} bytes"
+
             raise ValueError(
-                f"Table '{name}' is ~{size_mb:.0f} MB, above the "
-                f"{limit_mb:.0f} MB eager-load limit. Use scan_table('{name}') "
+                f"Table '{name}' is {_human(size)}, above the "
+                f"{_human(limit)} eager-load limit. Use scan_table('{name}') "
                 f"for a lazy polars scan with predicate/projection pushdown "
                 f"(pip install 'datafolio[polars]' if needed), or pass "
                 f"allow_full_load=True (or set max_eager_bytes=None) to "
@@ -2713,22 +2831,7 @@ For more information, see the [datafolio documentation](https://github.com/casey
             raise KeyError(f"Item '{name}' not found in DataFolio")
 
         with self._mutation_guard():
-            item = self._items[name]
-
-            if self._is_in_snapshots(name):
-                # Copy-on-write: the snapshot must keep seeing the metadata it
-                # pinned. The new working version shares the payload file (the
-                # bytes didn't change); every payload-deletion path checks
-                # _payload_is_shared before removing a file.
-                import copy
-
-                new_item = copy.deepcopy(dict(item))
-                self._handle_copy_on_write(name)
-                new_item.pop("in_snapshots", None)  # legacy field
-                new_item["is_current"] = True
-                new_item["version_id"] = self._next_version_id(name)
-                self._items[name] = new_item
-                item = new_item
+            item = self._cow_if_pinned(name)
 
             # Update fields if provided
             if description is not None:
@@ -2898,7 +3001,9 @@ For more information, see the [datafolio documentation](https://github.com/casey
 
         with self._mutation_guard():
             for n in names_to_archive:
-                self._items[n]["archived"] = True
+                # A pinned version's recorded state must not change post-hoc:
+                # copy-on-write the descriptor like update_item does.
+                self._cow_if_pinned(n)["archived"] = True
             self._save_items()
         return self
 
@@ -2950,7 +3055,7 @@ For more information, see the [datafolio documentation](https://github.com/casey
 
         with self._mutation_guard():
             for n in names_to_unarchive:
-                self._items[n].pop("archived", None)
+                self._cow_if_pinned(n).pop("archived", None)
             self._save_items()
         return self
 
@@ -3164,14 +3269,26 @@ For more information, see the [datafolio documentation](https://github.com/casey
         if include_items is not None and exclude_items is not None:
             raise ValueError("Cannot specify both include_items and exclude_items")
 
+        if include_items is not None:
+            unknown = [n for n in include_items if n not in self._items]
+            if unknown:
+                raise KeyError(
+                    f"copy(include_items=...) names not present in this "
+                    f"folio: {unknown}. (A typo here would otherwise produce "
+                    f"a silently empty copy.)"
+                )
+
         # Construct full path for new bundle
         if name is not None:
             new_path = self._storage.join_paths(str(path), name)
         else:
             new_path = str(path)
 
-        # Create new bundle
-        new_metadata = dict(self.metadata)
+        # Create new bundle (deep copy: nested metadata objects must not be
+        # shared between the source and the destination instances)
+        import copy as _copy
+
+        new_metadata = _copy.deepcopy(dict(self.metadata))
         if metadata_updates:
             new_metadata.update(metadata_updates)
 

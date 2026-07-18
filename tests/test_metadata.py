@@ -68,20 +68,14 @@ def test_init_with_data(mock_folio):
     mock_folio._save_metadata.assert_not_called()
 
 
-def test_init_with_kwargs(mock_folio):
-    """Test initializing MetadataDict with keyword arguments."""
-    md = MetadataDict(mock_folio, name="test", version="1.0")
-
-    assert len(md) == 2
-    assert md["name"] == "test"
-    assert md["version"] == "1.0"
-    # Should not trigger save during initialization
-    mock_folio._save_metadata.assert_not_called()
-
-
-# ============================================================================
-# Test __setitem__
-# ============================================================================
+def test_init_with_reserved_key_names(mock_folio):
+    """Keys named like constructor parameters must not collide (a **kwargs
+    collision here used to make folios with a 'parent' key unopenable)."""
+    md = MetadataDict(mock_folio, {"parent": "exp-1", "self": "x", "data": 1})
+    assert md["parent"] == "exp-1"
+    assert md["self"] == "x"
+    assert md["data"] == 1
+    assert md._parent is mock_folio
 
 
 def test_setitem_triggers_save(mock_folio):

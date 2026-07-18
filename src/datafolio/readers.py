@@ -53,8 +53,13 @@ def _read_file(
         fbin = cf.get(filename)
 
     # Check if content is empty (likely file doesn't exist)
-    if not fbin:
+    if fbin is None:
         raise FileNotFoundError(f"File not found: {filename}")
+    if not fbin:
+        raise ValueError(
+            f"File exists but is empty (0 bytes): {filename} — was an "
+            f"upstream write interrupted?"
+        )
 
     return fbin
 
