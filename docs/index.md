@@ -232,6 +232,14 @@ If you need concurrent cloud writers, database queries, automated workflow
 execution, or management of thousands of objects, use the tool built for that
 job and let DataFolio remain small.
 
+## Relationship to data version control
+
+A folio is just an ordinary directory, so tools like [DVC](https://dvc.org/) can
+version it over time while DataFolio explains what lives inside it. But once you
+need detailed data version control or pipeline management—reproducing a run,
+diffing data across commits, rerunning changed stages—reach for a tool built for
+that job. DataFolio deliberately stops before it.
+
 ## Installation
 
 ```bash

@@ -2418,6 +2418,31 @@ For more information, see the [datafolio documentation](https://github.com/casey
 
         return repr_str
 
+    def __contains__(self, name: object) -> bool:
+        """Check whether an item exists in the DataFolio by name.
+
+        Membership mirrors :meth:`get`: ``name in folio`` is True exactly
+        when ``folio.get(name)`` would succeed, so archived items count as
+        present. Non-string keys are simply not members.
+
+        Args:
+            name: Item name to test.
+
+        Returns:
+            True if an item with that name exists, False otherwise.
+
+        Examples:
+            >>> folio = DataFolio('experiments/my-exp')
+            >>> if 'results' not in folio:
+            ...     folio.add('results', df)
+            >>> 'results' in folio
+            True
+        """
+        if not isinstance(name, str):
+            return False
+        self._refresh_if_needed()
+        return name in self._items
+
     def describe(
         self,
         pattern: Optional[str] = None,

@@ -34,6 +34,30 @@ def test_batch_mode(tmp_path):
     assert "item2" in folio2.list_contents()["json_data"]
 
 
+def test_contains(tmp_path):
+    folio = DataFolio(tmp_path / "contains_test")
+
+    # Absent before add, present after — the guard-then-add idiom
+    assert "my_data" not in folio
+    if "my_data" not in folio:
+        folio.add("my_data", {"a": 1})
+    assert "my_data" in folio
+
+    # Non-string keys are never members
+    assert 123 not in folio
+    assert None not in folio
+
+    # Archived items count as present (membership mirrors get())
+    folio.archive("my_data")
+    assert "my_data" in folio
+    assert folio.get("my_data") == {"a": 1}
+
+    # Membership reflects a reload from disk
+    folio2 = DataFolio(tmp_path / "contains_test")
+    assert "my_data" in folio2
+    assert "nope" not in folio2
+
+
 def test_validate(tmp_path):
     folio = DataFolio(tmp_path / "validate_test")
 
