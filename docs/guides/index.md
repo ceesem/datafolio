@@ -1,116 +1,48 @@
-# Advanced Guides
+# Guides
 
-Welcome to the DataFolio advanced guides! These tutorials cover specialized topics and advanced features.
+Ordered by how often you will need them. The first two cover most real use.
 
-**New to DataFolio?** Start with the [Getting Started](getting-started.md) tutorial first, then come back here for advanced topics.
+**[Your first folio](getting-started.md)**
+Create a folio, add a mixed bag of objects, read them back by name, understand
+what landed on disk. Ten minutes. Start here.
 
-## Available Guides
+**[Everyday patterns](everyday.md)**
+The moves that recur: one path per analysis, lineage, folio metadata, bulk
+reads, batched writes, tidying up, handing over a path.
 
-### [Working with Models](models.md)
-**Save and load ML models with custom transformers**
+**[Tables: big, external, and lazy](tables.md)**
+The only item type where size forces a decision. Parquet and pandas by default;
+Polars lazy scans when a table is too big to load; `reference_table()` when the
+data is not yours.
 
-Complete guide to working with machine learning models in DataFolio:
-- Scikit-learn models (standard and custom)
-- Custom transformers with sklearn mixins
-- Joblib vs. skops serialization formats
-- When and how to use `custom=True` for portability
-- PyTorch models overview
-- Model metadata and lineage tracking
-- Common patterns (A/B testing, hyperparameter tuning)
-- Best practices and FAQ
+**[Models](models.md)**
+joblib vs. skops, what each actually protects you from, and why a custom
+transformer must live in an importable module.
 
-**Who should read this:** Anyone working with sklearn pipelines, custom transformers, or deploying models across environments.
+**[Sharing a folio](sharing.md)**
+Cloud paths, read-only opens, multiple readers, sync vs. fork, and what to send
+someone who will never install the package.
 
-**Time to complete:** 20-25 minutes
+**[Snapshots](snapshots.md)**
+Naming a state you may need to return to — how it works, what it does not
+cover, and when not to bother.
 
----
+**[Reading a folio without DataFolio](format.md)**
+The on-disk format as a documented, public surface: the catalog schema, how to
+resolve payloads, and the concurrency rules.
 
-### [Snapshots](snapshots.md)
-**Version control for your experiments**
+**[What DataFolio is not](limits.md)**
+Strengths, limits, sharp edges, and what to reach for instead. Worth reading
+before you build on it.
 
-Deep dive into DataFolio's snapshot system:
-- Why use snapshots (with real-world scenarios)
-- Creating and loading snapshots
-- Copy-on-write versioning (efficient storage)
-- Comparing and managing snapshots
-- Snapshot workflows (paper submissions, A/B testing, hyperparameter tuning)
-- Git integration and credential protection
-- CLI tools for snapshot management
-- Best practices and troubleshooting
+**[Migrating to 2.0](migrating-to-2.0.md)**
+Method mapping and behavior changes from 1.x.
 
-**Who should read this:** Anyone who wants to version experiments, maintain reproducibility, or experiment safely without losing good results.
+## If you are in a hurry
 
-**Time to complete:** 15-20 minutes
-
----
-
-### [Caching](caching.md)
-**Speed up remote data access**
-
-Local caching for cloud-stored bundles:
-- Why and when to use caching
-- Enabling and configuring caching
-- Cache management (status, clearing, invalidation)
-- Performance examples and benchmarks
-- Team collaboration with shared caches
-- Offline work preparation
-- Best practices and troubleshooting
-- Interaction with Parquet filtering
-
-**Who should read this:** Anyone working with remote bundles (S3, GCS, etc.) or wanting faster repeated data access.
-
-**Time to complete:** 15-20 minutes
-
----
-
-### [Parquet Optimization](parquet-optimization.md)
-**Work efficiently with large datasets**
-
-Advanced techniques for working with large Parquet files:
-- Column selection (column pruning) - Read only what you need
-- Row filtering (predicate pushdown) - Filter before loading
-- Memory optimization strategies
-- Working with datasets larger than memory
-- Cloud storage optimization and caching
-- Integration with PyArrow and DuckDB
-- Real-world performance examples
-- Best practices and troubleshooting
-
-**Who should read this:** Anyone working with large datasets (>1GB), cloud storage, or wanting to optimize performance.
-
-**Time to complete:** 20-25 minutes
-
----
-
-## Learning Path
-
-**For Beginners:**
-1. Start with [Getting Started](getting-started.md)
-2. Then read [Snapshots](snapshots.md) to learn about versioning
-
-**For Specific Use Cases:**
-- **Experiment tracking** → [Getting Started](getting-started.md) + [CLI Reference](../reference/cli.md)
-- **Reproducible research** → [Snapshots](snapshots.md)
-- **Curating results for publication** → `archive()` / `copy(follow_lineage=True)` in the [API Reference](../reference/datafolio-api.md#archiving-items)
-- **Team collaboration** → [Getting Started](getting-started.md) (Multi-Instance Access section)
-- **Sharing files with non-datafolio users** → `get_item_path()` / `describe(show_paths=True)` in the [API Reference](../reference/datafolio-api.md#sharing-paths-with-collaborators)
-- **Model deployment** → [Working with Models](models.md)
-- **Custom sklearn pipelines** → [Working with Models](models.md)
-- **Cloud storage** → [Caching](caching.md) + [Parquet Optimization](parquet-optimization.md)
-- **Large datasets** → [Parquet Optimization](parquet-optimization.md)
-- **Fast remote access** → [Caching](caching.md)
-
----
-
-## Additional Resources
-
-- [DataFolio API Reference](../reference/datafolio-api.md) - Complete method documentation
-- [CLI Reference](../reference/cli.md) - Command-line tools
-- [Complete API](../reference/api.md) - Full API documentation
-- [About](../index.md) - Overview and quick examples
-
-## Need Help?
-
-- Check the [Getting Started FAQ](getting-started.md#common-questions)
-- See the [Snapshots FAQ](snapshots.md#faq)
-- Report issues on [GitHub](https://github.com/ceesem/datafolio/issues)
+- Save and reload one object: [Your first folio](getting-started.md#add-objects)
+- A table too big to load: [Tables](tables.md#when-the-table-is-too-big-to-load)
+- Link data you do not own: [Tables](tables.md#when-the-table-is-not-yours)
+- Give a colleague access: [Sharing](sharing.md#give-collaborators-the-least-dangerous-thing-that-works)
+- Freeze the state the paper used: [Snapshots](snapshots.md)
+- Look up a method: [API cheat sheet](../reference/datafolio-api.md)

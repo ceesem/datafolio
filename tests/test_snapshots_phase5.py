@@ -17,7 +17,7 @@ class TestDeleteSnapshot:
         """Test deleting a snapshot removes it from registry."""
         folio = DataFolio(tmp_path / "test-bundle")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
         folio.create_snapshot("v1.0")
         folio.create_snapshot("v2.0")
 
@@ -33,28 +33,28 @@ class TestDeleteSnapshot:
         """Test deleting snapshot removes it from items' in_snapshots list."""
         folio = DataFolio(tmp_path / "test-bundle")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
         folio.create_snapshot("v1.0")
         folio.create_snapshot("v2.0")
 
         # Check item has both snapshots
         item = folio._items["data"]
-        assert "v1.0" in item["in_snapshots"]
-        assert "v2.0" in item["in_snapshots"]
+        assert "v1.0" in folio._snapshot_pins(item)
+        assert "v2.0" in folio._snapshot_pins(item)
 
         # Delete v1.0
         folio.delete_snapshot("v1.0")
 
         # Item should only have v2.0
         item = folio._items["data"]
-        assert "v1.0" not in item["in_snapshots"]
-        assert "v2.0" in item["in_snapshots"]
+        assert "v1.0" not in folio._snapshot_pins(item)
+        assert "v2.0" in folio._snapshot_pins(item)
 
     def test_delete_nonexistent_snapshot(self, tmp_path):
         """Test deleting nonexistent snapshot raises KeyError."""
         folio = DataFolio(tmp_path / "test-bundle")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
 
         with pytest.raises(KeyError, match="not found"):
             folio.delete_snapshot("nonexistent")
@@ -65,10 +65,10 @@ class TestDeleteSnapshot:
         df1 = pd.DataFrame({"a": [1, 2, 3]})
         df2 = pd.DataFrame({"a": [4, 5, 6]})
 
-        folio.add_table("data", df1)
+        folio.add("data", df1)
         folio.create_snapshot("v1.0")
 
-        folio.add_table("data", df2, overwrite=True)
+        folio.add("data", df2, overwrite=True)
         folio.create_snapshot("v2.0")
 
         # Delete v1.0 without cleanup
@@ -84,10 +84,10 @@ class TestDeleteSnapshot:
         df1 = pd.DataFrame({"a": [1, 2, 3]})
         df2 = pd.DataFrame({"a": [4, 5, 6]})
 
-        folio.add_table("data", df1)
+        folio.add("data", df1)
         folio.create_snapshot("v1.0")
 
-        folio.add_table("data", df2, overwrite=True)
+        folio.add("data", df2, overwrite=True)
         folio.create_snapshot("v2.0")
 
         # Now there are two versions: current in _items, old in _snapshot_versions
@@ -114,14 +114,14 @@ class TestDeleteSnapshot:
         """Test deleting the only snapshot doesn't affect current state."""
         folio = DataFolio(tmp_path / "test-bundle")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
         folio.create_snapshot("v1.0")
 
         # Delete snapshot
         folio.delete_snapshot("v1.0")
 
         # Current state should be unaffected
-        loaded_df = folio.get_table("data")
+        loaded_df = folio.get("data")
         pd.testing.assert_frame_equal(loaded_df, df)
 
 
@@ -132,7 +132,7 @@ class TestCompareSnapshots:
         """Test comparing two identical snapshots."""
         folio = DataFolio(tmp_path / "test-bundle")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
         folio.metadata["accuracy"] = 0.85
         folio.create_snapshot("v1.0")
         folio.create_snapshot("v1.1")  # Identical to v1.0
@@ -153,10 +153,10 @@ class TestCompareSnapshots:
         df1 = pd.DataFrame({"a": [1, 2, 3]})
         df2 = pd.DataFrame({"b": [4, 5, 6]})
 
-        folio.add_table("data1", df1)
+        folio.add("data1", df1)
         folio.create_snapshot("v1.0")
 
-        folio.add_table("data2", df2)
+        folio.add("data2", df2)
         folio.create_snapshot("v2.0")
 
         diff = folio.compare_snapshots("v1.0", "v2.0")
@@ -171,8 +171,8 @@ class TestCompareSnapshots:
         df1 = pd.DataFrame({"a": [1, 2, 3]})
         df2 = pd.DataFrame({"b": [4, 5, 6]})
 
-        folio.add_table("data1", df1)
-        folio.add_table("data2", df2)
+        folio.add("data1", df1)
+        folio.add("data2", df2)
         folio.create_snapshot("v1.0")
 
         folio.delete("data2")
@@ -190,10 +190,10 @@ class TestCompareSnapshots:
         df1 = pd.DataFrame({"a": [1, 2, 3]})
         df2 = pd.DataFrame({"a": [4, 5, 6]})
 
-        folio.add_table("data", df1)
+        folio.add("data", df1)
         folio.create_snapshot("v1.0")
 
-        folio.add_table("data", df2, overwrite=True)
+        folio.add("data", df2, overwrite=True)
         folio.create_snapshot("v2.0")
 
         diff = folio.compare_snapshots("v1.0", "v2.0")
@@ -207,7 +207,7 @@ class TestCompareSnapshots:
         """Test comparing snapshots with metadata changes."""
         folio = DataFolio(tmp_path / "test-bundle")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
 
         folio.metadata["accuracy"] = 0.85
         folio.metadata["model"] = "baseline"
@@ -232,7 +232,7 @@ class TestCompareSnapshots:
         """Test comparing with nonexistent snapshot raises KeyError."""
         folio = DataFolio(tmp_path / "test-bundle")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
         folio.create_snapshot("v1.0")
 
         with pytest.raises(KeyError, match="not found"):
@@ -249,7 +249,7 @@ class TestCleanupOrphanedVersions:
         """Test cleanup when there are no orphaned versions."""
         folio = DataFolio(tmp_path / "test-bundle")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
         folio.create_snapshot("v1.0")
 
         deleted = folio.cleanup_orphaned_versions()
@@ -263,13 +263,13 @@ class TestCleanupOrphanedVersions:
         df3 = pd.DataFrame({"a": [7, 8, 9]})
 
         # Create v1, snapshot, then v2, snapshot, then v3 (current)
-        folio.add_table("data", df1)
+        folio.add("data", df1)
         folio.create_snapshot("v1.0")
 
-        folio.add_table("data", df2, overwrite=True)
+        folio.add("data", df2, overwrite=True)
         folio.create_snapshot("v2.0")
 
-        folio.add_table("data", df3, overwrite=True)
+        folio.add("data", df3, overwrite=True)
         # Don't snapshot v3 - it's current
 
         # Now we have:
@@ -295,10 +295,10 @@ class TestCleanupOrphanedVersions:
         df1 = pd.DataFrame({"a": [1, 2, 3]})
         df2 = pd.DataFrame({"a": [4, 5, 6]})
 
-        folio.add_table("data", df1)
+        folio.add("data", df1)
         folio.create_snapshot("v1.0")
 
-        folio.add_table("data", df2, overwrite=True)
+        folio.add("data", df2, overwrite=True)
         # v1 is now orphaned (in snapshot, but let's delete snapshot)
 
         folio.delete_snapshot("v1.0", cleanup_orphans=False)
@@ -317,17 +317,17 @@ class TestCleanupOrphanedVersions:
         df1 = pd.DataFrame({"a": [1, 2, 3]})
         df2 = pd.DataFrame({"a": [4, 5, 6]})
 
-        folio.add_table("data", df1)
+        folio.add("data", df1)
         folio.create_snapshot("v1.0")
 
-        folio.add_table("data", df2, overwrite=True)
+        folio.add("data", df2, overwrite=True)
         # Current version is df2, not in any snapshot
 
         # Delete the snapshot
         folio.delete_snapshot("v1.0", cleanup_orphans=True)
 
         # Current version should still be accessible
-        loaded_df = folio.get_table("data")
+        loaded_df = folio.get("data")
         pd.testing.assert_frame_equal(loaded_df, df2)
 
     def test_cleanup_preserves_snapshot_versions(self, tmp_path):
@@ -336,10 +336,10 @@ class TestCleanupOrphanedVersions:
         df1 = pd.DataFrame({"a": [1, 2, 3]})
         df2 = pd.DataFrame({"a": [4, 5, 6]})
 
-        folio.add_table("data", df1)
+        folio.add("data", df1)
         folio.create_snapshot("v1.0")
 
-        folio.add_table("data", df2, overwrite=True)
+        folio.add("data", df2, overwrite=True)
         folio.create_snapshot("v2.0")
 
         # Run cleanup - should find no orphans
@@ -347,10 +347,10 @@ class TestCleanupOrphanedVersions:
         assert deleted == []
 
         # Both snapshots should still be accessible
-        v1_df = folio.snapshots["v1.0"].get_table("data")
+        v1_df = folio.snapshots["v1.0"].get("data")
         pd.testing.assert_frame_equal(v1_df, df1)
 
-        v2_df = folio.snapshots["v2.0"].get_table("data")
+        v2_df = folio.snapshots["v2.0"].get("data")
         pd.testing.assert_frame_equal(v2_df, df2)
 
 
@@ -363,18 +363,18 @@ class TestRestoreSnapshot:
         df1 = pd.DataFrame({"a": [1, 2, 3]})
         df2 = pd.DataFrame({"a": [4, 5, 6]})
 
-        folio.add_table("data", df1)
+        folio.add("data", df1)
         folio.metadata["version"] = 1
         folio.create_snapshot("v1.0")
 
-        folio.add_table("data", df2, overwrite=True)
+        folio.add("data", df2, overwrite=True)
         folio.metadata["version"] = 2
 
         # Restore to v1.0
         folio.restore_snapshot("v1.0", confirm=True)
 
         # Current state should match v1.0
-        loaded_df = folio.get_table("data")
+        loaded_df = folio.get("data")
         pd.testing.assert_frame_equal(loaded_df, df1)
         assert folio.metadata["version"] == 1
 
@@ -382,7 +382,7 @@ class TestRestoreSnapshot:
         """Test restore requires confirm=True."""
         folio = DataFolio(tmp_path / "test-bundle")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
         folio.create_snapshot("v1.0")
 
         with pytest.raises(ValueError, match="confirm"):
@@ -395,7 +395,7 @@ class TestRestoreSnapshot:
         """Test restoring nonexistent snapshot raises KeyError."""
         folio = DataFolio(tmp_path / "test-bundle")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
 
         with pytest.raises(KeyError, match="not found"):
             folio.restore_snapshot("nonexistent", confirm=True)
@@ -406,10 +406,10 @@ class TestRestoreSnapshot:
         df1 = pd.DataFrame({"a": [1, 2, 3]})
         df2 = pd.DataFrame({"b": [4, 5, 6]})
 
-        folio.add_table("data1", df1)
+        folio.add("data1", df1)
         folio.create_snapshot("v1.0")
 
-        folio.add_table("data2", df2)
+        folio.add("data2", df2)
 
         # Restore to v1.0
         folio.restore_snapshot("v1.0", confirm=True)
@@ -422,7 +422,7 @@ class TestRestoreSnapshot:
         """Test restore restores metadata state."""
         folio = DataFolio(tmp_path / "test-bundle")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
 
         folio.metadata["accuracy"] = 0.85
         folio.metadata["model"] = "baseline"
@@ -453,15 +453,15 @@ class TestSnapshotManagementIntegration:
         df2 = pd.DataFrame({"a": [4, 5, 6]})
         df3 = pd.DataFrame({"a": [7, 8, 9]})
 
-        folio.add_table("data", df1)
+        folio.add("data", df1)
         folio.metadata["version"] = 1
         folio.create_snapshot("v1.0", description="First version")
 
-        folio.add_table("data", df2, overwrite=True)
+        folio.add("data", df2, overwrite=True)
         folio.metadata["version"] = 2
         folio.create_snapshot("v2.0", description="Second version")
 
-        folio.add_table("data", df3, overwrite=True)
+        folio.add("data", df3, overwrite=True)
         folio.metadata["version"] = 3
         folio.create_snapshot("v3.0", description="Third version")
 
@@ -481,10 +481,10 @@ class TestSnapshotManagementIntegration:
         assert len(folio.list_snapshots()) == 2
 
         # v1.0 and v3.0 should still be accessible
-        v1_df = folio.snapshots["v1.0"].get_table("data")
+        v1_df = folio.snapshots["v1.0"].get("data")
         pd.testing.assert_frame_equal(v1_df, df1)
 
-        v3_df = folio.snapshots["v3.0"].get_table("data")
+        v3_df = folio.snapshots["v3.0"].get("data")
         pd.testing.assert_frame_equal(v3_df, df3)
 
     def test_restore_and_continue_workflow(self, tmp_path):
@@ -494,24 +494,24 @@ class TestSnapshotManagementIntegration:
         df1 = pd.DataFrame({"a": [1, 2, 3]})
         df2 = pd.DataFrame({"a": [4, 5, 6]})
 
-        folio.add_table("data", df1)
+        folio.add("data", df1)
         folio.metadata["accuracy"] = 0.85
         folio.create_snapshot("v1.0-baseline")
 
-        folio.add_table("data", df2, overwrite=True)
+        folio.add("data", df2, overwrite=True)
         folio.metadata["accuracy"] = 0.78  # Worse!
 
         # Restore baseline
         folio.restore_snapshot("v1.0-baseline", confirm=True)
 
         # Verify restored
-        loaded_df = folio.get_table("data")
+        loaded_df = folio.get("data")
         pd.testing.assert_frame_equal(loaded_df, df1)
         assert folio.metadata["accuracy"] == 0.85
 
         # Continue with new approach
         df3 = pd.DataFrame({"a": [10, 11, 12]})
-        folio.add_table("data", df3, overwrite=True)
+        folio.add("data", df3, overwrite=True)
         folio.metadata["accuracy"] = 0.92
         folio.create_snapshot("v2.0-improved")
 

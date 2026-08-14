@@ -25,8 +25,8 @@ class DataframeHandler(BaseHandler):
         >>> handler = DataframeHandler()
         >>> register_handler(handler)
         >>>
-        >>> folio.add_table('data', polars_df)   # Polars DataFrame
-        >>> folio.add_table('data', pandas_df)   # pandas DataFrame
+        >>> folio.add('data', polars_df)   # Polars DataFrame
+        >>> folio.add('data', pandas_df)   # pandas DataFrame
     """
 
     @property
@@ -54,9 +54,20 @@ class DataframeHandler(BaseHandler):
         except ImportError:
             return False
 
+    @staticmethod
+    def _is_polars_lazy(data: Any) -> bool:
+        try:
+            import polars as pl
+
+            return isinstance(data, pl.LazyFrame)
+        except ImportError:
+            return False
+
     def can_handle(self, data: Any) -> bool:
-        """Return True for pandas or Polars DataFrames."""
-        return self._is_pandas(data) or self._is_polars(data)
+        """Return True for pandas or Polars DataFrames (eager or lazy)."""
+        return (
+            self._is_pandas(data) or self._is_polars(data) or self._is_polars_lazy(data)
+        )
 
     # ── Arrow conversion ──────────────────────────────────────────────────────
 
@@ -99,15 +110,19 @@ class DataframeHandler(BaseHandler):
         table_format: str = "parquet",
         **kwargs,
     ) -> Dict[str, Any]:
-        """Add a DataFrame to the folio.
+        """Add a DataFrame (eager) or LazyFrame (streamed) to the folio.
 
-        Converts the DataFrame to a PyArrow Table and writes it to Parquet,
-        preserving exact column types (Int64, struct fields, etc.).
+        For pandas/Polars DataFrames the frame is converted to a PyArrow Table
+        and written to Parquet, preserving exact column types (Int64, struct
+        fields, etc.). For a Polars ``LazyFrame`` the query is materialized
+        with a streaming ``sink_parquet`` (bounded memory — the full result is
+        never held at once); schema and row count are then read back from the
+        written Parquet footer (cheap) rather than from an in-memory result.
 
         Args:
             folio: DataFolio instance.
             name: Item name.
-            data: pandas or Polars DataFrame to store.
+            data: pandas DataFrame, Polars DataFrame, or Polars LazyFrame.
             description: Optional description.
             inputs: Optional lineage inputs.
             table_format: Storage format (default: ``'parquet'``).
@@ -116,21 +131,81 @@ class DataframeHandler(BaseHandler):
             Metadata dict for this table.
 
         Raises:
-            TypeError: If data is not a supported DataFrame type.
+            TypeError: If data is not a supported frame type.
         """
-        arrow_table = self._to_arrow(data)
-
         extension = get_file_extension(table_format)
-        filename = f"{name}{extension}"
+        # The folio allocates a collision-safe versioned filename and injects it
+        # so a new payload never overwrites bytes a committed manifest (or a
+        # snapshot) still references. Direct handler calls fall back to a stable
+        # name.
+        filename = kwargs.get("_filename") or f"{name}{extension}"
         subdir = self.get_storage_subdir()
         filepath = folio._storage.join_paths(folio._bundle_dir, subdir, filename)
 
-        # Pass the original data so StorageBackend can use the native writer
-        # (e.g. Polars' own writer for Polars DataFrames, which produces parquet
-        # statistics that Polars' predicate-pushdown engine can parse correctly).
-        folio._storage.write_parquet(filepath, data)
+        index_columns = []
+        index_names: list = []
+        if kwargs.get("preserve_index") and not self._is_pandas(data):
+            raise TypeError(
+                f"preserve_index=True is only meaningful for pandas "
+                f"DataFrames (table '{name}' is "
+                f"{type(data).__name__}; polars frames have no index)."
+            )
+        if self._is_polars_lazy(data):
+            # Streaming, bounded-memory materialization. The footer is read from
+            # the local staging file, so a cloud write never re-downloads the
+            # just-uploaded object just to learn its schema/row count.
+            arrow_schema, num_rows = folio._storage.sink_parquet_with_footer(
+                filepath, data
+            )
+        else:
+            # Eager frame -> Arrow -> Parquet. Pass the original data so the
+            # backend can use the native writer (Polars' own writer emits
+            # parquet statistics its predicate-pushdown engine can parse).
+            preserve_index = bool(kwargs.get("preserve_index", False))
+            if self._is_pandas(data):
+                import pandas as pd
+
+                default_index = isinstance(
+                    data.index, pd.RangeIndex
+                ) and data.index.equals(pd.RangeIndex(len(data)))
+                if preserve_index and not default_index:
+                    # Store the index as ordinary columns (any tool can read
+                    # them) and record which they were so the pandas read
+                    # path can set_index() them back. Original level names
+                    # are recorded too, so unnamed levels restore as None
+                    # rather than reset_index()'s 'level_0' placeholders.
+                    original = set(data.columns)
+                    index_names = list(data.index.names)
+                    try:
+                        data = data.reset_index()
+                    except ValueError as exc:
+                        raise ValueError(
+                            f"Cannot preserve the index of table '{name}': "
+                            f"an index level collides with an existing "
+                            f"column ({exc}). Rename the index level or the "
+                            f"column, or reset_index() yourself first."
+                        ) from exc
+                    index_columns = [c for c in data.columns if c not in original]
+                elif not default_index:
+                    # A non-default index is silently dropped by the parquet
+                    # write; make that visible and offer the escape hatch.
+                    import warnings
+
+                    warnings.warn(
+                        f"Table '{name}' has a non-default pandas index that "
+                        f"will NOT be stored (parquet keeps columns only). "
+                        f"Call reset_index() first to keep it as a column, or "
+                        f"pass preserve_index=True to store it.",
+                        UserWarning,
+                        stacklevel=4,
+                    )
+            arrow_table = self._to_arrow(data)
+            folio._storage.write_parquet(filepath, data)
+            arrow_schema = arrow_table.schema
+            num_rows = arrow_table.num_rows
 
         checksum = folio._storage.calculate_checksum(filepath)
+        size_bytes = folio._storage.file_size(filepath)
 
         metadata = {
             "name": name,
@@ -139,17 +214,22 @@ class DataframeHandler(BaseHandler):
             "table_format": table_format,
             "is_directory": False,
             "checksum": checksum,
-            "num_rows": arrow_table.num_rows,
-            "num_cols": arrow_table.num_columns,
-            "columns": arrow_table.schema.names,
-            "dtypes": {field.name: str(field.type) for field in arrow_table.schema},
+            "num_rows": num_rows,
+            "num_cols": len(arrow_schema),
+            "columns": list(arrow_schema.names),
+            "dtypes": {field.name: str(field.type) for field in arrow_schema},
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
+        if size_bytes is not None:
+            metadata["size_bytes"] = size_bytes
+        if index_columns:
+            metadata["index_columns"] = index_columns
+            metadata["index_names"] = index_names
 
         if description:
             metadata["description"] = description
         if inputs:
-            metadata["inputs"] = inputs
+            metadata["inputs"] = list(inputs)
 
         return metadata
 
@@ -173,7 +253,45 @@ class DataframeHandler(BaseHandler):
             folio._bundle_dir, subdir, item["filename"]
         )
 
-        return folio._storage.read_parquet(filepath, **kwargs)
+        df = folio._storage.read_parquet(filepath, **kwargs)
+        # Restore an index stored via add(..., preserve_index=True). The
+        # parquet file itself keeps these as plain columns (readable by any
+        # tool); only the pandas read path re-applies them as the index.
+        index_columns = item.get("index_columns")
+        if index_columns and all(c in df.columns for c in index_columns):
+            df = df.set_index(
+                index_columns if len(index_columns) > 1 else index_columns[0]
+            )
+            # Restore the original level names (unnamed levels come back as
+            # None instead of reset_index()'s 'index'/'level_N' placeholders).
+            index_names = item.get("index_names")
+            if index_names and len(index_names) == df.index.nlevels:
+                df.index.names = index_names
+            elif index_columns == ["index"]:
+                # Legacy manifests without index_names
+                df.index.name = None
+        return df
+
+    def get_lazy(self, folio: "DataFolio", name: str, **kwargs) -> Any:
+        """Lazily scan the bundled table as a polars LazyFrame.
+
+        Args:
+            folio: DataFolio instance
+            name: Item name
+            **kwargs: Additional arguments passed to the polars scanner
+
+        Returns:
+            polars LazyFrame backed by the bundle's parquet file
+        """
+        item = folio._items[name]
+        subdir = self.get_storage_subdir()
+        filepath = folio._storage.join_paths(
+            folio._bundle_dir, subdir, item["filename"]
+        )
+
+        return folio._storage.scan_table(
+            filepath, item.get("table_format", "parquet"), **kwargs
+        )
 
 
 class ReferenceTableHandler(BaseHandler):
@@ -215,9 +333,17 @@ class ReferenceTableHandler(BaseHandler):
         description: Optional[str] = None,
         inputs: Optional[list[str]] = None,
         table_format: str = "parquet",
+        allow_full_load: bool = False,
+        polars_only: Optional[bool] = None,
         **kwargs,
     ) -> Dict[str, Any]:
         """Add reference to external table.
+
+        This is a cheap, purely-local manifest operation: it performs **no
+        remote I/O**. It does not stat the object, read its schema, count its
+        rows, or check that it exists. Use :meth:`DataFolio.inspect_table` to
+        enrich the manifest with schema/size/identity, and
+        :meth:`DataFolio.validate` to check existence.
 
         Args:
             folio: DataFolio instance
@@ -226,61 +352,158 @@ class ReferenceTableHandler(BaseHandler):
             description: Optional description
             inputs: Optional lineage inputs
             table_format: Format of the table (default: 'parquet')
+            allow_full_load: If True, this reference bypasses the folio's
+                ``max_eager_bytes`` guard on eager ``get`` reads.
+            polars_only: If True, the reference can only be read lazily/via
+                polars (``scan_table`` / ``frame='polars'``); eager pandas reads
+                raise a clear error. If None (default), this is inferred: a
+                sharded/partitioned directory dataset is polars-only, since
+                pandas mishandles such layouts.
             **kwargs: Additional arguments
 
         Returns:
             Metadata dict for this reference
         """
+        import os
+
         from datafolio.utils import is_cloud_path, resolve_path
 
-        # Resolve path (handles local/cloud)
-        resolved_path = resolve_path(reference)
-
-        # Check if directory
-        is_directory = False
-
-        # Handle local paths (including file://)
-        check_path = resolved_path
-        if check_path.startswith("file://"):
-            check_path = check_path[7:]
-
-        if not is_cloud_path(check_path):
-            import os
-
-            is_directory = os.path.isdir(check_path)
+        # Reference path policy: external references are absolute and static, so
+        # that moving/copying a folio preserves the recorded reference exactly
+        # (it is never rebased or reinterpreted). Cloud URIs keep their full URI;
+        # an absolute local path is normalized to a ``file://`` URI. A *new*
+        # relative path is rejected with an actionable error (legacy relative
+        # references already in a manifest are still read — resolved against the
+        # bundle — for backward compatibility; see _resolve_reference_path). No
+        # remote I/O either way.
+        ref_str = str(reference)
+        if (
+            is_cloud_path(ref_str)
+            or ref_str.startswith("file://")
+            or os.path.isabs(ref_str)
+        ):
+            stored_path = resolve_path(ref_str)
         else:
-            # For cloud paths, we can't easily check isdir without network calls
-            # Heuristic: if it ends with '/', treat as directory
-            # Or if table_format implies directory (like 'delta')
-            if resolved_path.endswith("/") or table_format in ("delta", "iceberg"):
-                is_directory = True
+            raise ValueError(
+                f"Relative reference path {ref_str!r} is not allowed. External "
+                f"references must be absolute and static so moving or copying the "
+                f"folio preserves the link exactly. Pass an absolute path or a "
+                f"file:// URI (e.g. {os.path.abspath(ref_str)!r}) or a cloud URI "
+                f"(s3://, gs://, ...)."
+            )
 
-        # Build metadata
+        # Layout guess against the effective location — local uses a cheap local
+        # stat; cloud is a name-only heuristic. Neither performs remote I/O.
+        effective = folio._resolve_reference_path(stored_path)
+        check_path = effective[7:] if effective.startswith("file://") else effective
+
+        is_directory = False
+        if not is_cloud_path(check_path):
+            is_directory = os.path.isdir(check_path)
+        elif check_path.endswith("/"):
+            # trailing '/' implies a directory (no network call)
+            is_directory = True
+
+        # Build metadata (manifest-only; enrichment happens in inspect_table).
+        # References are inherently mutable: datafolio links to external data it
+        # does not own or copy, so the content at this path can change over time
+        # (snapshots preserve the link, not the bytes). inspect_table() records
+        # a point-in-time source_identity to make such drift detectable.
         metadata = {
             "name": name,
             "item_type": self.item_type,
-            "path": resolved_path,
+            "path": stored_path,
             "table_format": table_format,
             "is_directory": is_directory,
+            "mutable": True,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
 
-        # Optionally read metadata (can be slow for large files)
-        if kwargs.get("read_metadata", False) and not is_directory:
-            try:
-                df = folio._storage.read_table(resolved_path, table_format)
-                metadata["num_rows"] = len(df)
-            except Exception:
-                # Don't fail add() if we can't read the remote file
-                pass
+        if allow_full_load:
+            metadata["allow_full_load"] = True
+
+        # Sharded/partitioned directory datasets are polars-only by default:
+        # pandas mishandles hive-partitioned/typed layouts (cryptic errors), so
+        # eager pandas reads are refused in favor of scan_table / frame='polars'.
+        is_polars_only = is_directory if polars_only is None else polars_only
+        if is_polars_only:
+            metadata["polars_only"] = True
 
         # Add optional fields
         if description:
             metadata["description"] = description
         if inputs:
-            metadata["inputs"] = inputs
+            metadata["inputs"] = list(inputs)
 
         return metadata
+
+    def inspect(self, folio: "DataFolio", name: str) -> Dict[str, Any]:
+        """Read the external object and return enrichment metadata.
+
+        Unlike :meth:`add`, this performs remote I/O. It verifies the object
+        exists, records its size, and (for parquet) reads the schema and row
+        count via a polars scan. Failures raise actionable errors rather than
+        being silently swallowed.
+
+        Args:
+            folio: DataFolio instance
+            name: Item name
+
+        Returns:
+            Dict of fields to merge into the manifest entry (``size_bytes``,
+            ``columns``, ``dtypes``, ``num_cols``, ``num_rows``, refreshed
+            ``is_directory``).
+
+        Raises:
+            FileNotFoundError: If the referenced object does not exist.
+            RuntimeError: If the object exists but its schema cannot be read.
+        """
+        item = folio._items[name]
+        path = folio._resolve_reference_path(item["path"])
+        table_format = item.get("table_format", "parquet")
+
+        if not folio._storage.exists(path):
+            raise FileNotFoundError(f"Referenced table '{name}' not found at {path}")
+
+        updated: Dict[str, Any] = {}
+
+        size_bytes = folio._storage.file_size(path)
+        if size_bytes is not None:
+            updated["size_bytes"] = size_bytes
+
+        if table_format == "parquet":
+            try:
+                from datafolio.readers import scan_parquet
+
+                lf = scan_parquet(path, use_https=folio._storage._use_https)
+                # Normalize to an Arrow-derived logical schema (same convention
+                # as included tables): collect zero rows to get the Arrow schema
+                # with column order and types, without reading data.
+                arrow_schema = lf.limit(0).collect().to_arrow().schema
+                updated["columns"] = list(arrow_schema.names)
+                updated["dtypes"] = {
+                    field.name: str(field.type) for field in arrow_schema
+                }
+                updated["num_cols"] = len(arrow_schema)
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Could not read schema for reference '{name}' at {path}: {exc}"
+                ) from exc
+            # Row count is best-effort (may require reading shard metadata).
+            try:
+                import polars as pl
+
+                updated["num_rows"] = int(lf.select(pl.len()).collect().item())
+            except Exception:
+                pass
+
+        # Point-in-time source identity so a mutable reference's drift is
+        # detectable (informational; datafolio does not freeze external data).
+        identity = folio._storage.source_identity(path)
+        if identity:
+            updated["source_identity"] = identity
+
+        return updated
 
     def get(self, folio: "DataFolio", name: str, **kwargs) -> Any:
         """Load DataFrame from external reference.
@@ -294,10 +517,32 @@ class ReferenceTableHandler(BaseHandler):
             pandas DataFrame loaded from external location
         """
         item = folio._items[name]
-        remote_path = item["path"]
+        remote_path = folio._resolve_reference_path(item["path"])
 
         return folio._storage.read_table(
             remote_path, item.get("table_format", "parquet"), **kwargs
+        )
+
+    def get_lazy(self, folio: "DataFolio", name: str, **kwargs) -> Any:
+        """Lazily scan the external table as a polars LazyFrame.
+
+        This is the marquee case for references: predicate/projection pushdown
+        over a large external parquet (e.g. ``s3://``/``gs://``) without copying
+        it into the bundle or pulling it fully into memory.
+
+        Args:
+            folio: DataFolio instance
+            name: Item name
+            **kwargs: Additional arguments passed to the polars scanner
+
+        Returns:
+            polars LazyFrame backed by the external path
+        """
+        item = folio._items[name]
+        return folio._storage.scan_table(
+            folio._resolve_reference_path(item["path"]),
+            item.get("table_format", "parquet"),
+            **kwargs,
         )
 
     def delete(self, folio: "DataFolio", name: str) -> None:

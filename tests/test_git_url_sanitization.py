@@ -175,7 +175,7 @@ class TestSanitizeGitRemoteUrl:
 class TestGitUrlSanitizationIntegration:
     """Integration tests for git URL sanitization in snapshot creation."""
 
-    def test_snapshot_sanitizes_git_remote(self, tmp_path):
+    def test_snapshot_sanitizes_git_remote(self, tmp_path, monkeypatch):
         """Test that snapshot creation sanitizes git remote URL."""
         import subprocess
 
@@ -184,7 +184,7 @@ class TestGitUrlSanitizationIntegration:
         # Create folio first (this creates the directory structure)
         folio = DataFolio(bundle_dir)
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
 
         # Now setup git repo in the bundle directory
         subprocess.run(["git", "init"], cwd=bundle_dir, capture_output=True, check=True)
@@ -226,7 +226,9 @@ class TestGitUrlSanitizationIntegration:
             check=True,
         )
 
-        # Create snapshot with git capture
+        # Git state is captured from the current working directory (the
+        # code repo), not the bundle dir - run from inside the fixture repo.
+        monkeypatch.chdir(bundle_dir)
         folio.create_snapshot("v1.0", capture_git=True)
 
         # Verify remote is sanitized
@@ -237,7 +239,7 @@ class TestGitUrlSanitizationIntegration:
         assert "token" not in snapshot["git"]["remote"]
         assert "ghp_" not in snapshot["git"]["remote"]
 
-    def test_snapshot_with_clean_remote(self, tmp_path):
+    def test_snapshot_with_clean_remote(self, tmp_path, monkeypatch):
         """Test that clean remote URLs are preserved unchanged."""
         import subprocess
 
@@ -246,7 +248,7 @@ class TestGitUrlSanitizationIntegration:
         # Create folio first
         folio = DataFolio(bundle_dir)
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
 
         # Setup git repo
         subprocess.run(["git", "init"], cwd=bundle_dir, capture_output=True, check=True)
@@ -288,14 +290,16 @@ class TestGitUrlSanitizationIntegration:
             check=True,
         )
 
-        # Create snapshot
+        # Git state is captured from the current working directory (the
+        # code repo), not the bundle dir - run from inside the fixture repo.
+        monkeypatch.chdir(bundle_dir)
         folio.create_snapshot("v1.0", capture_git=True)
 
         # Verify remote is preserved
         snapshot = folio.get_snapshot_info("v1.0")
         assert snapshot["git"]["remote"] == "https://github.com/user/repo.git"
 
-    def test_snapshot_with_ssh_remote(self, tmp_path):
+    def test_snapshot_with_ssh_remote(self, tmp_path, monkeypatch):
         """Test that SSH remotes are preserved (they don't have credentials)."""
         import subprocess
 
@@ -304,7 +308,7 @@ class TestGitUrlSanitizationIntegration:
         # Create folio first
         folio = DataFolio(bundle_dir)
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
 
         # Setup git repo
         subprocess.run(["git", "init"], cwd=bundle_dir, capture_output=True, check=True)
@@ -340,14 +344,16 @@ class TestGitUrlSanitizationIntegration:
             check=True,
         )
 
-        # Create snapshot
+        # Git state is captured from the current working directory (the
+        # code repo), not the bundle dir - run from inside the fixture repo.
+        monkeypatch.chdir(bundle_dir)
         folio.create_snapshot("v1.0", capture_git=True)
 
         # Verify SSH remote is preserved
         snapshot = folio.get_snapshot_info("v1.0")
         assert snapshot["git"]["remote"] == "git@github.com:user/repo.git"
 
-    def test_reproduce_instructions_dont_leak_credentials(self, tmp_path):
+    def test_reproduce_instructions_dont_leak_credentials(self, tmp_path, monkeypatch):
         """Test that reproduce instructions don't contain credentials."""
         import subprocess
 
@@ -356,7 +362,7 @@ class TestGitUrlSanitizationIntegration:
         # Create folio first
         folio = DataFolio(bundle_dir)
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
 
         # Setup git repo
         subprocess.run(["git", "init"], cwd=bundle_dir, capture_output=True, check=True)
@@ -398,11 +404,14 @@ class TestGitUrlSanitizationIntegration:
             check=True,
         )
 
-        # Create snapshot
+        # Git state is captured from the current working directory (the
+        # code repo), not the bundle dir - run from inside the fixture repo.
+        monkeypatch.chdir(bundle_dir)
         folio.create_snapshot("v1.0", capture_git=True)
 
         # Get reproduction instructions
-        instructions = folio.reproduce_instructions("v1.0")
+        info = folio.get_snapshot_info("v1.0")
+        instructions = str(info.get("git", {}))
 
         # Verify no credentials in output
         assert "secret_token" not in instructions

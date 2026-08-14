@@ -63,7 +63,7 @@ class BaseHandler(ABC):
             Item type string (e.g., 'included_table', 'numpy_array', 'pytorch_model')
 
         Examples:
-            >>> handler = PandasHandler()
+            >>> handler = DataframeHandler()
             >>> handler.item_type
             'included_table'
         """
@@ -73,7 +73,7 @@ class BaseHandler(ABC):
     def can_handle(self, data: Any) -> bool:
         """Check if this handler can process the given data.
 
-        Used by add_data() for auto-detection. Return False if the handler
+        Used by add() for auto-detection. Return False if the handler
         should not participate in auto-detection (e.g., for reference tables
         or models that require explicit parameters).
 
@@ -84,7 +84,7 @@ class BaseHandler(ABC):
             True if this handler supports this data type
 
         Examples:
-            >>> handler = PandasHandler()
+            >>> handler = DataframeHandler()
             >>> handler.can_handle(pd.DataFrame())
             True
             >>> handler.can_handle(np.array([1, 2, 3]))
@@ -153,10 +153,49 @@ class BaseHandler(ABC):
         """
         pass
 
+    def get_lazy(self, folio: "DataFolio", name: str, **kwargs) -> Any:
+        """Lazily load data as a polars LazyFrame (optional hook).
+
+        Default implementation raises ``NotImplementedError``. Table handlers
+        override this to return a ``pl.LazyFrame`` backed by the stored file so
+        callers get predicate/projection pushdown without materializing the
+        whole table. Non-table handlers (models, arrays, JSON) leave it unset.
+
+        Args:
+            folio: DataFolio instance
+            name: Item name
+            **kwargs: Handler-specific options (passed to the scanner)
+
+        Returns:
+            A polars LazyFrame
+
+        Raises:
+            NotImplementedError: If this item type does not support lazy access
+        """
+        raise NotImplementedError(
+            f"'{self.item_type}' does not support lazy access via scan_table()"
+        )
+
+    def inspect(self, folio: "DataFolio", name: str) -> Dict[str, Any]:
+        """Read the stored item and return enrichment metadata (optional hook).
+
+        Default implementation returns an empty dict (nothing to enrich).
+        Reference handlers override this to perform explicit remote I/O and
+        report schema/size/identity. May raise actionable errors on failure.
+
+        Args:
+            folio: DataFolio instance
+            name: Item name
+
+        Returns:
+            Dict of fields to merge into the manifest entry.
+        """
+        return {}
+
     def delete(self, folio: "DataFolio", name: str) -> None:
         """Delete data files for this item.
 
-        Default implementation deletes file at items[name]['filename']
+        Default implementation deletes file at ``items[name]['filename']``
         from the appropriate subdirectory. Override if custom logic needed
         (e.g., for external references that have no local files).
 
@@ -188,7 +227,7 @@ class BaseHandler(ABC):
             StorageCategory enum value
 
         Examples:
-            >>> handler = PandasHandler()
+            >>> handler = DataframeHandler()
             >>> handler.get_storage_category()
             <StorageCategory.TABLES: 'tables'>
 
@@ -209,7 +248,7 @@ class BaseHandler(ABC):
             Subdirectory name: 'tables', 'models', or 'artifacts'
 
         Examples:
-            >>> handler = PandasHandler()
+            >>> handler = DataframeHandler()
             >>> handler.get_storage_subdir()
             'tables'
 

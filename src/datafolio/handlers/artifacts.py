@@ -24,9 +24,9 @@ class ArtifactHandler(BaseHandler):
         >>> handler = ArtifactHandler()
         >>> register_handler(handler)
         >>>
-        >>> # Handler is used automatically by DataFolio
-        >>> folio.add_artifact('config', '/path/to/config.yaml')
-        >>> path = folio.get_artifact_path('config')
+        >>> # Files enter the folio via the explicit add_file() verb
+        >>> folio.add_file('/path/to/config.yaml', name='config')
+        >>> path = folio.get('config')
     """
 
     @property
@@ -35,17 +35,20 @@ class ArtifactHandler(BaseHandler):
         return "artifact"
 
     def can_handle(self, data: Any) -> bool:
-        """Check if data is a file path string.
+        """Artifacts are never auto-detected.
+
+        Whether a string is "a file" depends on the current working
+        directory's contents, which made ``add()``'s behavior for strings
+        nondeterministic. Files enter the folio only through the explicit
+        ``add_file()`` verb; strings passed to ``add()`` are always stored
+        as JSON data.
 
         Args:
             data: Data to check
 
         Returns:
-            True if data is a string representing an existing file
+            Always False.
         """
-        if isinstance(data, (str, Path)):
-            path = Path(data)
-            return path.exists() and path.is_file()
         return False
 
     def add(
@@ -88,8 +91,9 @@ class ArtifactHandler(BaseHandler):
             raise IsADirectoryError(f"Path is a directory, not a file: {filepath}")
 
         # Build filename - preserve extension from original file
+        # (folio injects a collision-safe versioned name).
         extension = source_path.suffix
-        filename = f"{name}{extension}"
+        filename = kwargs.get("_filename") or f"{name}{extension}"
         subdir = self.get_storage_subdir()
         dest_path = folio._storage.join_paths(folio._bundle_dir, subdir, filename)
 
@@ -117,7 +121,7 @@ class ArtifactHandler(BaseHandler):
         if description:
             metadata["description"] = description
         if inputs:
-            metadata["inputs"] = inputs
+            metadata["inputs"] = list(inputs)
 
         return metadata
 

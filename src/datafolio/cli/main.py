@@ -14,8 +14,10 @@ from rich.table import Table
 
 from datafolio import DataFolio
 
-# Global console for Rich output
-console = Console()
+# Global console for Rich output. Disable automatic syntax highlighting so
+# status messages render as plain text — otherwise Rich splits tokens like a
+# snapshot name "v1.0" with ANSI codes around the highlighted number.
+console = Console(highlight=False)
 
 
 def find_folio_dir(ctx_folio: Optional[str] = None) -> Path:
@@ -551,32 +553,6 @@ def snapshot_gc(ctx, dry_run):
         sys.exit(1)
 
 
-@snapshot.command("reproduce")
-@click.argument("name")
-@click.pass_context
-def snapshot_reproduce(ctx, name):
-    """Show reproduction instructions for a snapshot.
-
-    Example:
-        datafolio snapshot reproduce v1.0
-    """
-    try:
-        bundle_path = find_folio_dir(ctx.obj.get("folio"))
-        validate_existing_folio(bundle_path)
-        folio = DataFolio(bundle_path)
-
-        instructions = folio.reproduce_instructions(name)
-
-        console.print(f"\n[bold cyan]{instructions}[/bold cyan]")
-
-    except KeyError:
-        console.print(f"[red]✗[/red] Snapshot '{name}' not found", style="red")
-        sys.exit(1)
-    except Exception as e:
-        console.print(f"[red]✗[/red] Error: {e}", style="red")
-        sys.exit(1)
-
-
 @snapshot.command("status")
 @click.pass_context
 def snapshot_status(ctx):
@@ -602,8 +578,8 @@ def snapshot_status(ctx):
             console.print("  datafolio snapshot create v1.0 -d 'Initial snapshot'")
             return
 
-        # Get last snapshot
-        last_snapshot = snapshots[-1]
+        # Get last snapshot (list_snapshots() sorts newest-first)
+        last_snapshot = snapshots[0]
 
         # Format timestamp
         timestamp = last_snapshot.get("timestamp", "")
@@ -804,19 +780,28 @@ def validate(ctx, path):
         else:
             folio_path = find_folio_dir(ctx.obj.get("folio"))
 
-        # Validate the path
+        # Validate the path structure
         validate_existing_folio(folio_path)
 
-        # If we get here, validation succeeded
-        console.print(f"[green]✓[/green] Valid DataFolio bundle: {folio_path}")
+        # Run the real integrity validation: payload existence (and, for
+        # local owned items, checksum agreement) for every item.
+        folio = DataFolio(folio_path, read_only=True)
+        results = folio.validate()
+        failures = sorted(name for name, ok in results.items() if not ok)
 
-        # Show basic info
-        folio = DataFolio(folio_path)
-        contents = folio.list_contents()
+        contents = folio.list_contents(include_archived=True)
         num_items = sum(len(items) for items in contents.values())
         num_snapshots = len(folio.list_snapshots())
 
-        console.print(f"  Items: {num_items}")
+        if failures:
+            console.print(f"[red]✗[/red] Invalid DataFolio bundle: {folio_path}")
+            console.print(f"  Items: {num_items} ({len(failures)} failing)")
+            for name in failures:
+                console.print(f"  [red]✗[/red] {name}: missing or corrupt payload")
+            sys.exit(1)
+
+        console.print(f"[green]✓[/green] Valid DataFolio bundle: {folio_path}")
+        console.print(f"  Items: {num_items} (all payloads verified)")
         console.print(f"  Snapshots: {num_snapshots}")
 
         if folio.metadata.get("description"):
@@ -877,31 +862,55 @@ def init(ctx, path, description, name):
     try:
         from pathlib import Path
 
-        # Use provided path or current directory
-        if path:
+        from datafolio.utils import is_cloud_path
+
+        # Use provided path or current directory. Cloud URIs must stay
+        # strings: Path.resolve() would mangle 'gs://bucket/x' into a local
+        # './gs:/bucket/x' path.
+        is_cloud = bool(path) and is_cloud_path(str(path))
+        if is_cloud:
+            bundle_path = str(path).rstrip("/")
+        elif path:
             bundle_path = Path(path).resolve()
         else:
             bundle_path = Path.cwd()
 
-        # Check if bundle already exists
-        if (bundle_path / "items.json").exists():
+        # Check if bundle already exists (local only; for cloud paths
+        # DataFolio detects and opens an existing bundle itself)
+        allow_existing = False
+        if not is_cloud and (bundle_path / "items.json").exists():
             console.print(
                 f"[yellow]⚠ Warning:[/yellow] Bundle already exists at {bundle_path}"
             )
             if not click.confirm("Reinitialize (this won't delete existing data)?"):
                 console.print("[yellow]Cancelled[/yellow]")
                 return
+        elif (
+            not is_cloud
+            and Path(bundle_path).is_dir()
+            and any(Path(bundle_path).iterdir())
+        ):
+            # An existing NON-folio directory with files in it (including the
+            # documented no-argument case: the current directory). Existing
+            # files are left alone; init only adds the folio manifests.
+            console.print(f"[yellow]⚠[/yellow] {bundle_path} exists and is not empty.")
+            if not click.confirm("Initialize a folio in this directory?"):
+                console.print("[yellow]Cancelled[/yellow]")
+                return
+            allow_existing = True
 
         # Initialize bundle
         console.print(f"[dim]Initializing bundle in:[/dim] {bundle_path}")
 
         # Determine bundle name
         if name is None:
-            name = bundle_path.name
+            name = str(bundle_path).rstrip("/").rsplit("/", 1)[-1]
 
         # Create the bundle (DataFolio will create the directory)
         folio = DataFolio(
-            bundle_path, metadata={"description": description} if description else None
+            bundle_path,
+            metadata={"description": description} if description else None,
+            allow_existing=allow_existing,
         )
 
         console.print(

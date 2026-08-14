@@ -27,7 +27,7 @@ class SklearnHandler(BaseHandler):
         >>> # Handler is used automatically by DataFolio
         >>> from sklearn.ensemble import RandomForestClassifier
         >>> model = RandomForestClassifier()
-        >>> folio.add_sklearn('clf', model)
+        >>> folio.add('clf', model)
         >>>
         >>> # Also works with custom models
         >>> class CustomModel:
@@ -45,10 +45,12 @@ class SklearnHandler(BaseHandler):
     def can_handle(self, data: Any) -> bool:
         """Check if data is a scikit-learn compatible model.
 
-        Checks for:
+        Auto-detects only precise, known model classes:
         1. sklearn.base.BaseEstimator (sklearn models)
         2. Common ML framework classes (XGBoost, LightGBM, CatBoost)
-        3. sklearn-compatible interface (has fit + predict/transform methods)
+
+        Arbitrary objects that merely duck-type fit/predict are NOT detected;
+        store those explicitly with add_model().
 
         Args:
             data: Data to check
@@ -130,16 +132,9 @@ class SklearnHandler(BaseHandler):
         except (ImportError, AttributeError):
             pass
 
-        # Check for sklearn-compatible interface
-        # Must have 'fit' method AND at least one of: predict, transform, predict_proba
-        has_fit = callable(getattr(data, "fit", None))
-        has_predict = callable(getattr(data, "predict", None))
-        has_transform = callable(getattr(data, "transform", None))
-        has_predict_proba = callable(getattr(data, "predict_proba", None))
-
-        if has_fit and (has_predict or has_transform or has_predict_proba):
-            return True
-
+        # No duck-typed fallback: an arbitrary object with fit/predict is NOT
+        # auto-detected — pickling something should be an explicit act. Use
+        # add_model() for model-like objects outside the frameworks above.
         return False
 
     def add(
@@ -166,8 +161,9 @@ class SklearnHandler(BaseHandler):
             model: Model to store (sklearn estimator or any sklearn-compatible object)
             description: Optional description
             inputs: Optional lineage inputs
-            custom: If True, use skops format for portable pipelines with custom
-                transformers. If False (default), use joblib format.
+            custom: If True, use skops format, which refuses non-standard
+                types on load unless explicitly trusted (the defining classes
+                must still be importable). If False (default), use joblib.
             **kwargs: Additional arguments (currently unused)
 
         Returns:
@@ -186,8 +182,9 @@ class SklearnHandler(BaseHandler):
             pass
 
         # Build filename based on custom flag
+        # (folio injects a collision-safe versioned name).
         extension = ".skops" if custom else ".joblib"
-        filename = f"{name}{extension}"
+        filename = kwargs.get("_filename") or f"{name}{extension}"
         subdir = self.get_storage_subdir()
         filepath = folio._storage.join_paths(folio._bundle_dir, subdir, filename)
 
@@ -219,16 +216,24 @@ class SklearnHandler(BaseHandler):
         if description:
             metadata["description"] = description
         if inputs:
-            metadata["inputs"] = inputs
+            metadata["inputs"] = list(inputs)
 
         return metadata
 
-    def get(self, folio: "DataFolio", name: str, **kwargs) -> Any:
+    def get(
+        self, folio: "DataFolio", name: str, trusted: bool = False, **kwargs
+    ) -> Any:
         """Load sklearn model from folio.
+
+        SECURITY: joblib-format models are pickle — loading executes
+        arbitrary code, so never load models from untrusted folios. skops-
+        format models refuse non-standard types unless ``trusted=True``.
 
         Args:
             folio: DataFolio instance
             name: Item name
+            trusted: For skops-format models, trust the non-standard types
+                found in the file (required for custom pipelines)
             **kwargs: Additional arguments (currently unused)
 
         Returns:
@@ -237,21 +242,31 @@ class SklearnHandler(BaseHandler):
         Raises:
             KeyError: If item doesn't exist
             ImportError: If required serialization library is not installed
+            ValueError: If a skops file contains untrusted types and
+                ``trusted`` is False, or the recorded format is unknown
         """
-        # Determine format from metadata (default to joblib for legacy models)
         item = folio._items[name]
-        format = item.get("serialization_format", "joblib")
+        format = item.get("serialization_format")
+        if format is None:
+            # Legacy models predate the field; infer from the extension.
+            format = (
+                "skops"
+                if str(item.get("filename", "")).endswith(".skops")
+                else "joblib"
+            )
 
         subdir = self.get_storage_subdir()
         filepath = folio._storage.join_paths(
             folio._bundle_dir, subdir, item["filename"]
         )
 
-        # Load with appropriate backend
         if format == "skops":
-            return folio._storage.read_skops(filepath)
+            return folio._storage.read_skops(filepath, trusted=trusted)
         elif format == "joblib":
             return folio._storage.read_joblib(filepath)
         else:
-            # Fallback for unknown formats
-            return folio._storage.read_joblib(filepath)
+            raise ValueError(
+                f"Model '{name}' records unknown serialization_format "
+                f"'{format}' (expected 'joblib' or 'skops'). The manifest may "
+                f"be corrupted."
+            )

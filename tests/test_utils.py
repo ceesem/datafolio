@@ -84,9 +84,15 @@ class TestTableFormatValidation:
         """Test parquet format is valid."""
         validate_table_format("parquet")  # Should not raise
 
-    def test_valid_delta(self):
-        """Test delta format is valid."""
-        validate_table_format("delta")  # Should not raise
+    def test_delta_rejected(self):
+        """Delta is rejected with actionable guidance (no reader exists)."""
+        with pytest.raises(ValueError, match="not supported"):
+            validate_table_format("delta")
+
+    def test_iceberg_rejected(self):
+        """Iceberg is rejected with actionable guidance."""
+        with pytest.raises(ValueError, match="not supported"):
+            validate_table_format("iceberg")
 
     def test_valid_csv(self):
         """Test CSV format is valid."""
@@ -109,6 +115,6 @@ class TestFileExtension:
         """Test CSV extension."""
         assert get_file_extension("csv") == ".csv"
 
-    def test_delta_extension(self):
-        """Test Delta Lake extension (none, it's a directory)."""
-        assert get_file_extension("delta") == ""
+    def test_arrow_extension(self):
+        """Test arrow extension (internal reader format)."""
+        assert get_file_extension("arrow") == ".arrow"

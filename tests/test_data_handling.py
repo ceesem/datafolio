@@ -35,17 +35,18 @@ class TestReferenceTable:
         assert ref["description"] == "Raw training data"
         assert ref["item_type"] == "referenced_table"
 
-    def test_reference_table_delta_with_version(self, tmp_path):
-        """Test referencing Delta table with version."""
+    def test_reference_table_delta_rejected(self, tmp_path):
+        """Delta references are rejected (no reader) with actionable guidance."""
         folio = DataFolio(tmp_path / "test")
-        folio.reference_table(
-            "features", path="s3://bucket/features/", table_format="delta", version=3
-        )
-
-        ref = folio._items["features"]
-        assert ref["table_format"] == "delta"
-        assert ref["version"] == 3
-        assert ref["item_type"] == "referenced_table"
+        with pytest.raises(
+            ValueError, match="delta.*not supported|not supported.*delta"
+        ):
+            folio.reference_table(
+                "features",
+                path="s3://bucket/features/",
+                table_format="delta",
+                version=3,
+            )
 
     def test_reference_table_method_chaining(self, tmp_path):
         """Test method chaining works."""
@@ -89,12 +90,12 @@ class TestAddTable:
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6]})
 
-        folio.add_table("test", df)
+        folio.add("test", df)
 
         assert "test" in folio._items
         assert folio._items["test"]["item_type"] == "included_table"
         # Verify table can be retrieved
-        retrieved = folio.get_table("test")
+        retrieved = folio.get("test")
         pd.testing.assert_frame_equal(df, retrieved)
 
     def test_add_table_metadata(self, tmp_path):
@@ -102,7 +103,7 @@ class TestAddTable:
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6]})
 
-        folio.add_table("test", df, description="Test data")
+        folio.add("test", df, description="Test data")
 
         metadata = folio._items["test"]
         assert metadata["num_rows"] == 3
@@ -117,7 +118,7 @@ class TestAddTable:
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
 
-        result = folio.add_table("test", df)
+        result = folio.add("test", df)
         assert result is folio
 
     def test_add_table_duplicate_name(self, tmp_path):
@@ -126,10 +127,10 @@ class TestAddTable:
         df1 = pd.DataFrame({"a": [1, 2, 3]})
         df2 = pd.DataFrame({"b": [4, 5, 6]})
 
-        folio.add_table("test", df1)
+        folio.add("test", df1)
 
         with pytest.raises(ValueError, match="already exists"):
-            folio.add_table("test", df2)
+            folio.add("test", df2)
 
     def test_add_table_conflicts_with_reference(self, tmp_path):
         """Test error when name conflicts with referenced table."""
@@ -139,20 +140,20 @@ class TestAddTable:
         folio.reference_table("test", path="s3://bucket/file.parquet")
 
         with pytest.raises(ValueError, match="already exists"):
-            folio.add_table("test", df)
+            folio.add("test", df)
 
-    def test_add_table_non_dataframe(self, tmp_path):
-        """Test error with non-DataFrame input."""
+    def test_add_list_is_not_a_table(self, tmp_path):
+        """A list routes to JSON, not the table handler."""
         folio = DataFolio(tmp_path / "test")
 
-        with pytest.raises(TypeError, match="Expected a pandas or Polars DataFrame"):
-            folio.add_table("test", [1, 2, 3])
+        folio.add("test", [1, 2, 3])
+        assert folio._items["test"]["item_type"] == "json_data"
 
     def test_add_table_appears_in_list_contents(self, tmp_path):
         """Test included table appears in list_contents."""
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("test", df)
+        folio.add("test", df)
 
         contents = folio.list_contents()
         assert "test" in contents["included_tables"]
@@ -166,9 +167,9 @@ class TestGetTable:
         """Test getting an included table."""
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6]})
-        folio.add_table("test", df)
+        folio.add("test", df)
 
-        retrieved = folio.get_table("test")
+        retrieved = folio.get("test")
 
         # Tables are read fresh from disk, not cached
         pd.testing.assert_frame_equal(retrieved, df)
@@ -178,7 +179,7 @@ class TestGetTable:
         folio = DataFolio(tmp_path / "test")
 
         with pytest.raises(KeyError, match="not found"):
-            folio.get_table("nonexistent")
+            folio.get("nonexistent")
 
 
 class TestGetDataPath:
@@ -189,7 +190,7 @@ class TestGetDataPath:
         folio = DataFolio(tmp_path / "test")
         folio.reference_table("test", path="s3://bucket/file.parquet")
 
-        path = folio.get_data_path("test")
+        path = folio.item_path("test")
         assert path == "s3://bucket/file.parquet"
 
     def test_get_data_path_cloud_path(self, tmp_path):
@@ -198,24 +199,25 @@ class TestGetDataPath:
         cloud_path = "gs://my-bucket/data.parquet"
         folio.reference_table("test", path=cloud_path)
 
-        path = folio.get_data_path("test")
+        path = folio.item_path("test")
         assert path == cloud_path
 
     def test_get_data_path_included_table(self, tmp_path):
         """Test get_data_path returns bundle path for included tables."""
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("test", df)
+        folio.add("test", df)
 
-        path = folio.get_data_path("test")
-        assert "test.parquet" in path
+        path = folio.item_path("test")
+        assert path.endswith(folio._items["test"]["filename"])
+        assert path.endswith(".parquet")
 
     def test_get_data_path_not_found(self, tmp_path):
         """Test error when referenced table doesn't exist."""
         folio = DataFolio(tmp_path / "test")
 
         with pytest.raises(KeyError, match="not found"):
-            folio.get_data_path("nonexistent")
+            folio.item_path("nonexistent")
 
 
 class TestIntegration:
@@ -232,7 +234,7 @@ class TestIntegration:
 
         # Add included table
         df = pd.DataFrame({"result": [1, 2, 3]})
-        folio.add_table("results", df)
+        folio.add("results", df)
 
         # Verify both are tracked
         contents = folio.list_contents()
@@ -240,9 +242,9 @@ class TestIntegration:
         assert "results" in contents["included_tables"]
 
         # Verify retrieval works
-        retrieved_df = folio.get_table("results")
+        retrieved_df = folio.get("results")
         pd.testing.assert_frame_equal(retrieved_df, df)
-        assert folio.get_data_path("big_data") == "s3://bucket/big.parquet"
+        assert folio.item_path("big_data") == "s3://bucket/big.parquet"
 
     def test_chaining_multiple_operations(self, tmp_path):
         """Test method chaining with multiple operations."""
@@ -250,11 +252,9 @@ class TestIntegration:
         df1 = pd.DataFrame({"a": [1, 2]})
         df2 = pd.DataFrame({"b": [3, 4]})
 
-        folio.reference_table("ref1", path="s3://bucket/file1.parquet").add_table(
+        folio.reference_table("ref1", path="s3://bucket/file1.parquet").add(
             "inc1", df1
-        ).reference_table("ref2", path="s3://bucket/file2.parquet").add_table(
-            "inc2", df2
-        )
+        ).reference_table("ref2", path="s3://bucket/file2.parquet").add("inc2", df2)
 
         contents = folio.list_contents()
         assert len(contents["referenced_tables"]) == 2

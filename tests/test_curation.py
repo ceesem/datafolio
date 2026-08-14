@@ -13,7 +13,7 @@ class TestArchive:
     def test_archive_marks_item(self, tmp_path):
         """archive() sets the 'archived' flag to True in item metadata."""
         folio = DataFolio(tmp_path / "test")
-        folio.add_numpy("arr", np.array([1, 2, 3]))
+        folio.add("arr", np.array([1, 2, 3]))
 
         folio.archive("arr")
 
@@ -22,7 +22,7 @@ class TestArchive:
     def test_unarchive_removes_flag(self, tmp_path):
         """unarchive() removes the 'archived' key entirely."""
         folio = DataFolio(tmp_path / "test")
-        folio.add_numpy("arr", np.array([1, 2, 3]))
+        folio.add("arr", np.array([1, 2, 3]))
         folio.archive("arr")
 
         folio.unarchive("arr")
@@ -32,8 +32,8 @@ class TestArchive:
     def test_archived_items_hidden_from_list_contents(self, tmp_path):
         """Archived items are excluded from list_contents() by default."""
         folio = DataFolio(tmp_path / "test")
-        folio.add_numpy("visible", np.array([1]))
-        folio.add_numpy("hidden", np.array([2]))
+        folio.add("visible", np.array([1]))
+        folio.add("hidden", np.array([2]))
         folio.archive("hidden")
 
         contents = folio.list_contents()
@@ -45,8 +45,8 @@ class TestArchive:
     def test_archived_items_visible_with_flag(self, tmp_path):
         """Archived items appear when include_archived=True is passed."""
         folio = DataFolio(tmp_path / "test")
-        folio.add_numpy("visible", np.array([1]))
-        folio.add_numpy("hidden", np.array([2]))
+        folio.add("visible", np.array([1]))
+        folio.add("hidden", np.array([2]))
         folio.archive("hidden")
 
         contents = folio.list_contents(include_archived=True)
@@ -58,9 +58,9 @@ class TestArchive:
     def test_archive_glob_pattern(self, tmp_path):
         """archive() with a glob pattern archives all matching items."""
         folio = DataFolio(tmp_path / "test")
-        folio.add_numpy("intermediate/step1", np.array([1]))
-        folio.add_numpy("intermediate/step2", np.array([2]))
-        folio.add_numpy("final/result", np.array([3]))
+        folio.add("intermediate/step1", np.array([1]))
+        folio.add("intermediate/step2", np.array([2]))
+        folio.add("final/result", np.array([3]))
 
         folio.archive("intermediate/*")
 
@@ -71,8 +71,8 @@ class TestArchive:
     def test_unarchive_glob_pattern(self, tmp_path):
         """unarchive() with a glob pattern restores all matching items."""
         folio = DataFolio(tmp_path / "test")
-        folio.add_numpy("intermediate/step1", np.array([1]))
-        folio.add_numpy("intermediate/step2", np.array([2]))
+        folio.add("intermediate/step1", np.array([1]))
+        folio.add("intermediate/step2", np.array([2]))
         folio.archive("intermediate/*")
 
         folio.unarchive("intermediate/*")
@@ -83,9 +83,9 @@ class TestArchive:
     def test_archive_list_of_names(self, tmp_path):
         """archive() accepts a list of names."""
         folio = DataFolio(tmp_path / "test")
-        folio.add_numpy("a", np.array([1]))
-        folio.add_numpy("b", np.array([2]))
-        folio.add_numpy("c", np.array([3]))
+        folio.add("a", np.array([1]))
+        folio.add("b", np.array([2]))
+        folio.add("c", np.array([3]))
 
         folio.archive(["a", "b"])
 
@@ -111,17 +111,17 @@ class TestArchive:
         """get_data() can still read archived items."""
         folio = DataFolio(tmp_path / "test")
         arr = np.array([10, 20, 30])
-        folio.add_numpy("arr", arr)
+        folio.add("arr", arr)
         folio.archive("arr")
 
-        result = folio.get_data("arr")
+        result = folio.get("arr")
 
         np.testing.assert_array_equal(result, arr)
 
     def test_delete_works_on_archived(self, tmp_path):
         """delete() removes archived items from the folio."""
         folio = DataFolio(tmp_path / "test")
-        folio.add_numpy("arr", np.array([1]))
+        folio.add("arr", np.array([1]))
         folio.archive("arr")
 
         folio.delete("arr", warn_dependents=False)
@@ -131,7 +131,7 @@ class TestArchive:
     def test_archived_field_persists_on_reload(self, tmp_path):
         """The 'archived' flag survives a save/reload cycle."""
         folio = DataFolio(tmp_path / "test")
-        folio.add_numpy("arr", np.array([1, 2]))
+        folio.add("arr", np.array([1, 2]))
         folio.archive("arr")
 
         # Reload from disk
@@ -142,7 +142,7 @@ class TestArchive:
     def test_archive_returns_self(self, tmp_path):
         """archive() returns self for method chaining."""
         folio = DataFolio(tmp_path / "test")
-        folio.add_numpy("arr", np.array([1]))
+        folio.add("arr", np.array([1]))
 
         result = folio.archive("arr")
 
@@ -151,7 +151,7 @@ class TestArchive:
     def test_unarchive_returns_self(self, tmp_path):
         """unarchive() returns self for method chaining."""
         folio = DataFolio(tmp_path / "test")
-        folio.add_numpy("arr", np.array([1]))
+        folio.add("arr", np.array([1]))
         folio.archive("arr")
 
         result = folio.unarchive("arr")
@@ -165,8 +165,8 @@ class TestCopyArchived:
     def test_copy_excludes_archived_by_default(self, tmp_path):
         """copy() does not include archived items by default."""
         src = DataFolio(tmp_path / "src")
-        src.add_numpy("visible", np.array([1]))
-        src.add_numpy("hidden", np.array([2]))
+        src.add("visible", np.array([1]))
+        src.add("hidden", np.array([2]))
         src.archive("hidden")
 
         dst = src.copy(str(tmp_path / "dst"))
@@ -177,8 +177,8 @@ class TestCopyArchived:
     def test_copy_includes_archived_with_flag(self, tmp_path):
         """copy(include_archived=True) includes archived items."""
         src = DataFolio(tmp_path / "src")
-        src.add_numpy("visible", np.array([1]))
-        src.add_numpy("hidden", np.array([2]))
+        src.add("visible", np.array([1]))
+        src.add("hidden", np.array([2]))
         src.archive("hidden")
 
         dst = src.copy(str(tmp_path / "dst"), include_archived=True)
@@ -189,7 +189,7 @@ class TestCopyArchived:
     def test_archived_flag_preserved_in_copy(self, tmp_path):
         """When archived items are copied, the 'archived' flag is preserved."""
         src = DataFolio(tmp_path / "src")
-        src.add_numpy("arr", np.array([1]))
+        src.add("arr", np.array([1]))
         src.archive("arr")
 
         dst = src.copy(str(tmp_path / "dst"), include_archived=True)
@@ -203,8 +203,8 @@ class TestCreateSnapshotWithArchived:
     def test_snapshot_captures_archived_items(self, tmp_path):
         """create_snapshot() includes archived items — snapshots capture complete state."""
         folio = DataFolio(tmp_path / "test")
-        folio.add_numpy("active", np.array([1]))
-        folio.add_numpy("intermediate", np.array([2]))
+        folio.add("active", np.array([1]))
+        folio.add("intermediate", np.array([2]))
         folio.archive("intermediate")
 
         folio.create_snapshot("v1", description="test snapshot")
@@ -222,13 +222,11 @@ class TestFollowLineage:
         raw_data → features → model, predictions
         """
         folio = DataFolio(path)
-        folio.add_numpy("raw_data", np.array([1, 2, 3]))
-        folio.add_numpy("features", np.array([4, 5, 6]), inputs=["raw_data"])
-        folio.add_numpy("model", np.array([0.1, 0.2]), inputs=["features"])
-        folio.add_numpy(
-            "predictions", np.array([0, 1, 0]), inputs=["features", "model"]
-        )
-        folio.add_numpy("unrelated", np.array([99]))
+        folio.add("raw_data", np.array([1, 2, 3]))
+        folio.add("features", np.array([4, 5, 6]), inputs=["raw_data"])
+        folio.add("model", np.array([0.1, 0.2]), inputs=["features"])
+        folio.add("predictions", np.array([0, 1, 0]), inputs=["features", "model"])
+        folio.add("unrelated", np.array([99]))
         return folio
 
     def test_follow_lineage_includes_transitive_deps(self, tmp_path):
@@ -261,10 +259,10 @@ class TestFollowLineage:
     def test_follow_lineage_multiple_seeds(self, tmp_path):
         """follow_lineage=True works with multiple seed items."""
         folio = DataFolio(tmp_path / "src")
-        folio.add_numpy("a", np.array([1]))
-        folio.add_numpy("b", np.array([2]), inputs=["a"])
-        folio.add_numpy("c", np.array([3]))
-        folio.add_numpy("d", np.array([4]), inputs=["c"])
+        folio.add("a", np.array([1]))
+        folio.add("b", np.array([2]), inputs=["a"])
+        folio.add("c", np.array([3]))
+        folio.add("d", np.array([4]), inputs=["c"])
 
         dst = folio.copy(
             str(tmp_path / "dst"),
@@ -281,7 +279,7 @@ class TestFollowLineage:
         """follow_lineage=True silently skips inputs not present in the folio."""
         folio = DataFolio(tmp_path / "src")
         # 'external_table' is referenced in lineage but not in this folio
-        folio.add_numpy("result", np.array([1]), inputs=["external_table"])
+        folio.add("result", np.array([1]), inputs=["external_table"])
 
         # Should not raise; external_table is simply omitted
         dst = folio.copy(
@@ -307,9 +305,9 @@ class TestFollowLineage:
     def test_follow_lineage_respects_archived_exclusion(self, tmp_path):
         """follow_lineage=True excludes archived deps unless include_archived=True."""
         folio = DataFolio(tmp_path / "src")
-        folio.add_numpy("raw", np.array([1]))
-        folio.add_numpy("processed", np.array([2]), inputs=["raw"])
-        folio.add_numpy("result", np.array([3]), inputs=["processed"])
+        folio.add("raw", np.array([1]))
+        folio.add("processed", np.array([2]), inputs=["raw"])
+        folio.add("result", np.array([3]), inputs=["processed"])
         folio.archive("raw")  # raw is archived
 
         # Without include_archived — 'raw' should be excluded
@@ -338,8 +336,8 @@ class TestDescribeArchived:
     def test_describe_hides_archived_by_default(self, tmp_path):
         """describe() does not show archived items by default."""
         folio = DataFolio(tmp_path / "test")
-        folio.add_numpy("visible", np.array([1]))
-        folio.add_numpy("hidden", np.array([2]))
+        folio.add("visible", np.array([1]))
+        folio.add("hidden", np.array([2]))
         folio.archive("hidden")
 
         text = folio.describe(return_string=True)
@@ -350,8 +348,8 @@ class TestDescribeArchived:
     def test_describe_shows_archived_with_flag(self, tmp_path):
         """describe(include_archived=True) shows archived items."""
         folio = DataFolio(tmp_path / "test")
-        folio.add_numpy("visible", np.array([1]))
-        folio.add_numpy("hidden", np.array([2]))
+        folio.add("visible", np.array([1]))
+        folio.add("hidden", np.array([2]))
         folio.archive("hidden")
 
         text = folio.describe(return_string=True, include_archived=True)

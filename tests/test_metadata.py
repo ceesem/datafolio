@@ -14,10 +14,29 @@ from datafolio.metadata import MetadataDict
 
 @pytest.fixture
 def mock_folio():
-    """Create a mock DataFolio instance."""
+    """Create a mock DataFolio instance.
+
+    Metadata mutations run inside folio._metadata_mutation() (the guarded
+    commit scope); the mock records each entry so tests can assert on
+    commit counts. _save_metadata is kept as an alias of that counter for
+    the older assertions.
+    """
+    import contextlib
+
     folio = Mock()
-    folio._save_metadata = Mock()
     folio._read_only = False  # Not in read-only mode
+
+    commits = Mock()
+
+    @contextlib.contextmanager
+    def _metadata_mutation():
+        yield
+        commits()
+
+    folio._metadata_mutation = _metadata_mutation
+    # Older tests assert on _save_metadata call counts; the commit counter
+    # plays that role under the guarded protocol.
+    folio._save_metadata = commits
     return folio
 
 
@@ -49,20 +68,14 @@ def test_init_with_data(mock_folio):
     mock_folio._save_metadata.assert_not_called()
 
 
-def test_init_with_kwargs(mock_folio):
-    """Test initializing MetadataDict with keyword arguments."""
-    md = MetadataDict(mock_folio, name="test", version="1.0")
-
-    assert len(md) == 2
-    assert md["name"] == "test"
-    assert md["version"] == "1.0"
-    # Should not trigger save during initialization
-    mock_folio._save_metadata.assert_not_called()
-
-
-# ============================================================================
-# Test __setitem__
-# ============================================================================
+def test_init_with_reserved_key_names(mock_folio):
+    """Keys named like constructor parameters must not collide (a **kwargs
+    collision here used to make folios with a 'parent' key unopenable)."""
+    md = MetadataDict(mock_folio, {"parent": "exp-1", "self": "x", "data": 1})
+    assert md["parent"] == "exp-1"
+    assert md["self"] == "x"
+    assert md["data"] == 1
+    assert md._parent is mock_folio
 
 
 def test_setitem_triggers_save(mock_folio):
@@ -82,7 +95,7 @@ def test_setitem_updates_timestamp(mock_folio):
 
     # Set initial timestamp
     old_time = "2024-01-01T00:00:00+00:00"
-    md._parent._save_metadata = Mock()  # Reset mock
+    md._parent._save_metadata.reset_mock()  # Reset commit counter
     super(MetadataDict, md).__setitem__("updated_at", old_time)
 
     # Set a new item

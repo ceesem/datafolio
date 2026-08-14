@@ -43,7 +43,9 @@ class TestAddModel:
 
         metadata = folio._items["clf"]
         assert metadata["item_type"] == "model"
-        assert metadata["filename"] == "clf.joblib"
+        # Payload filenames are versioned but preserve the format extension.
+        assert metadata["filename"].startswith("clf--r")
+        assert metadata["filename"].endswith(".joblib")
         assert metadata["description"] == "Test classifier"
 
     def test_add_model_method_chaining(self, tmp_path):
@@ -108,7 +110,7 @@ class TestAddArtifact:
         artifact_file.write_text("test content")
 
         folio = DataFolio(tmp_path / "test")
-        folio.add_artifact("test_file", artifact_file)
+        folio.add_file(artifact_file, name="test_file")
 
         assert "test_file" in folio._items
         assert folio._items["test_file"]["item_type"] == "artifact"
@@ -119,12 +121,13 @@ class TestAddArtifact:
         artifact_file.write_text("fake image")
 
         folio = DataFolio(tmp_path / "test")
-        folio.add_artifact("loss_curve", artifact_file, category="plots")
+        folio.add_file(artifact_file, name="loss_curve", category="plots")
 
         metadata = folio._items["loss_curve"]
         assert metadata["item_type"] == "artifact"
         assert metadata["category"] == "plots"
-        assert metadata["filename"] == "loss_curve.png"
+        assert metadata["filename"].startswith("loss_curve--r")
+        assert metadata["filename"].endswith(".png")
 
     def test_add_artifact_preserves_extension(self, tmp_path):
         """Test that file extension is preserved."""
@@ -132,10 +135,11 @@ class TestAddArtifact:
         artifact_file.write_text('{"key": "value"}')
 
         folio = DataFolio(tmp_path / "test")
-        folio.add_artifact("config", artifact_file)
+        folio.add_file(artifact_file, name="config")
 
         metadata = folio._items["config"]
-        assert metadata["filename"] == "config.json"
+        # Versioned payload filename still preserves the source extension.
+        assert metadata["filename"].endswith(".json")
 
     def test_add_artifact_with_description(self, tmp_path):
         """Test artifact with description."""
@@ -143,8 +147,11 @@ class TestAddArtifact:
         artifact_file.write_text("col1,col2\n1,2")
 
         folio = DataFolio(tmp_path / "test")
-        folio.add_artifact(
-            "summary", artifact_file, category="data", description="Summary statistics"
+        folio.add_file(
+            artifact_file,
+            name="summary",
+            category="data",
+            description="Summary statistics",
         )
 
         metadata = folio._items["summary"]
@@ -156,7 +163,7 @@ class TestAddArtifact:
         artifact_file.write_text("test")
 
         folio = DataFolio(tmp_path / "test")
-        result = folio.add_artifact("test", artifact_file)
+        result = folio.add_file(artifact_file, name="test")
 
         assert result is folio
 
@@ -168,17 +175,17 @@ class TestAddArtifact:
         file2.write_text("content2")
 
         folio = DataFolio(tmp_path / "test")
-        folio.add_artifact("test", file1)
+        folio.add_file(file1, name="test")
 
         with pytest.raises(ValueError, match="already exists"):
-            folio.add_artifact("test", file2)
+            folio.add_file(file2, name="test")
 
     def test_add_artifact_file_not_found(self, tmp_path):
         """Test error when file doesn't exist."""
         folio = DataFolio(tmp_path / "test")
 
         with pytest.raises(FileNotFoundError, match="not found"):
-            folio.add_artifact("test", "/nonexistent/file.txt")
+            folio.add_file("/nonexistent/file.txt", name="test")
 
     def test_add_artifact_appears_in_list_contents(self, tmp_path):
         """Test artifact appears in list_contents."""
@@ -186,7 +193,7 @@ class TestAddArtifact:
         artifact_file.write_text("test")
 
         folio = DataFolio(tmp_path / "test")
-        folio.add_artifact("test", artifact_file)
+        folio.add_file(artifact_file, name="test")
 
         contents = folio.list_contents()
         assert "test" in contents["artifacts"]
@@ -202,9 +209,9 @@ class TestGetArtifactPath:
         artifact_file.write_text("test content")
 
         folio = DataFolio(tmp_path / "test")
-        folio.add_artifact("test", artifact_file)
+        folio.add_file(artifact_file, name="test")
 
-        retrieved_path = folio.get_artifact_path("test")
+        retrieved_path = folio.item_path("test")
 
         # Path should point to file in bundle
         assert "artifacts" in retrieved_path
@@ -215,7 +222,7 @@ class TestGetArtifactPath:
         folio = DataFolio(tmp_path / "test")
 
         with pytest.raises(KeyError, match="not found"):
-            folio.get_artifact_path("nonexistent")
+            folio.item_path("nonexistent")
 
 
 class TestModelsArtifactsIntegration:
@@ -236,8 +243,8 @@ class TestModelsArtifactsIntegration:
 
         folio.add_model("clf1", model1)
         folio.add_model("clf2", model2)
-        folio.add_artifact("plot", plot_file, category="plots")
-        folio.add_artifact("config", config_file, category="configs")
+        folio.add_file(plot_file, name="plot", category="plots")
+        folio.add_file(config_file, name="config", category="configs")
 
         # Verify tracking
         contents = folio.list_contents()
@@ -254,7 +261,7 @@ class TestModelsArtifactsIntegration:
         folio = DataFolio(tmp_path / "test")
         model = DummyModel()
 
-        folio.add_model("clf", model).add_artifact("artifact", artifact_file)
+        folio.add_model("clf", model).add_file(artifact_file, name="artifact")
 
         contents = folio.list_contents()
         assert "clf" in contents["models"]
@@ -273,4 +280,4 @@ class TestModelsArtifactsIntegration:
         folio.add_model("item1", model)
 
         with pytest.raises(ValueError, match="already exists"):
-            folio.add_artifact("item1", artifact_file)
+            folio.add_file(artifact_file, name="item1")

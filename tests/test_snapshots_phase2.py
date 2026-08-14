@@ -1,7 +1,10 @@
 """Tests for Snapshot Phase 2: Copy-on-Write Version Management.
 
-These tests verify that copy-on-write logic works correctly when overwriting
-items that are referenced by snapshots.
+These tests verify copy-on-write when overwriting items referenced by
+snapshots. With versioned payload filenames (``<name>--r<rev><ext>``) each
+version already lives in its own file, so overwriting never touches the bytes a
+snapshot depends on — there is nothing to rename. The outgoing version is simply
+marked non-current and preserved; the replacement becomes the current version.
 """
 
 import json
@@ -17,251 +20,210 @@ class TestCopyOnWrite:
     """Tests for copy-on-write when overwriting items in snapshots."""
 
     def test_overwrite_without_snapshots(self, tmp_path):
-        """Test that overwriting works normally when item not in snapshots."""
+        """Overwriting works normally when the item is not in snapshots."""
         folio = DataFolio(tmp_path / "test-bundle")
         df1 = pd.DataFrame({"a": [1, 2, 3]})
         df2 = pd.DataFrame({"a": [4, 5, 6]})
 
-        # Add item
-        folio.add_table("data", df1)
+        folio.add("data", df1)
         assert len(folio._items) == 1
         assert len(folio._snapshot_versions) == 0
 
         # Overwrite - should work since not in snapshots
-        folio.add_table("data", df2, overwrite=True)
+        folio.add("data", df2, overwrite=True)
 
-        # Should still have only 1 current item
+        # Should still have only 1 current item, no preserved versions
         assert len(folio._items) == 1
         assert len(folio._snapshot_versions) == 0
 
-        # Should have new data
-        loaded_df = folio.get_table("data")
+        loaded_df = folio.get("data")
         pd.testing.assert_frame_equal(loaded_df, df2)
 
     def test_copy_on_write_when_in_snapshots(self, tmp_path):
-        """Test that copy-on-write preserves old version when overwriting."""
+        """Copy-on-write preserves the old version when overwriting."""
         folio = DataFolio(tmp_path / "test-bundle")
         df1 = pd.DataFrame({"a": [1, 2, 3]})
         df2 = pd.DataFrame({"a": [4, 5, 6]})
 
-        # Add item
-        folio.add_table("data", df1)
+        folio.add("data", df1)
 
-        # Manually mark as in snapshot (Phase 3 will do this via create_snapshot())
-        folio._items["data"]["in_snapshots"] = ["v1.0"]
+        # Manually mark as in snapshot (Phase 3 does this via create_snapshot()).
+        folio.create_snapshot("v1.0")
 
         # Overwrite - should trigger copy-on-write
-        folio.add_table("data", df2, overwrite=True)
+        folio.add("data", df2, overwrite=True)
 
-        # Should have 1 current item + 1 snapshot version
+        # 1 current item + 1 preserved snapshot version
         assert len(folio._items) == 1
         assert len(folio._snapshot_versions) == 1
 
-        # Current item should be new data
+        # Current item should be the new data
         assert folio._items["data"]["is_current"] is True
-        assert folio._items["data"]["in_snapshots"] == []
+        assert folio._snapshot_pins(folio._items["data"]) == []
 
-        # Snapshot version should be old data
+        # Snapshot version should be the old data, non-current, in its own file.
         snapshot_item = folio._snapshot_versions[0]
         assert snapshot_item["name"] == "data"
         assert snapshot_item["is_current"] is False
-        assert snapshot_item["in_snapshots"] == ["v1.0"]
-        assert "@v1.0" in snapshot_item["filename"]  # Renamed with @ syntax
+        assert folio._snapshot_pins(snapshot_item) == ["v1.0"]
+        # No rename: the preserved version keeps its own distinct payload file.
+        assert snapshot_item["filename"] != folio._items["data"]["filename"]
+        assert snapshot_item.get("version_id")
 
-        # Current data should be new
-        loaded_df = folio.get_table("data")
+        loaded_df = folio.get("data")
         pd.testing.assert_frame_equal(loaded_df, df2)
 
-    def test_snapshot_filename_uses_first_snapshot_name(self, tmp_path):
-        """Test that renamed file uses first snapshot name."""
+    def test_preserved_version_file_is_not_renamed(self, tmp_path):
+        """The old version's payload file is preserved in place, not renamed."""
         folio = DataFolio(tmp_path / "test-bundle")
         df1 = pd.DataFrame({"a": [1, 2, 3]})
         df2 = pd.DataFrame({"a": [4, 5, 6]})
 
-        # Add item
-        folio.add_table("data", df1)
-
-        # Mark as in multiple snapshots
-        folio._items["data"]["in_snapshots"] = ["v1.0", "v1.1", "v1.2"]
-
-        # Overwrite
-        folio.add_table("data", df2, overwrite=True)
-
-        # Snapshot version should use first snapshot name (v1.0)
-        snapshot_item = folio._snapshot_versions[0]
-        assert "@v1.0" in snapshot_item["filename"]
-        assert snapshot_item["in_snapshots"] == ["v1.0", "v1.1", "v1.2"]
-
-    def test_file_actually_renamed(self, tmp_path):
-        """Test that physical file is renamed with @snapshot suffix."""
-        folio = DataFolio(tmp_path / "test-bundle")
-        df1 = pd.DataFrame({"a": [1, 2, 3]})
-        df2 = pd.DataFrame({"a": [4, 5, 6]})
-
-        # Add item
-        folio.add_table("data", df1)
-
-        # Check original file exists
+        folio.add("data", df1)
+        original_filename = folio._items["data"]["filename"]
         tables_dir = Path(folio._bundle_dir) / "tables"
-        original_file = tables_dir / "data.parquet"
-        assert original_file.exists()
+        assert (tables_dir / original_filename).exists()
 
-        # Mark as in snapshot
-        folio._items["data"]["in_snapshots"] = ["v1.0"]
+        folio.create_snapshot("v1.0")
+        folio.add("data", df2, overwrite=True)
 
-        # Overwrite - triggers copy-on-write
-        folio.add_table("data", df2, overwrite=True)
+        # The old file still exists under its ORIGINAL name (never renamed).
+        preserved = folio._snapshot_versions[0]
+        assert preserved["filename"] == original_filename
+        assert (tables_dir / original_filename).exists()
 
-        # Old file should be renamed to @v1.0
-        snapshot_file = tables_dir / "data@v1.0.parquet"
-        assert snapshot_file.exists()
+        # A new, distinct current file holds the new data.
+        current_filename = folio._items["data"]["filename"]
+        assert current_filename != original_filename
+        assert (tables_dir / current_filename).exists()
 
-        # New current file should exist
-        assert original_file.exists()
-
-        # Old file should have old data
-        df_snapshot = pd.read_parquet(snapshot_file)
-        pd.testing.assert_frame_equal(df_snapshot, df1)
-
-        # New file should have new data
-        df_current = pd.read_parquet(original_file)
-        pd.testing.assert_frame_equal(df_current, df2)
+        pd.testing.assert_frame_equal(
+            pd.read_parquet(tables_dir / original_filename), df1
+        )
+        pd.testing.assert_frame_equal(
+            pd.read_parquet(tables_dir / current_filename), df2
+        )
 
     def test_items_json_contains_both_versions(self, tmp_path):
-        """Test that items.json saves both current and snapshot versions."""
+        """items.json persists both the current and the preserved version."""
         folio = DataFolio(tmp_path / "test-bundle")
         df1 = pd.DataFrame({"a": [1, 2, 3]})
         df2 = pd.DataFrame({"a": [4, 5, 6]})
 
-        # Add item
-        folio.add_table("data", df1)
+        folio.add("data", df1)
+        folio.create_snapshot("v1.0")
+        folio.add("data", df2, overwrite=True)
 
-        # Mark as in snapshot
-        folio._items["data"]["in_snapshots"] = ["v1.0"]
-
-        # Overwrite
-        folio.add_table("data", df2, overwrite=True)
-
-        # Read items.json directly
         items_path = Path(folio._bundle_dir) / "items.json"
         with open(items_path) as f:
             items_data = json.load(f)
 
-        # Should have 2 items with same name
         items = items_data["items"]
         assert len(items) == 2
 
-        # One should be current
         current_items = [item for item in items if item.get("is_current")]
         assert len(current_items) == 1
-        assert current_items[0]["filename"] == "data.parquet"
+        # Current payload is versioned and distinct from the preserved one.
+        assert current_items[0]["filename"] == folio._items["data"]["filename"]
 
-        # One should be snapshot version
         snapshot_items = [item for item in items if not item.get("is_current")]
         assert len(snapshot_items) == 1
-        assert "@v1.0" in snapshot_items[0]["filename"]
-        assert "v1.0" in snapshot_items[0]["in_snapshots"]
+        assert "v1.0" in folio._snapshot_pins(snapshot_items[0])
+        assert snapshot_items[0]["filename"] != current_items[0]["filename"]
 
     def test_reload_after_copy_on_write(self, tmp_path):
-        """Test that bundle reloads correctly after copy-on-write."""
-        # Create bundle and trigger copy-on-write
+        """The bundle reloads correctly after copy-on-write."""
         folio1 = DataFolio(tmp_path / "test-bundle")
         df1 = pd.DataFrame({"a": [1, 2, 3]})
         df2 = pd.DataFrame({"a": [4, 5, 6]})
 
-        folio1.add_table("data", df1)
-        folio1._items["data"]["in_snapshots"] = ["v1.0"]
-        folio1.add_table("data", df2, overwrite=True)
+        folio1.add("data", df1)
+        folio1.create_snapshot("v1.0")
+        folio1.add("data", df2, overwrite=True)
+        preserved_filename = folio1._snapshot_versions[0]["filename"]
 
-        # Reload bundle
         folio2 = DataFolio(folio1._bundle_dir)
 
-        # Should have 1 current + 1 snapshot version
         assert len(folio2._items) == 1
         assert len(folio2._snapshot_versions) == 1
 
-        # Current should be new data
-        loaded_df = folio2.get_table("data")
+        loaded_df = folio2.get("data")
         pd.testing.assert_frame_equal(loaded_df, df2)
 
-        # Snapshot version should be preserved
-        assert folio2._snapshot_versions[0]["in_snapshots"] == ["v1.0"]
-        assert "@v1.0" in folio2._snapshot_versions[0]["filename"]
+        assert folio2._snapshot_pins(folio2._snapshot_versions[0]) == ["v1.0"]
+        assert folio2._snapshot_versions[0]["filename"] == preserved_filename
 
     def test_multiple_overwrites(self, tmp_path):
-        """Test multiple overwrites creating multiple snapshot versions."""
+        """Multiple overwrites create multiple preserved versions."""
         folio = DataFolio(tmp_path / "test-bundle")
         df1 = pd.DataFrame({"a": [1, 2, 3]})
         df2 = pd.DataFrame({"a": [4, 5, 6]})
         df3 = pd.DataFrame({"a": [7, 8, 9]})
 
-        # First version
-        folio.add_table("data", df1)
-        folio._items["data"]["in_snapshots"] = ["v1.0"]
+        folio.add("data", df1)
+        folio.create_snapshot("v1.0")
 
-        # Second version (first overwrite)
-        folio.add_table("data", df2, overwrite=True)
-        folio._items["data"]["in_snapshots"] = ["v2.0"]
+        folio.add("data", df2, overwrite=True)
+        folio.create_snapshot("v2.0")
 
-        # Third version (second overwrite)
-        folio.add_table("data", df3, overwrite=True)
+        folio.add("data", df3, overwrite=True)
 
-        # Should have 1 current + 2 snapshot versions
+        # 1 current + 2 preserved versions
         assert len(folio._items) == 1
         assert len(folio._snapshot_versions) == 2
 
-        # Current should be newest data
-        loaded_df = folio.get_table("data")
+        loaded_df = folio.get("data")
         pd.testing.assert_frame_equal(loaded_df, df3)
 
-        # Should have v1.0 and v2.0 snapshot versions
-        snapshot_files = [item["filename"] for item in folio._snapshot_versions]
-        assert any("@v1.0" in f for f in snapshot_files)
-        assert any("@v2.0" in f for f in snapshot_files)
+        # Each preserved version has its own distinct payload file and version id.
+        filenames = [item["filename"] for item in folio._snapshot_versions]
+        version_ids = [item.get("version_id") for item in folio._snapshot_versions]
+        assert len(set(filenames)) == 2
+        assert all(version_ids)
+        assert len(set(version_ids)) == 2
+        # v1.0 and v2.0 are each represented among the preserved versions.
+        snaps = [set(folio._snapshot_pins(item)) for item in folio._snapshot_versions]
+        assert {"v1.0"} in snaps
+        assert {"v2.0"} in snaps
 
 
 class TestCopyOnWriteErrors:
     """Tests for error handling in copy-on-write logic."""
 
     def test_cannot_overwrite_without_flag(self, tmp_path):
-        """Test that overwriting without flag raises error (backward compat)."""
+        """Overwriting without the flag raises (backward compat)."""
         folio = DataFolio(tmp_path / "test-bundle")
         df1 = pd.DataFrame({"a": [1, 2, 3]})
         df2 = pd.DataFrame({"a": [4, 5, 6]})
 
-        folio.add_table("data", df1)
+        folio.add("data", df1)
 
-        # Should raise error without overwrite=True
         with pytest.raises(ValueError, match="already exists"):
-            folio.add_table("data", df2)
+            folio.add("data", df2)
 
     def test_can_overwrite_with_flag_when_not_in_snapshots(self, tmp_path):
-        """Test that overwrite=True works when item not in snapshots."""
+        """overwrite=True works when the item is not in snapshots."""
         folio = DataFolio(tmp_path / "test-bundle")
         df1 = pd.DataFrame({"a": [1, 2, 3]})
         df2 = pd.DataFrame({"a": [4, 5, 6]})
 
-        folio.add_table("data", df1)
-        folio.add_table("data", df2, overwrite=True)  # Should work
+        folio.add("data", df1)
+        folio.add("data", df2, overwrite=True)
 
-        # Should only have 1 version
         assert len(folio._items) == 1
         assert len(folio._snapshot_versions) == 0
 
     def test_automatic_copy_on_write_when_in_snapshots(self, tmp_path):
-        """Test that copy-on-write happens automatically for items in snapshots."""
+        """Copy-on-write happens automatically for items in snapshots."""
         folio = DataFolio(tmp_path / "test-bundle")
         df1 = pd.DataFrame({"a": [1, 2, 3]})
         df2 = pd.DataFrame({"a": [4, 5, 6]})
 
-        folio.add_table("data", df1)
-        folio._items["data"]["in_snapshots"] = ["v1.0"]
+        folio.add("data", df1)
+        folio.create_snapshot("v1.0")
 
-        # Should work even without overwrite=True (snapshots force preservation)
-        # Actually, it still requires overwrite=True for now
-        folio.add_table("data", df2, overwrite=True)
+        folio.add("data", df2, overwrite=True)
 
-        # Should have created snapshot version
         assert len(folio._snapshot_versions) == 1
 
 

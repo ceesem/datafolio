@@ -10,15 +10,15 @@ def test_batch_mode(tmp_path):
     folio = DataFolio(tmp_path / "batch_test")
 
     # Verify items.json is saved normally
-    folio.add_json("item1", {"a": 1})
+    folio.add("item1", {"a": 1})
     assert (folio._bundle_path / "items.json").exists()
 
     # Check timestamp of items.json
     t1 = (folio._bundle_path / "items.json").stat().st_mtime
 
     with folio.batch():
-        folio.add_json("item2", {"b": 2})
-        folio.add_json("item3", {"c": 3})
+        folio.add("item2", {"b": 2})
+        folio.add("item3", {"c": 3})
         # items.json should NOT be updated yet (or at least not written to disk repeatedly)
         # But since we can't easily check write count without mocking,
         # we rely on logic correctness.
@@ -34,11 +34,35 @@ def test_batch_mode(tmp_path):
     assert "item2" in folio2.list_contents()["json_data"]
 
 
+def test_contains(tmp_path):
+    folio = DataFolio(tmp_path / "contains_test")
+
+    # Absent before add, present after — the guard-then-add idiom
+    assert "my_data" not in folio
+    if "my_data" not in folio:
+        folio.add("my_data", {"a": 1})
+    assert "my_data" in folio
+
+    # Non-string keys are never members
+    assert 123 not in folio
+    assert None not in folio
+
+    # Archived items count as present (membership mirrors get())
+    folio.archive("my_data")
+    assert "my_data" in folio
+    assert folio.get("my_data") == {"a": 1}
+
+    # Membership reflects a reload from disk
+    folio2 = DataFolio(tmp_path / "contains_test")
+    assert "my_data" in folio2
+    assert "nope" not in folio2
+
+
 def test_validate(tmp_path):
     folio = DataFolio(tmp_path / "validate_test")
 
     # Add valid items
-    folio.add_json("valid_json", {"a": 1})
+    folio.add("valid_json", {"a": 1})
 
     # Add reference
     ref_path = tmp_path / "external.csv"
@@ -50,8 +74,8 @@ def test_validate(tmp_path):
     assert results["valid_json"] is True
     assert results["valid_ref"] is True
 
-    # Corrupt bundle (delete internal file)
-    (folio._bundle_path / "artifacts" / "valid_json.json").unlink()
+    # Corrupt bundle (delete internal file — payload filenames are versioned)
+    (folio._bundle_path / "artifacts" / folio._items["valid_json"]["filename"]).unlink()
 
     # Corrupt reference (delete external file)
     ref_path.unlink()
@@ -70,7 +94,7 @@ def test_checksum_validation(tmp_path):
     art_path.write_text("hello world")
 
     # Add artifact (should calc checksum)
-    folio.add_artifact("my_art", str(art_path))
+    folio.add_file(str(art_path), name="my_art")
 
     # Verify checksum in metadata
     item = folio._items["my_art"]
@@ -80,8 +104,8 @@ def test_checksum_validation(tmp_path):
     # Validate - should be True
     assert folio.validate()["my_art"] is True
 
-    # Modify file in bundle to corrupt it
-    bundle_file = folio._bundle_path / "artifacts" / "my_art.txt"
+    # Modify file in bundle to corrupt it (payload filenames are versioned)
+    bundle_file = folio._bundle_path / "artifacts" / folio._items["my_art"]["filename"]
     bundle_file.write_text("hacked content")
 
     # Validate - should be False due to checksum mismatch
@@ -127,12 +151,12 @@ def test_extended_checksums(tmp_path):
     import numpy as np
 
     arr = np.array([1, 2, 3])
-    folio.add_numpy("arr", arr)
+    folio.add("arr", arr)
     assert "checksum" in folio._items["arr"]
     assert folio.validate()["arr"] is True
 
     # Test JSON
-    folio.add_json("config", {"a": 1})
+    folio.add("config", {"a": 1})
     assert "checksum" in folio._items["config"]
     assert folio.validate()["config"] is True
 
@@ -145,7 +169,9 @@ def test_extended_checksums(tmp_path):
     assert folio.validate()["model"] is True
 
     # Corrupt one
-    (folio._bundle_path / "artifacts" / "config.json").write_text("{}")
+    (folio._bundle_path / "artifacts" / folio._items["config"]["filename"]).write_text(
+        "{}"
+    )
     assert folio.validate()["config"] is False
 
 
@@ -153,14 +179,16 @@ def test_is_valid(tmp_path):
     folio = DataFolio(tmp_path / "is_valid_test")
 
     # Add valid items
-    folio.add_json("item1", {"a": 1})
-    folio.add_json("item2", {"b": 2})
+    folio.add("item1", {"a": 1})
+    folio.add("item2", {"b": 2})
 
     # Should be valid
     assert folio.is_valid() is True
 
-    # Corrupt one item
-    (folio._bundle_path / "artifacts" / "item1.json").write_text("corrupted")
+    # Corrupt one item (payload filenames are versioned)
+    (folio._bundle_path / "artifacts" / folio._items["item1"]["filename"]).write_text(
+        "corrupted"
+    )
 
     # Should be invalid
     assert folio.is_valid() is False

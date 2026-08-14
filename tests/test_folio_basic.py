@@ -142,7 +142,7 @@ class TestRepr:
 
         folio = DataFolio(tmp_path / "test", metadata={"key1": "val1"})
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("test", df)
+        folio.add("test", df)
         repr_str = repr(folio)
 
         assert "items=1" in repr_str
@@ -246,7 +246,7 @@ class TestVersionAndReadme:
         # Check that the path is included in usage example
         assert "from datafolio import DataFolio" in readme_content
         assert "folio.describe()" in readme_content
-        assert "folio.get_table" in readme_content
+        assert "folio.get(" in readme_content
 
     def test_existing_datafolio_metadata_not_overwritten(self, tmp_path):
         """Test that existing _datafolio metadata is not overwritten."""
@@ -284,8 +284,8 @@ class TestDelete:
 
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data1", df)
-        folio.add_table("data2", df)
+        folio.add("data1", df)
+        folio.add("data2", df)
 
         # Delete one table
         folio.delete("data1")
@@ -304,9 +304,9 @@ class TestDelete:
 
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data1", df)
-        folio.add_table("data2", df)
-        folio.add_table("data3", df)
+        folio.add("data1", df)
+        folio.add("data2", df)
+        folio.add("data3", df)
 
         # Delete multiple items
         folio.delete(["data1", "data2"])
@@ -316,10 +316,11 @@ class TestDelete:
         assert "data2" not in folio._items
         assert "data3" in folio._items
 
-        # Verify files are deleted
-        assert not (tmp_path / "test" / "tables" / "data1.parquet").exists()
-        assert not (tmp_path / "test" / "tables" / "data2.parquet").exists()
-        assert (tmp_path / "test" / "tables" / "data3.parquet").exists()
+        # Verify files are deleted (payload filenames are versioned; only the
+        # surviving item's payload should remain in tables/).
+        tables_dir = tmp_path / "test" / "tables"
+        remaining = {p.name for p in tables_dir.glob("*.parquet")}
+        assert remaining == {folio._items["data3"]["filename"]}
 
     def test_delete_model(self, tmp_path):
         """Test deleting a model."""
@@ -342,7 +343,7 @@ class TestDelete:
 
         folio = DataFolio(tmp_path / "test")
         arr = np.array([1, 2, 3])
-        folio.add_numpy("embeddings", arr)
+        folio.add("embeddings", arr)
 
         # Delete array
         folio.delete("embeddings")
@@ -354,7 +355,7 @@ class TestDelete:
     def test_delete_json_data(self, tmp_path):
         """Test deleting JSON data."""
         folio = DataFolio(tmp_path / "test")
-        folio.add_json("config", {"lr": 0.01, "batch_size": 32})
+        folio.add("config", {"lr": 0.01, "batch_size": 32})
 
         # Delete JSON
         folio.delete("config")
@@ -370,7 +371,7 @@ class TestDelete:
         artifact_file.write_text("fake image")
 
         folio = DataFolio(tmp_path / "test")
-        folio.add_artifact("plot", artifact_file)
+        folio.add_file(artifact_file, name="plot")
 
         # Delete artifact
         folio.delete("plot")
@@ -413,8 +414,8 @@ class TestDelete:
 
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data1", df)
-        folio.add_table("data2", df)
+        folio.add("data1", df)
+        folio.add("data2", df)
 
         # Try to delete with one nonexistent item
         with pytest.raises(KeyError, match="nonexistent"):
@@ -433,8 +434,8 @@ class TestDelete:
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
 
-        folio.add_table("raw", df)
-        folio.add_table("processed", df, inputs=["raw"])
+        folio.add("raw", df)
+        folio.add("processed", df, inputs=["raw"])
 
         # Delete item with dependent - should warn
         with warnings.catch_warnings(record=True) as w:
@@ -458,8 +459,8 @@ class TestDelete:
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
 
-        folio.add_table("raw", df)
-        folio.add_table("processed", df, inputs=["raw"])
+        folio.add("raw", df)
+        folio.add("processed", df, inputs=["raw"])
 
         # Delete without warning
         with warnings.catch_warnings(record=True) as w:
@@ -478,8 +479,8 @@ class TestDelete:
 
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data1", df)
-        folio.add_table("data2", df)
+        folio.add("data1", df)
+        folio.add("data2", df)
 
         # Chain delete operations
         result = folio.delete("data1").delete("data2")
@@ -494,7 +495,7 @@ class TestDelete:
 
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
 
         # Delete and reload
         folio.delete("data")
@@ -513,7 +514,7 @@ class TestUpdateItem:
 
         folio = DataFolio(tmp_path / "test")
         arr = np.array([1, 2, 3])
-        folio.add_numpy("test_array", arr)
+        folio.add("test_array", arr)
 
         # Initially no description
         assert "description" not in folio._items["test_array"]
@@ -530,7 +531,7 @@ class TestUpdateItem:
 
         folio = DataFolio(tmp_path / "test")
         arr = np.array([1, 2, 3])
-        folio.add_numpy("test_array", arr)
+        folio.add("test_array", arr)
 
         # Update inputs
         folio.update_item("test_array", inputs=["raw_data", "preprocessing"])
@@ -542,11 +543,10 @@ class TestUpdateItem:
 
         folio = DataFolio(tmp_path / "test")
         arr = np.array([1, 2, 3])
-        folio.add_numpy("test_array", arr)
+        folio.add("test_array", arr)
 
         # Update code
-        folio.update_item("test_array", code="arr = np.array([1, 2, 3])")
-        assert folio._items["test_array"]["code"] == "arr = np.array([1, 2, 3])"
+        folio.update_item("test_array", description="an array")
 
     def test_update_multiple_fields(self, tmp_path):
         """Test updating multiple fields at once."""
@@ -554,20 +554,18 @@ class TestUpdateItem:
 
         folio = DataFolio(tmp_path / "test")
         arr = np.array([1, 2, 3])
-        folio.add_numpy("test_array", arr)
+        folio.add("test_array", arr)
 
         # Update multiple fields
         folio.update_item(
             "test_array",
             description="Updated description",
             inputs=["new_input"],
-            code="new_code",
         )
 
         item = folio._items["test_array"]
         assert item["description"] == "Updated description"
         assert item["inputs"] == ["new_input"]
-        assert item["code"] == "new_code"
 
     def test_clear_fields_with_empty_values(self, tmp_path):
         """Test clearing fields with empty string/list."""
@@ -575,21 +573,19 @@ class TestUpdateItem:
 
         folio = DataFolio(tmp_path / "test")
         arr = np.array([1, 2, 3])
-        folio.add_numpy(
+        folio.add(
             "test_array",
             arr,
             description="Initial description",
             inputs=["input1"],
-            code="code1",
         )
 
         # Clear fields
-        folio.update_item("test_array", description="", inputs=[], code="")
+        folio.update_item("test_array", description="", inputs=[])
 
         item = folio._items["test_array"]
         assert "description" not in item
         assert "inputs" not in item
-        assert "code" not in item
 
     def test_update_nonexistent_item_raises_error(self, tmp_path):
         """Test that updating nonexistent item raises KeyError."""
@@ -606,7 +602,7 @@ class TestUpdateItem:
 
         folio = DataFolio(tmp_path / "test")
         arr = np.array([1, 2, 3])
-        folio.add_numpy("test_array", arr)
+        folio.add("test_array", arr)
 
         # Update description
         folio.update_item("test_array", description="Persisted description")
@@ -621,7 +617,7 @@ class TestUpdateItem:
 
         folio = DataFolio(tmp_path / "test")
         arr = np.array([1, 2, 3])
-        folio.add_numpy("test_array", arr)
+        folio.add("test_array", arr)
 
         result = folio.update_item("test_array", description="Test")
         assert result is folio
@@ -633,7 +629,7 @@ class TestUpdateItem:
 
         folio = DataFolio(tmp_path / "test")
         arr = np.array([1, 2, 3])
-        folio.add_numpy("test_array", arr)
+        folio.add("test_array", arr)
 
         # Reopen in read-only mode
         folio_ro = DataFolio(tmp_path / "test", read_only=True)
@@ -647,9 +643,7 @@ class TestUpdateItem:
 
         folio = DataFolio(tmp_path / "test")
         arr = np.array([1, 2, 3])
-        folio.add_numpy(
-            "test_array", arr, description="Original", inputs=["input1"], code="code1"
-        )
+        folio.add("test_array", arr, description="Original", inputs=["input1"])
 
         # Update only description
         folio.update_item("test_array", description="Updated")
@@ -657,7 +651,6 @@ class TestUpdateItem:
         item = folio._items["test_array"]
         assert item["description"] == "Updated"
         assert item["inputs"] == ["input1"]  # Should still be there
-        assert item["code"] == "code1"  # Should still be there
 
 
 class TestAddFile:
@@ -673,8 +666,10 @@ class TestAddFile:
 
         # Name should be stem (without extension)
         assert "readme" in folio._items
-        # But filename should have extension
-        assert folio._items["readme"]["filename"] == "readme.md"
+        # Payload filenames are versioned (name--r<rev>.ext) but preserve the
+        # original extension and are derived from the logical name.
+        fn = folio._items["readme"]["filename"]
+        assert fn.startswith("readme--r") and fn.endswith(".md")
         assert folio._items["readme"]["description"] == "Project docs"
 
     def test_add_file_with_custom_name(self, tmp_path):
@@ -686,7 +681,8 @@ class TestAddFile:
         folio.add_file(code_file, name="training_script")
 
         assert "training_script" in folio._items
-        assert folio._items["training_script"]["filename"] == "training_script.py"
+        fn = folio._items["training_script"]["filename"]
+        assert fn.startswith("training_script--r") and fn.endswith(".py")
 
     def test_add_file_with_category(self, tmp_path):
         """Test adding file with category."""
@@ -708,9 +704,9 @@ class TestAddFile:
         folio = DataFolio(tmp_path / "test")
         folio.add_file(source)
 
-        # Verify file was copied to artifacts/
-        artifacts_dir = tmp_path / "test" / "artifacts"
-        copied_file = artifacts_dir / "source.txt"
+        # Verify file was copied to artifacts/ (versioned payload filename)
+        copied_file = Path(folio.item_path("source"))
+        assert copied_file.parent == tmp_path / "test" / "artifacts"
         assert copied_file.exists()
         assert copied_file.read_text() == content
 
@@ -732,7 +728,8 @@ class TestAddFile:
 
             stem = Path(filename).stem
             assert stem in folio._items
-            assert folio._items[stem]["filename"] == filename
+            # Versioned payload name preserves the original extension.
+            assert folio._items[stem]["filename"].endswith(Path(filename).suffix)
 
     def test_add_file_method_chaining(self, tmp_path):
         """Test that add_file returns self for chaining."""
@@ -764,9 +761,8 @@ class TestAddFile:
 
         assert folio._items["data"]["description"] == "Updated"
 
-        # Verify content was updated
-        artifacts_dir = tmp_path / "test" / "artifacts"
-        assert (artifacts_dir / "data.txt").read_text() == "updated content"
+        # Verify content was updated (read via the recorded versioned filename)
+        assert Path(folio.item_path("data")).read_text() == "updated content"
 
     def test_add_file_get_path(self, tmp_path):
         """Test retrieving file path with get_artifact_path."""
@@ -777,7 +773,7 @@ class TestAddFile:
         folio.add_file(source)
 
         # Get path using stem name
-        path = folio.get_artifact_path("readme")
+        path = folio.item_path("readme")
         assert Path(path).exists()
         assert Path(path).read_text() == "# README"
 
@@ -824,11 +820,11 @@ def test_percentile_clipper_roundtrip(tmp_path):
 
     # Save with skops
     folio = DataFolio(tmp_path / "analysis")
-    folio.add_sklearn("preprocessing_pipeline", pipeline, custom=True)
+    folio.add_model("preprocessing_pipeline", pipeline, custom=True)
 
     # Load in "different analysis project" (simulate by creating new folio)
     folio2 = DataFolio(tmp_path / "analysis")
-    loaded = folio2.get_sklearn("preprocessing_pipeline")
+    loaded = folio2.get_model("preprocessing_pipeline", trusted=True)
 
     # Verify it works
     X_test = np.random.randn(10, 5)

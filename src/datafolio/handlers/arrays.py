@@ -25,7 +25,7 @@ class NumpyHandler(BaseHandler):
         >>>
         >>> # Handler is used automatically by DataFolio
         >>> import numpy as np
-        >>> folio.add_numpy('embeddings', np.random.randn(100, 128))
+        >>> folio.add('embeddings', np.random.randn(100, 128))
     """
 
     @property
@@ -91,8 +91,28 @@ class NumpyHandler(BaseHandler):
         if not isinstance(data, np.ndarray):
             raise TypeError(f"Expected numpy array, got {type(data).__name__}")
 
-        # Build filename
-        filename = f"{name}.npy"
+        if isinstance(data, np.ma.MaskedArray):
+            # np.save either fails deep in numpy or silently drops the mask
+            # depending on version — refuse clearly instead.
+            raise ValueError(
+                f"Cannot store array '{name}': masked arrays are not "
+                f"supported by the .npy round-trip (the mask would be lost). "
+                f"Store data and mask separately (e.g. arr.data and "
+                f"arr.mask), or use arr.filled(fill_value)."
+            )
+
+        if data.dtype.hasobject:
+            # np.save writes object arrays with pickle, but np.load refuses
+            # them by default — the write would succeed and every read fail.
+            raise ValueError(
+                f"Cannot store array '{name}': object-dtype arrays are "
+                f"pickled by np.save and cannot be read back safely. Convert "
+                f"to a concrete dtype (e.g. .astype(str) or .astype(float)), "
+                f"or store the object explicitly with add_model()."
+            )
+
+        # Build filename (folio injects a collision-safe versioned name)
+        filename = kwargs.get("_filename") or f"{name}.npy"
         subdir = self.get_storage_subdir()
         filepath = folio._storage.join_paths(folio._bundle_dir, subdir, filename)
 
@@ -117,7 +137,7 @@ class NumpyHandler(BaseHandler):
         if description:
             metadata["description"] = description
         if inputs:
-            metadata["inputs"] = inputs
+            metadata["inputs"] = list(inputs)
 
         return metadata
 

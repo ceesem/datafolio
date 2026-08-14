@@ -65,7 +65,7 @@ class TestBackwardCompatibility:
 
         # Verify snapshot fields were added
         assert folio._items["test_table"]["is_current"] is True
-        assert folio._items["test_table"]["in_snapshots"] == []
+        assert folio._snapshot_pins(folio._items["test_table"]) == []
 
         # Verify snapshots initialized as empty
         assert folio._snapshots == {}
@@ -75,7 +75,7 @@ class TestBackwardCompatibility:
         # Create a normal bundle using DataFolio
         folio1 = DataFolio(tmp_path / "test-bundle")
         df = pd.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6]})
-        folio1.add_table("data", df)
+        folio1.add("data", df)
 
         # Verify snapshots.json doesn't exist
         snapshots_path = Path(folio1._bundle_dir) / "snapshots.json"
@@ -98,7 +98,7 @@ class TestNewItemsFormat:
         """Test that new bundles save items with snapshot fields."""
         folio = DataFolio(tmp_path / "test-bundle")
         df = pd.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6]})
-        folio.add_table("data", df)
+        folio.add("data", df)
 
         # Read items.json directly
         items_path = Path(folio._bundle_dir) / "items.json"
@@ -112,23 +112,22 @@ class TestNewItemsFormat:
         assert len(items_data["items"]) == 1
         item = items_data["items"][0]
         assert "is_current" in item
-        assert "in_snapshots" in item
         assert item["is_current"] is True
-        assert item["in_snapshots"] == []
+        assert folio._snapshot_pins(item) == []
 
     def test_reload_new_format_bundle(self, tmp_path):
         """Test that bundles with new format reload correctly."""
         # Create bundle with new format
         folio1 = DataFolio(tmp_path / "test-bundle")
         df = pd.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6]})
-        folio1.add_table("data", df)
+        folio1.add("data", df)
 
         # Reload
         folio2 = DataFolio(folio1._bundle_dir)
 
         # Verify snapshot fields loaded
         assert folio2._items["data"]["is_current"] is True
-        assert folio2._items["data"]["in_snapshots"] == []
+        assert folio2._snapshot_pins(folio2._items["data"]) == []
 
 
 class TestSnapshotsManifest:
@@ -144,7 +143,7 @@ class TestSnapshotsManifest:
         """Test that snapshots.json is not created until needed."""
         folio = DataFolio(tmp_path / "test-bundle")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
 
         # snapshots.json should NOT exist yet (we haven't created any snapshots)
         snapshots_path = Path(folio._bundle_dir) / "snapshots.json"
@@ -224,7 +223,7 @@ class TestItemNameValidation:
 
         # Should raise ValueError for @ in name
         with pytest.raises(ValueError, match="cannot contain '@' symbol"):
-            folio.add_table("my@table", df)
+            folio.add("my@table", df)
 
     def test_valid_item_names(self, tmp_path):
         """Test that valid item names are accepted."""
@@ -232,10 +231,10 @@ class TestItemNameValidation:
         df = pd.DataFrame({"a": [1, 2, 3]})
 
         # These should all be valid
-        folio.add_table("my_table", df)
-        folio.add_table("my-table-2", df.copy())
-        folio.add_table("MyTable3", df.copy())
-        folio.add_table("table.v1", df.copy())
+        folio.add("my_table", df)
+        folio.add("my-table-2", df.copy())
+        folio.add("MyTable3", df.copy())
+        folio.add("table.v1", df.copy())
 
         assert len(folio._items) == 4
 
@@ -250,16 +249,16 @@ class TestMultipleItems:
         # Add multiple items
         df1 = pd.DataFrame({"a": [1, 2, 3]})
         df2 = pd.DataFrame({"b": [4, 5, 6]})
-        folio.add_table("table1", df1)
-        folio.add_table("table2", df2)
+        folio.add("table1", df1)
+        folio.add("table2", df2)
 
         # Both should be current versions
         assert folio._items["table1"]["is_current"] is True
         assert folio._items["table2"]["is_current"] is True
 
         # Both should have empty in_snapshots
-        assert folio._items["table1"]["in_snapshots"] == []
-        assert folio._items["table2"]["in_snapshots"] == []
+        assert folio._snapshot_pins(folio._items["table1"]) == []
+        assert folio._snapshot_pins(folio._items["table2"]) == []
 
     def test_reload_multiple_items(self, tmp_path):
         """Test reloading bundle with multiple items."""
@@ -267,8 +266,8 @@ class TestMultipleItems:
         folio1 = DataFolio(tmp_path / "test-bundle")
         df1 = pd.DataFrame({"a": [1, 2, 3]})
         df2 = pd.DataFrame({"b": [4, 5, 6]})
-        folio1.add_table("table1", df1)
-        folio1.add_table("table2", df2)
+        folio1.add("table1", df1)
+        folio1.add("table2", df2)
 
         # Reload
         folio2 = DataFolio(folio1._bundle_dir)

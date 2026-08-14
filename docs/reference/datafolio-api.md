@@ -1,592 +1,209 @@
 ---
-title: DataFolio API Reference
+title: API cheat sheet
 ---
 
-# DataFolio Class - Complete API Reference
+# API cheat sheet
+
+Every public method, grouped by what you are trying to do. Full docstrings are
+on the [Package API](api.md) page and in `help(DataFolio)`.
+
+The shape of the API in one line: **one write verb (`add`), one read verb
+(`get`), and a short list of explicit verbs for the cases where guessing would
+be wrong.**
+
+## Open a folio
+
+```python
+DataFolio(
+    path,                                # local path or gs:// / s3:// URI
+    metadata=None,                       # INITIAL folio metadata; ignored when
+                                         # opening an existing folio (write via
+                                         # folio.metadata instead)
+    random_suffix=False,                 # append a memorable suffix to the name
+    read_only=False,                     # refuse every write
+    allow_existing=False,                # allow creating inside a non-folio directory
+    use_https=False,                     # HTTPS reads of public buckets
+    max_eager_bytes=500 * 1024 * 1024,   # eager-read ceiling; None disables
+)
+```
+
+Creates the folio if the path is empty, opens it if it already holds one.
+`http(s)://` paths are always read-only.
+
+```python
+DataFolio.load_snapshot(path, snapshot)   # classmethod -> read-only folio
+```
+
+## Add items
+
+| Call | For |
+| --- | --- |
+| `add(name, obj, *, description=None, inputs=None, overwrite=False, **type_opts)` | DataFrames, arrays, dicts/lists/scalars/strings, tz-aware datetimes, estimators |
+| `add_model(name, model, *, description=None, inputs=None, overwrite=False, custom=False)` | any picklable model-like object; `custom=True` uses skops |
+| `add_file(path, name=None, *, category=None, description=None, overwrite=False)` | copy a file into the folio |
+| `reference_table(name, path, table_format="parquet", num_rows=None, version=None, description=None, inputs=None, overwrite=False, allow_full_load=False, polars_only=None)` | link an external table without copying |
+
+`**type_opts` for `add()`: `preserve_index=True` (tables), `custom=True`
+(models), `category=...` (files). Unknown options raise `TypeError`.
+
+Replacing any existing item requires `overwrite=True`. A version pinned by a
+snapshot is preserved via copy-on-write.
+
+## Read items
+
+| Call | Returns |
+| --- | --- |
+| `get(name, **type_opts)` | the natural object; a **path** for file items |
+| `get_many(names, *, threads=20, **type_opts)` | `{name: object}`, read concurrently |
+| `get_model(name, trusted=False)` | the loaded model (`trusted=True` for skops) |
+| `scan_table(name, **kwargs)` | a genuinely lazy `polars.LazyFrame` |
+| `item_path(name)` | the payload path (external path for references) |
+| `item_info(name)` | a copy of the catalog entry |
+
+`**type_opts` for `get()`: `frame="pandas"|"polars"` and `allow_full_load=True`
+(tables), `as_unix=True` (timestamps), `trusted=True` (models).
+
+```python
+with folio.pinned():     # one staleness check for the whole block
+    ...
+folio.refresh()          # force a reload from disk
+```
+
+## Inspect
+
+```python
+folio.describe(pattern=None, return_string=False, show_empty=False,
+               max_metadata_fields=10, snapshot=None,
+               include_archived=False, show_paths=False)
+
+folio.list_contents(include_archived=False)   # {kind: [names]}
+folio.tables                                  # names of included + referenced tables
+folio.models
+folio.artifacts                               # file items
+"features" in folio                           # True exactly when get() would work
+
+folio.inspect_table(name)     # read the source, record schema/size/identity
+folio.validate()              # {name: bool}
+folio.is_valid()              # all of the above
+```
+
+Properties: `path`, `metadata`, `read_only`, `in_snapshot_mode`,
+`loaded_snapshot`, `data`.
+
+### The `data` accessor
+
+```python
+folio.data.features.content        # == folio.get('features')
+folio.data.features.lazy           # == folio.scan_table('features')
+folio.data.features.description
+folio.data.features.type
+folio.data.features.path
+folio.data.features.inputs
+folio.data.features.dependents
+folio.data.features.metadata
+folio.data["qc/step1"].content     # names that are not valid identifiers
+```
 
-This page provides a comprehensive reference of all methods available on the `DataFolio` class, organized by functionality.
+Built for tab completion in Jupyter. Equivalent to the plain methods.
 
-## Creating a DataFolio
+## Change and remove
 
-::: datafolio.DataFolio.__init__
-    options:
-        show_source: false
-        heading_level: 3
+```python
+folio.update_item(name, description=None, inputs=None)   # "" / [] clear a field
+folio.delete(name_or_names, warn_dependents=True)
+folio.archive(name_or_names_or_glob)
+folio.unarchive(name_or_names_or_glob)
 
----
+folio.metadata["key"] = value        # commits immediately
+folio.metadata.update({...})
+folio.metadata = {...}               # wholesale replacement
 
-## Adding Data
+with folio.batch():                  # one commit for the whole block
+    ...
+```
 
-Methods for adding different types of data to a DataFolio.
+## Lineage
 
-### Tables (DataFrames)
+```python
+folio.get_inputs(name)          # what this was derived from
+folio.get_dependents(name)      # what was derived from this
+folio.get_lineage_graph()       # {name: [inputs]}
+```
 
-::: datafolio.DataFolio.add_table
-    options:
-        show_source: false
-        heading_level: 3
+Recorded by `inputs=` at write time (or `update_item`). Documentation, not
+enforcement.
 
-::: datafolio.DataFolio.reference_table
-    options:
-        show_source: false
-        heading_level: 3
+## Copy and export
 
-### Arrays
+```python
+folio.copy(path, name=None, metadata_updates=None, include_items=None,
+           exclude_items=None, random_suffix=False, follow_lineage=False,
+           include_archived=False)
+```
 
-::: datafolio.DataFolio.add_numpy
-    options:
-        show_source: false
-        heading_level: 3
-
-### JSON Data
-
-::: datafolio.DataFolio.add_json
-    options:
-        show_source: false
-        heading_level: 3
-
-### Timestamps
-
-::: datafolio.DataFolio.add_timestamp
-    options:
-        show_source: false
-        heading_level: 3
-
-### Generic Data
-
-::: datafolio.DataFolio.add_data
-    options:
-        show_source: false
-        heading_level: 3
-
----
-
-## Adding Models
-
-Methods for saving machine learning models.
-
-### Scikit-learn Models
-
-::: datafolio.DataFolio.add_sklearn
-    options:
-        show_source: false
-        heading_level: 3
-
-::: datafolio.DataFolio.add_model
-    options:
-        show_source: false
-        heading_level: 3
-
----
-
-## Adding Artifacts
-
-Methods for adding arbitrary files and artifacts.
-
-::: datafolio.DataFolio.add_artifact
-    options:
-        show_source: false
-        heading_level: 3
-
----
-
-## Retrieving Data
-
-Methods for loading data from a DataFolio.
-
-### Tables (DataFrames)
-
-::: datafolio.DataFolio.get_table
-    options:
-        show_source: false
-        heading_level: 3
-
-::: datafolio.DataFolio.get_table_path
-    options:
-        show_source: false
-        heading_level: 3
-
-### Arrays
-
-::: datafolio.DataFolio.get_numpy
-    options:
-        show_source: false
-        heading_level: 3
-
-::: datafolio.DataFolio.get_numpy_path
-    options:
-        show_source: false
-        heading_level: 3
-
-### JSON Data
-
-::: datafolio.DataFolio.get_json
-    options:
-        show_source: false
-        heading_level: 3
-
-::: datafolio.DataFolio.get_json_path
-    options:
-        show_source: false
-        heading_level: 3
-
-### Timestamps
-
-::: datafolio.DataFolio.get_timestamp
-    options:
-        show_source: false
-        heading_level: 3
-
-::: datafolio.DataFolio.get_timestamp_path
-    options:
-        show_source: false
-        heading_level: 3
-
-### Generic Data
-
-::: datafolio.DataFolio.get_data
-    options:
-        show_source: false
-        heading_level: 3
-
-::: datafolio.DataFolio.get_data_path
-    options:
-        show_source: false
-        heading_level: 3
-
-::: datafolio.DataFolio.get_item_path
-    options:
-        show_source: false
-        heading_level: 3
-
----
-
-## Retrieving Models
-
-Methods for loading machine learning models.
-
-### Scikit-learn Models
-
-::: datafolio.DataFolio.get_sklearn
-    options:
-        show_source: false
-        heading_level: 3
-
-::: datafolio.DataFolio.get_model
-    options:
-        show_source: false
-        heading_level: 3
-
-::: datafolio.DataFolio.get_model_path
-    options:
-        show_source: false
-        heading_level: 3
-
----
-
-## Retrieving Artifacts
-
-::: datafolio.DataFolio.get_artifact_path
-    options:
-        show_source: false
-        heading_level: 3
-
----
-
-## Inspecting Items
-
-Methods for getting information about items.
-
-::: datafolio.DataFolio.list_contents
-    options:
-        show_source: false
-        heading_level: 3
-
-::: datafolio.DataFolio.get_table_info
-    options:
-        show_source: false
-        heading_level: 3
-
-::: datafolio.DataFolio.get_model_info
-    options:
-        show_source: false
-        heading_level: 3
-
-::: datafolio.DataFolio.get_artifact_info
-    options:
-        show_source: false
-        heading_level: 3
-
-::: datafolio.DataFolio.describe
-    options:
-        show_source: false
-        heading_level: 3
-
----
-
-## Managing Items
-
-### Deleting Items
-
-::: datafolio.DataFolio.delete
-    options:
-        show_source: false
-        heading_level: 3
-
-### Archiving Items
-
-::: datafolio.DataFolio.archive
-    options:
-        show_source: false
-        heading_level: 3
-
-::: datafolio.DataFolio.unarchive
-    options:
-        show_source: false
-        heading_level: 3
-
-### Copying Bundles
-
-::: datafolio.DataFolio.copy
-    options:
-        show_source: false
-        heading_level: 3
-
-### Validation
-
-::: datafolio.DataFolio.validate
-    options:
-        show_source: false
-        heading_level: 3
-
-::: datafolio.DataFolio.is_valid
-    options:
-        show_source: false
-        heading_level: 3
-
----
-
-## Lineage and Dependencies
-
-Methods for working with lineage tracking.
-
-::: datafolio.DataFolio.get_inputs
-    options:
-        show_source: false
-        heading_level: 3
-
-::: datafolio.DataFolio.get_dependents
-    options:
-        show_source: false
-        heading_level: 3
-
-::: datafolio.DataFolio.get_lineage_graph
-    options:
-        show_source: false
-        heading_level: 3
-
----
+A **fork**: current versions only, no snapshot history, archived items excluded,
+fresh identity. To *mirror* a folio, use `rsync`/`gsutil rsync`/`aws s3 sync`.
 
 ## Snapshots
 
-Methods for working with snapshots (read-only copies).
-
-::: datafolio.DataFolio.create_snapshot
-    options:
-        show_source: false
-        heading_level: 3
-
-::: datafolio.DataFolio.list_snapshots
-    options:
-        show_source: false
-        heading_level: 3
-
-::: datafolio.DataFolio.delete_snapshot
-    options:
-        show_source: false
-        heading_level: 3
-
-::: datafolio.DataFolio.load_snapshot
-    options:
-        show_source: false
-        heading_level: 3
-
-::: datafolio.DataFolio.get_snapshot
-    options:
-        show_source: false
-        heading_level: 3
-
-::: datafolio.DataFolio.get_snapshot_info
-    options:
-        show_source: false
-        heading_level: 3
-
-::: datafolio.DataFolio.compare_snapshots
-    options:
-        show_source: false
-        heading_level: 3
-
-::: datafolio.DataFolio.diff_from_snapshot
-    options:
-        show_source: false
-        heading_level: 3
-
-::: datafolio.DataFolio.restore_snapshot
-    options:
-        show_source: false
-        heading_level: 3
-
-::: datafolio.DataFolio.export_snapshot
-    options:
-        show_source: false
-        heading_level: 3
-
----
-
-## Caching
-
-Methods for managing the local cache (for remote bundles).
-
-::: datafolio.DataFolio.cache_status
-    options:
-        show_source: false
-        heading_level: 3
-
-::: datafolio.DataFolio.clear_cache
-    options:
-        show_source: false
-        heading_level: 3
-
-::: datafolio.DataFolio.invalidate_cache
-    options:
-        show_source: false
-        heading_level: 3
-
-::: datafolio.DataFolio.refresh_cache
-    options:
-        show_source: false
-        heading_level: 3
-
----
-
-## Bundle Management
-
-Methods for managing the DataFolio bundle itself.
-
-::: datafolio.DataFolio.refresh
-    options:
-        show_source: false
-        heading_level: 3
-
----
-
-## Properties
-
-Useful properties for accessing bundle information and items.
-
-### Core Properties
-
-#### `path`
-The path to the DataFolio bundle.
-
 ```python
-print(folio.path)  # e.g., 'gs://my-bucket/my-bundle' or '/local/path/bundle'
+folio.create_snapshot(name, description=None, tags=None,
+                      capture_git=True, capture_environment=False,
+                      capture_execution=False)
+
+folio.snapshots                     # dict-like accessor -> SnapshotView
+folio.list_snapshots()              # [{name, timestamp, description, tags, …}]
+folio.get_snapshot_info(name)       # full record incl. pinned versions and git
+folio.mutable_references()          # references whose bytes are not owned
+
+folio.get_snapshot(name)                        # read-only DataFolio
+DataFolio.load_snapshot(path, name)             # same, without an open folio
+
+folio.compare_snapshots(a, b)
+folio.diff_from_snapshot(name=None)             # None -> newest snapshot
+
+folio.restore_snapshot(name, confirm=True)      # DESTRUCTIVE
+folio.export_snapshot(name, target_path, *, include_snapshot_metadata=True)
+
+folio.delete_snapshot(name, cleanup_orphans=False)
+folio.cleanup_orphaned_versions(dry_run=False)
 ```
 
-#### `metadata`
-Bundle-level metadata dictionary.
+A `SnapshotView` (`folio.snapshots["v1"]`) exposes `name`, `description`,
+`timestamp`, `tags`, `metadata`, `item_versions`, `get(name)`,
+`get_table(name)`, and `scan_table(name)`.
+
+## Exceptions
+
+| Exception | Raised when |
+| --- | --- |
+| `ConcurrentWriteError` | another writer advanced the catalog; `refresh()` and retry |
+| `ManifestReadError` | the catalog is missing, unreadable, or was replaced externally |
+| `UnsupportedManifestVersionError` | the folio was written by a newer DataFolio |
 
 ```python
-print(folio.metadata)  # e.g., {'project': 'analysis', 'version': '1.0'}
-```
-
-#### `items`
-Dictionary of all items in the bundle with their metadata.
-
-```python
-print(folio.items)  # e.g., {'table1': {...}, 'model1': {...}}
-```
-
-### Item Lists
-
-#### `tables`
-List of all table names in the bundle.
-
-```python
-print(folio.tables)  # e.g., ['results', 'metadata', 'analysis']
-```
-
-#### `models`
-List of all model names in the bundle.
-
-```python
-print(folio.models)  # e.g., ['classifier', 'regressor']
-```
-
-#### `artifacts`
-List of all artifact names in the bundle.
-
-```python
-print(folio.artifacts)  # e.g., ['config.yaml', 'results.png']
-```
-
-### Data Accessor
-
-#### `data`
-Accessor for convenient data retrieval with autocomplete support.
-
-```python
-df = folio.data.my_table  # Equivalent to folio.get_table('my_table')
-model = folio.data.my_model  # Equivalent to folio.get_model('my_model')
-```
-
-### Status Properties
-
-#### `read_only`
-Whether the bundle is in read-only mode.
-
-```python
-print(folio.read_only)  # True or False
-```
-
-#### `in_snapshot_mode`
-Whether the bundle was loaded from a snapshot.
-
-```python
-print(folio.in_snapshot_mode)  # True or False
-```
-
-#### `loaded_snapshot`
-Name of the snapshot this bundle was loaded from (if any).
-
-```python
-print(folio.loaded_snapshot)  # e.g., 'v1.0' or None
-```
-
----
-
-## Method Categories Summary
-
-| Category | Methods |
-|----------|---------|
-| **Adding Data** | `add_table()`, `add_numpy()`, `add_json()`, `add_timestamp()`, `add_data()`, `reference_table()` |
-| **Adding Models** | `add_sklearn()`, `add_model()` |
-| **Adding Artifacts** | `add_artifact()` |
-| **Retrieving Data** | `get_table()`, `get_table_path()`, `get_numpy()`, `get_numpy_path()`, `get_json()`, `get_json_path()`, `get_timestamp()`, `get_timestamp_path()`, `get_data()`, `get_data_path()`, `get_item_path()` |
-| **Retrieving Models** | `get_sklearn()`, `get_model()`, `get_model_path()` |
-| **Retrieving Artifacts** | `get_artifact_path()` |
-| **Inspecting Items** | `list_contents()`, `get_table_info()`, `get_model_info()`, `get_artifact_info()`, `describe()` |
-| **Managing Items** | `delete()`, `copy()`, `validate()`, `is_valid()` |
-| **Lineage** | `get_inputs()`, `get_dependents()`, `get_lineage_graph()` |
-| **Snapshots** | `create_snapshot()`, `list_snapshots()`, `delete_snapshot()`, `load_snapshot()`, `get_snapshot()`, `get_snapshot_info()`, `compare_snapshots()`, `diff_from_snapshot()`, `restore_snapshot()`, `export_snapshot()` |
-| **Caching** | `cache_status()`, `clear_cache()`, `invalidate_cache()`, `refresh_cache()` |
-| **Bundle Management** | `refresh()` |
-
----
-
-## Quick Examples
-
-### Basic Usage
-```python
-import datafolio
-import pandas as pd
-
-# Create a new DataFolio
-folio = datafolio.DataFolio('my_analysis')
-
-# Add data
-df = pd.DataFrame({'x': [1, 2, 3], 'y': [4, 5, 6]})
-folio.add_table('results', df, description='Experimental results')
-
-# Retrieve data
-df_loaded = folio.get_table('results')
-
-# List contents
-print(folio.list_contents())
-print(folio.tables)  # Property access
-
-# Use data accessor with autocomplete
-df_via_accessor = folio.data.results
-```
-
-### With Caching
-```python
-# Enable caching for remote bundles
-folio = datafolio.DataFolio(
-    'gs://my-bucket/my-bundle',
-    cache_enabled=True,
-    cache_dir='/tmp/my-cache'
+from datafolio import (
+    DataFolio, ConcurrentWriteError, ManifestReadError,
+    UnsupportedManifestVersionError,
 )
-
-# First access downloads and caches
-df = folio.get_table('large_table')  # Downloads from cloud
-
-# Second access uses cache (much faster!)
-df = folio.get_table('large_table')  # Reads from local cache
-
-# Check cache statistics
-status = folio.cache_status()
-print(f"Cache hits: {status['cache_hits']}")
-print(f"Cache misses: {status['cache_misses']}")
 ```
 
-### With Snapshots
-```python
-# Create a read-only snapshot
-folio.create_snapshot('v1.0', description='Release 1.0')
+Everything else in the package — handlers, storage backends, readers — is
+internal.
 
-# Load a snapshot (read-only mode)
-folio_snapshot = datafolio.DataFolio.load_snapshot('v1.0')
+## Common option quick-reference
 
-# List all snapshots
-snapshots = folio.list_snapshots()
-for snap in snapshots:
-    print(f"{snap['name']}: {snap['description']}")
-```
-
-### Lineage Tracking
-```python
-# Add data with lineage
-folio.add_table('raw_data', raw_df)
-folio.add_table('processed_data', processed_df, inputs=['raw_data'])
-folio.add_model('trained_model', model, inputs=['processed_data'])
-
-# Query lineage
-inputs = folio.get_inputs('trained_model')  # ['processed_data']
-dependents = folio.get_dependents('raw_data')  # ['processed_data']
-
-# Get full lineage graph
-graph = folio.get_lineage_graph()
-print(graph)  # Shows dependency relationships
-```
-
-### Sharing Paths with Collaborators
-```python
-# For a cloud-hosted folio, get the direct path to any item
-folio = datafolio.DataFolio('s3://my-bucket/experiments/run-42')
-
-# Type-specific path methods (recommended):
-path = folio.get_table_path('results')
-# → 's3://my-bucket/experiments/run-42/tables/results.parquet'
-
-path = folio.get_model_path('classifier')
-# → 's3://my-bucket/experiments/run-42/models/classifier.joblib'
-
-# Generic path getter (dispatches to the appropriate method automatically):
-path = folio.get_data_path('results')   # same as get_table_path for tables
-path = folio.get_item_path('results')   # lower-level, skips type-specific logic
-
-# Share with a colleague who doesn't use datafolio:
-# import pandas as pd; pd.read_parquet('s3://my-bucket/.../results.parquet')
-
-# Or browse all paths at once with describe()
-folio.describe(show_paths=True)
-# Tables (2):
-#   • raw_data (reference): Input dataset
-#     ↳ path: s3://data-lake/raw.parquet
-#   • results: Model results
-#     ↳ path: s3://my-bucket/experiments/run-42/tables/results.parquet
-# Models (1):
-#   • classifier: Trained model
-#     ↳ path: s3://my-bucket/experiments/run-42/models/classifier.joblib
-```
+| Option | Where | Effect |
+| --- | --- | --- |
+| `overwrite=True` | every add verb | required to replace an existing item |
+| `inputs=[...]` | add verbs, `update_item` | lineage |
+| `description="..."` | add verbs, `update_item` | the sentence future-you reads |
+| `preserve_index=True` | `add` (tables) | store a non-default pandas index as columns |
+| `custom=True` | `add_model` | skops instead of joblib |
+| `frame="polars"` | `get` (tables) | Polars DataFrame instead of pandas |
+| `allow_full_load=True` | `get` (tables), `reference_table` | bypass the eager-size guard |
+| `trusted=True` | `get_model` | accept a skops file's non-standard types |
+| `as_unix=True` | `get` (timestamps) | float seconds instead of a datetime |
+| `read_only=True` | constructor | refuse every write |
+| `follow_lineage=True` | `copy` | pull in upstream dependencies of `include_items` |
+| `dry_run=True` | `cleanup_orphaned_versions` | list, do not delete |

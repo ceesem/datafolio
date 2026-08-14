@@ -14,7 +14,7 @@ class TestAddTimestamp:
         """Test adding a basic UTC timestamp."""
         folio = DataFolio(tmp_path / "test")
         event_time = datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
-        folio.add_timestamp("event_time", event_time)
+        folio.add("event_time", event_time)
 
         assert "event_time" in folio._items
         assert folio._items["event_time"]["item_type"] == "timestamp"
@@ -29,7 +29,7 @@ class TestAddTimestamp:
         """Test adding timestamp with description."""
         folio = DataFolio(tmp_path / "test")
         event_time = datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
-        folio.add_timestamp("event_time", event_time, description="Event occurred")
+        folio.add("event_time", event_time, description="Event occurred")
 
         item = folio._items["event_time"]
         assert item["description"] == "Event occurred"
@@ -38,33 +38,35 @@ class TestAddTimestamp:
         """Test adding timestamp with lineage metadata."""
         folio = DataFolio(tmp_path / "test")
         event_time = datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
-        folio.add_timestamp(
+        folio.add(
             "event_time",
             event_time,
             inputs=["event_log"],
-            code='timestamp = event_log.iloc[0]["timestamp"]',
         )
 
         item = folio._items["event_time"]
         assert item["inputs"] == ["event_log"]
-        assert item["code"] == 'timestamp = event_log.iloc[0]["timestamp"]'
 
-    def test_add_timestamp_unix_int(self, tmp_path):
-        """Test adding Unix timestamp as integer."""
+    def test_add_timestamp_from_unix_int(self, tmp_path):
+        """Unix timestamps enter as datetimes; bare ints store as JSON."""
         folio = DataFolio(tmp_path / "test")
         unix_ts = 1705318200
-        folio.add_timestamp("start_time", unix_ts)
+        expected_dt = datetime.fromtimestamp(unix_ts, tz=timezone.utc)
+        folio.add("start_time", expected_dt)
 
         item = folio._items["start_time"]
-        # The timestamp should convert to a datetime in UTC
-        expected_dt = datetime.fromtimestamp(unix_ts, tz=timezone.utc)
         assert item["iso_string"] == expected_dt.isoformat()
         assert item["unix_timestamp"] == pytest.approx(float(unix_ts))
 
-    def test_add_timestamp_unix_float(self, tmp_path):
-        """Test adding Unix timestamp as float."""
+        # A bare number is JSON data, not a timestamp
+        folio.add("raw_number", unix_ts)
+        assert folio._items["raw_number"]["item_type"] == "json_data"
+
+    def test_add_timestamp_from_unix_float(self, tmp_path):
+        """Fractional Unix timestamps survive the datetime round-trip."""
         folio = DataFolio(tmp_path / "test")
-        folio.add_timestamp("start_time", 1705318200.5)
+        dt = datetime.fromtimestamp(1705318200.5, tz=timezone.utc)
+        folio.add("start_time", dt)
 
         item = folio._items["start_time"]
         assert item["unix_timestamp"] == pytest.approx(1705318200.5)
@@ -80,7 +82,7 @@ class TestAddTimestamp:
         tz_plus_5 = timezone(timedelta(hours=5))
         local_time = datetime(2024, 1, 15, 15, 30, 0, tzinfo=tz_plus_5)
 
-        folio.add_timestamp("local_event", local_time)
+        folio.add("local_event", local_time)
 
         item = folio._items["local_event"]
         # Should be converted to UTC (15:30 UTC+5 = 10:30 UTC)
@@ -90,7 +92,7 @@ class TestAddTimestamp:
         """Test method chaining works."""
         folio = DataFolio(tmp_path / "test")
         event_time = datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
-        result = folio.add_timestamp("event_time", event_time)
+        result = folio.add("event_time", event_time)
 
         assert result is folio  # Returns self
 
@@ -98,10 +100,10 @@ class TestAddTimestamp:
         """Test error when adding duplicate timestamp without overwrite."""
         folio = DataFolio(tmp_path / "test")
         event_time = datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
-        folio.add_timestamp("event_time", event_time)
+        folio.add("event_time", event_time)
 
         with pytest.raises(ValueError, match="already exists"):
-            folio.add_timestamp("event_time", event_time)
+            folio.add("event_time", event_time)
 
     def test_add_timestamp_overwrite_true(self, tmp_path):
         """Test overwriting existing timestamp with overwrite=True."""
@@ -109,8 +111,8 @@ class TestAddTimestamp:
         event_time1 = datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
         event_time2 = datetime(2024, 1, 16, 10, 30, 0, tzinfo=timezone.utc)
 
-        folio.add_timestamp("event_time", event_time1)
-        folio.add_timestamp("event_time", event_time2, overwrite=True)
+        folio.add("event_time", event_time1)
+        folio.add("event_time", event_time2, overwrite=True)
 
         item = folio._items["event_time"]
         assert item["iso_string"] == "2024-01-16T10:30:00+00:00"
@@ -121,20 +123,22 @@ class TestAddTimestamp:
         naive_time = datetime(2024, 1, 15, 10, 30, 0)  # No timezone
 
         with pytest.raises(ValueError, match="Naive datetime objects are not allowed"):
-            folio.add_timestamp("event_time", naive_time)
+            folio.add("event_time", naive_time)
 
-    def test_add_timestamp_invalid_type_raises_error(self, tmp_path):
-        """Test error when adding invalid type."""
+    def test_add_date_string_is_json(self, tmp_path):
+        """A date-like string stores as JSON — only real datetimes are
+        timestamps."""
         folio = DataFolio(tmp_path / "test")
 
-        with pytest.raises(TypeError, match="Expected datetime or Unix timestamp"):
-            folio.add_timestamp("event_time", "2024-01-15")
+        folio.add("event_time", "2024-01-15")
+        assert folio._items["event_time"]["item_type"] == "json_data"
+        assert folio.get("event_time") == "2024-01-15"
 
     def test_add_timestamp_appears_in_list_contents(self, tmp_path):
         """Test timestamp appears in list_contents."""
         folio = DataFolio(tmp_path / "test")
         event_time = datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
-        folio.add_timestamp("event_time", event_time)
+        folio.add("event_time", event_time)
 
         contents = folio.list_contents()
         assert "event_time" in contents["timestamps"]
@@ -143,10 +147,12 @@ class TestAddTimestamp:
         """Test that timestamp file is created on disk."""
         folio = DataFolio(tmp_path / "test")
         event_time = datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
-        folio.add_timestamp("event_time", event_time)
+        folio.add("event_time", event_time)
 
-        # Check file exists
-        timestamp_file = tmp_path / "test" / "artifacts" / "event_time.json"
+        # Check file exists (payload filename is versioned)
+        timestamp_file = (
+            tmp_path / "test" / "artifacts" / folio._items["event_time"]["filename"]
+        )
         assert timestamp_file.exists()
 
 
@@ -157,9 +163,9 @@ class TestGetTimestamp:
         """Test retrieving timestamp as datetime (default)."""
         folio = DataFolio(tmp_path / "test")
         event_time = datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
-        folio.add_timestamp("event_time", event_time)
+        folio.add("event_time", event_time)
 
-        retrieved = folio.get_timestamp("event_time")
+        retrieved = folio.get("event_time")
 
         assert isinstance(retrieved, datetime)
         assert retrieved.tzinfo is not None  # Timezone-aware
@@ -169,9 +175,9 @@ class TestGetTimestamp:
         """Test retrieving timestamp as Unix timestamp."""
         folio = DataFolio(tmp_path / "test")
         event_time = datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
-        folio.add_timestamp("event_time", event_time)
+        folio.add("event_time", event_time)
 
-        retrieved = folio.get_timestamp("event_time", as_unix=True)
+        retrieved = folio.get("event_time", as_unix=True)
 
         assert isinstance(retrieved, float)
         expected_unix = event_time.timestamp()
@@ -182,23 +188,24 @@ class TestGetTimestamp:
         folio = DataFolio(tmp_path / "test")
 
         with pytest.raises(KeyError, match="not found"):
-            folio.get_timestamp("nonexistent")
+            folio.get("nonexistent")
 
-    def test_get_timestamp_wrong_type(self, tmp_path):
-        """Test error when item is not a timestamp."""
+    def test_get_non_timestamp_returns_stored_type(self, tmp_path):
+        """get() returns the stored type; as_unix on a non-timestamp errors."""
         folio = DataFolio(tmp_path / "test")
-        folio.add_json("config", {"key": "value"})
+        folio.add("config", {"key": "value"})
 
-        with pytest.raises(ValueError, match="is not a timestamp"):
-            folio.get_timestamp("config")
+        assert folio.get("config") == {"key": "value"}
+        with pytest.raises(TypeError, match="as_unix"):
+            folio.get("config", as_unix=True)
 
     def test_get_timestamp_round_trip(self, tmp_path):
         """Test adding and retrieving timestamp maintains value."""
         folio = DataFolio(tmp_path / "test")
         original = datetime(2024, 1, 15, 10, 30, 45, tzinfo=timezone.utc)
-        folio.add_timestamp("event_time", original)
+        folio.add("event_time", original)
 
-        retrieved = folio.get_timestamp("event_time")
+        retrieved = folio.get("event_time")
 
         assert retrieved == original
 
@@ -206,9 +213,9 @@ class TestGetTimestamp:
         """Test timestamp with microseconds is preserved."""
         folio = DataFolio(tmp_path / "test")
         original = datetime(2024, 1, 15, 10, 30, 45, 123456, tzinfo=timezone.utc)
-        folio.add_timestamp("event_time", original)
+        folio.add("event_time", original)
 
-        retrieved = folio.get_timestamp("event_time")
+        retrieved = folio.get("event_time")
 
         assert retrieved == original
 
@@ -223,20 +230,20 @@ class TestTimestampIntegration:
         # Create and save
         folio1 = DataFolio(bundle_path)
         event_time = datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
-        folio1.add_timestamp("event_time", event_time, description="Event occurred")
+        folio1.add("event_time", event_time, description="Event occurred")
 
         # Load in new instance
         folio2 = DataFolio(bundle_path)
 
         assert "event_time" in folio2._items
-        retrieved = folio2.get_timestamp("event_time")
+        retrieved = folio2.get("event_time")
         assert retrieved == event_time
 
     def test_timestamp_in_describe(self, tmp_path):
         """Test timestamp appears in describe() output."""
         folio = DataFolio(tmp_path / "test")
         event_time = datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
-        folio.add_timestamp("event_time", event_time, description="Event occurred")
+        folio.add("event_time", event_time, description="Event occurred")
 
         output = folio.describe(return_string=True)
 
@@ -248,7 +255,7 @@ class TestTimestampIntegration:
         """Test accessing timestamp via folio.data.name pattern."""
         folio = DataFolio(tmp_path / "test")
         event_time = datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
-        folio.add_timestamp("event_time", event_time)
+        folio.add("event_time", event_time)
 
         # Access via .data accessor
         retrieved = folio.data.event_time.content
@@ -260,7 +267,7 @@ class TestTimestampIntegration:
         """Test accessing timestamp metadata via data accessor."""
         folio = DataFolio(tmp_path / "test")
         event_time = datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
-        folio.add_timestamp("event_time", event_time, description="Event occurred")
+        folio.add("event_time", event_time, description="Event occurred")
 
         # Access metadata via data accessor
         assert folio.data.event_time.description == "Event occurred"
@@ -274,8 +281,8 @@ class TestTimestampIntegration:
         start = datetime(2024, 1, 15, 10, 0, 0, tzinfo=timezone.utc)
         end = datetime(2024, 1, 15, 12, 30, 0, tzinfo=timezone.utc)
 
-        folio.add_timestamp("start_time", start, description="Start")
-        folio.add_timestamp("end_time", end, description="End")
+        folio.add("start_time", start, description="Start")
+        folio.add("end_time", end, description="End")
 
         contents = folio.list_contents()
         assert len(contents["timestamps"]) == 2
@@ -283,19 +290,21 @@ class TestTimestampIntegration:
         assert "end_time" in contents["timestamps"]
 
     def test_timestamp_with_unix_zero(self, tmp_path):
-        """Test Unix timestamp of 0 (epoch)."""
+        """Test the epoch as a timestamp."""
         folio = DataFolio(tmp_path / "test")
-        folio.add_timestamp("epoch", 0)
+        folio.add("epoch", datetime.fromtimestamp(0, tz=timezone.utc))
 
-        retrieved = folio.get_timestamp("epoch")
+        retrieved = folio.get("epoch")
         assert retrieved == datetime(1970, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
 
     def test_timestamp_with_negative_unix(self, tmp_path):
-        """Test negative Unix timestamp (before epoch)."""
+        """Test a pre-epoch timestamp."""
         folio = DataFolio(tmp_path / "test")
-        folio.add_timestamp("before_epoch", -86400)  # 1 day before epoch
+        folio.add(
+            "before_epoch", datetime.fromtimestamp(-86400, tz=timezone.utc)
+        )  # 1 day before epoch
 
-        retrieved = folio.get_timestamp("before_epoch")
+        retrieved = folio.get("before_epoch")
         assert retrieved == datetime(1969, 12, 31, 0, 0, 0, tzinfo=timezone.utc)
 
     def test_timestamp_list_contents_empty(self, tmp_path):
@@ -319,12 +328,12 @@ class TestTimestampEdgeCases:
     """Tests for edge cases and error conditions."""
 
     def test_timestamp_very_large_unix_timestamp(self, tmp_path):
-        """Test very large Unix timestamp (far future)."""
+        """Test very large timestamp (far future)."""
         folio = DataFolio(tmp_path / "test")
         # Year 2100
-        folio.add_timestamp("future", 4102444800)
+        folio.add("future", datetime.fromtimestamp(4102444800, tz=timezone.utc))
 
-        retrieved = folio.get_timestamp("future", as_unix=True)
+        retrieved = folio.get("future", as_unix=True)
         assert retrieved == pytest.approx(4102444800.0)
 
     def test_timestamp_with_special_characters_in_name(self, tmp_path):
@@ -333,16 +342,16 @@ class TestTimestampEdgeCases:
         event_time = datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
 
         # Use underscores and numbers
-        folio.add_timestamp("event_2024_01", event_time)
+        folio.add("event_2024_01", event_time)
 
-        retrieved = folio.get_timestamp("event_2024_01")
+        retrieved = folio.get("event_2024_01")
         assert retrieved == event_time
 
     def test_timestamp_metadata_has_created_at(self, tmp_path):
         """Test timestamp metadata includes created_at field."""
         folio = DataFolio(tmp_path / "test")
         event_time = datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
-        folio.add_timestamp("event_time", event_time)
+        folio.add("event_time", event_time)
 
         item = folio._items["event_time"]
         assert "created_at" in item
@@ -353,7 +362,9 @@ class TestTimestampEdgeCases:
         """Test timestamp is stored with correct filename."""
         folio = DataFolio(tmp_path / "test")
         event_time = datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
-        folio.add_timestamp("my_event", event_time)
+        folio.add("my_event", event_time)
 
         item = folio._items["my_event"]
-        assert item["filename"] == "my_event.json"
+        # Payload filename is versioned but derived from the name + .json.
+        assert item["filename"].startswith("my_event--r")
+        assert item["filename"].endswith(".json")

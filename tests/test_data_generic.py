@@ -17,7 +17,7 @@ class TestAddNumpy:
         folio = DataFolio(tmp_path / "test")
         array = np.array([1, 2, 3, 4, 5])
 
-        folio.add_numpy("test_array", array)
+        folio.add("test_array", array)
 
         assert "test_array" in folio._items
         assert folio._items["test_array"]["item_type"] == "numpy_array"
@@ -29,7 +29,7 @@ class TestAddNumpy:
         folio = DataFolio(tmp_path / "test")
         array = np.random.randn(10, 128)
 
-        folio.add_numpy("embeddings", array, description="Model embeddings")
+        folio.add("embeddings", array, description="Model embeddings")
 
         metadata = folio._items["embeddings"]
         assert metadata["item_type"] == "numpy_array"
@@ -41,22 +41,20 @@ class TestAddNumpy:
         folio = DataFolio(tmp_path / "test")
         array = np.array([0, 1, 0, 1])
 
-        folio.add_numpy(
+        folio.add(
             "predictions",
             array,
             inputs=["test_data"],
-            code="predictions = model.predict(X)",
         )
 
         metadata = folio._items["predictions"]
         assert metadata["inputs"] == ["test_data"]
-        assert metadata["code"] == "predictions = model.predict(X)"
 
     def test_add_numpy_appears_in_list_contents(self, tmp_path):
         """Test numpy array appears in list_contents."""
         folio = DataFolio(tmp_path / "test")
         array = np.array([1, 2, 3])
-        folio.add_numpy("test", array)
+        folio.add("test", array)
 
         contents = folio.list_contents()
         assert "test" in contents["numpy_arrays"]
@@ -68,17 +66,17 @@ class TestAddNumpy:
         array1 = np.array([1, 2, 3])
         array2 = np.array([4, 5, 6])
 
-        folio.add_numpy("test", array1)
+        folio.add("test", array1)
 
         with pytest.raises(ValueError, match="already exists"):
-            folio.add_numpy("test", array2)
+            folio.add("test", array2)
 
-    def test_add_numpy_not_array(self, tmp_path):
-        """Test error when data is not a numpy array."""
+    def test_add_list_stores_json(self, tmp_path):
+        """A plain list routes to JSON, not the numpy handler."""
         folio = DataFolio(tmp_path / "test")
-
-        with pytest.raises(TypeError, match="Expected numpy array"):
-            folio.add_numpy("test", [1, 2, 3])
+        folio.add("test", [1, 2, 3])
+        assert folio._items["test"]["item_type"] == "json_data"
+        assert folio.get("test") == [1, 2, 3]
 
 
 class TestGetNumpy:
@@ -88,9 +86,9 @@ class TestGetNumpy:
         """Test getting numpy array (read from disk)."""
         folio = DataFolio(tmp_path / "test")
         original_array = np.array([1.5, 2.5, 3.5])
-        folio.add_numpy("test", original_array)
+        folio.add("test", original_array)
 
-        retrieved = folio.get_numpy("test")
+        retrieved = folio.get("test")
 
         np.testing.assert_array_equal(retrieved, original_array)
 
@@ -98,9 +96,9 @@ class TestGetNumpy:
         """Test getting multidimensional array."""
         folio = DataFolio(tmp_path / "test")
         original = np.random.randn(5, 10, 3)
-        folio.add_numpy("test", original)
+        folio.add("test", original)
 
-        retrieved = folio.get_numpy("test")
+        retrieved = folio.get("test")
 
         assert retrieved.shape == (5, 10, 3)
         np.testing.assert_array_equal(retrieved, original)
@@ -110,15 +108,13 @@ class TestGetNumpy:
         folio = DataFolio(tmp_path / "test")
 
         with pytest.raises(KeyError, match="not found"):
-            folio.get_numpy("nonexistent")
+            folio.get("nonexistent")
 
-    def test_get_numpy_wrong_type(self, tmp_path):
-        """Test error when item is not a numpy array."""
+    def test_get_returns_stored_type(self, tmp_path):
+        """get() returns whatever type the item actually is."""
         folio = DataFolio(tmp_path / "test")
-        folio.add_json("config", {"lr": 0.01})
-
-        with pytest.raises(ValueError, match="not a numpy array"):
-            folio.get_numpy("config")
+        folio.add("config", {"lr": 0.01})
+        assert folio.get("config") == {"lr": 0.01}
 
 
 class TestAddJson:
@@ -129,7 +125,7 @@ class TestAddJson:
         folio = DataFolio(tmp_path / "test")
         config = {"learning_rate": 0.01, "batch_size": 32}
 
-        folio.add_json("config", config, description="Model config")
+        folio.add("config", config, description="Model config")
 
         assert "config" in folio._items
         assert folio._items["config"]["item_type"] == "json_data"
@@ -141,7 +137,7 @@ class TestAddJson:
         folio = DataFolio(tmp_path / "test")
         classes = ["cat", "dog", "bird"]
 
-        folio.add_json("classes", classes)
+        folio.add("classes", classes)
 
         metadata = folio._items["classes"]
         assert metadata["item_type"] == "json_data"
@@ -151,9 +147,9 @@ class TestAddJson:
         """Test adding scalar as JSON."""
         folio = DataFolio(tmp_path / "test")
 
-        folio.add_json("accuracy", 0.95)
-        folio.add_json("count", 100)
-        folio.add_json("name", "experiment1")
+        folio.add("accuracy", 0.95)
+        folio.add("count", 100)
+        folio.add("name", "experiment1")
 
         assert folio._items["accuracy"]["data_type"] == "float"
         assert folio._items["count"]["data_type"] == "int"
@@ -164,21 +160,19 @@ class TestAddJson:
         folio = DataFolio(tmp_path / "test")
         metrics = {"accuracy": 0.95, "f1": 0.92}
 
-        folio.add_json(
+        folio.add(
             "metrics",
             metrics,
             inputs=["test_data"],
-            code="metrics = evaluate(model, X_test)",
         )
 
         metadata = folio._items["metrics"]
         assert metadata["inputs"] == ["test_data"]
-        assert metadata["code"] == "metrics = evaluate(model, X_test)"
 
     def test_add_json_appears_in_list_contents(self, tmp_path):
         """Test JSON data appears in list_contents."""
         folio = DataFolio(tmp_path / "test")
-        folio.add_json("config", {"lr": 0.01})
+        folio.add("config", {"lr": 0.01})
 
         contents = folio.list_contents()
         assert "config" in contents["json_data"]
@@ -187,18 +181,16 @@ class TestAddJson:
     def test_add_json_duplicate_name(self, tmp_path):
         """Test error when adding duplicate name."""
         folio = DataFolio(tmp_path / "test")
-        folio.add_json("config", {"lr": 0.01})
+        folio.add("config", {"lr": 0.01})
 
         with pytest.raises(ValueError, match="already exists"):
-            folio.add_json("config", {"lr": 0.02})
+            folio.add("config", {"lr": 0.02})
 
-    def test_add_json_not_serializable(self, tmp_path):
-        """Test error when data is not JSON-serializable."""
+    def test_add_numpy_routes_to_numpy_handler(self, tmp_path):
+        """numpy arrays route to the numpy handler, never JSON."""
         folio = DataFolio(tmp_path / "test")
-
-        # numpy arrays are not directly JSON serializable (need to use add_numpy)
-        with pytest.raises(TypeError, match="not JSON-serializable"):
-            folio.add_json("test", np.array([1, 2, 3]))
+        folio.add("test", np.array([1, 2, 3]))
+        assert folio._items["test"]["item_type"] == "numpy_array"
 
 
 class TestGetJson:
@@ -208,9 +200,9 @@ class TestGetJson:
         """Test getting dict from JSON."""
         folio = DataFolio(tmp_path / "test")
         original = {"learning_rate": 0.01, "batch_size": 32}
-        folio.add_json("config", original)
+        folio.add("config", original)
 
-        retrieved = folio.get_json("config")
+        retrieved = folio.get("config")
 
         assert retrieved == original
 
@@ -218,18 +210,18 @@ class TestGetJson:
         """Test getting list from JSON."""
         folio = DataFolio(tmp_path / "test")
         original = ["cat", "dog", "bird"]
-        folio.add_json("classes", original)
+        folio.add("classes", original)
 
-        retrieved = folio.get_json("classes")
+        retrieved = folio.get("classes")
 
         assert retrieved == original
 
     def test_get_json_scalar(self, tmp_path):
         """Test getting scalar from JSON."""
         folio = DataFolio(tmp_path / "test")
-        folio.add_json("accuracy", 0.95)
+        folio.add("accuracy", 0.95)
 
-        retrieved = folio.get_json("accuracy")
+        retrieved = folio.get("accuracy")
 
         assert retrieved == 0.95
 
@@ -238,15 +230,13 @@ class TestGetJson:
         folio = DataFolio(tmp_path / "test")
 
         with pytest.raises(KeyError, match="not found"):
-            folio.get_json("nonexistent")
+            folio.get("nonexistent")
 
-    def test_get_json_wrong_type(self, tmp_path):
-        """Test error when item is not JSON data."""
+    def test_get_numpy_item_returns_array(self, tmp_path):
+        """get() on a numpy item returns the array."""
         folio = DataFolio(tmp_path / "test")
-        folio.add_numpy("embeddings", np.array([1, 2, 3]))
-
-        with pytest.raises(ValueError, match="not JSON data"):
-            folio.get_json("embeddings")
+        folio.add("embeddings", np.array([1, 2, 3]))
+        assert list(folio.get("embeddings")) == [1, 2, 3]
 
 
 class TestAddData:
@@ -259,7 +249,7 @@ class TestAddData:
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6]})
 
-        folio.add_data("results", df, description="Test results")
+        folio.add("results", df, description="Test results")
 
         assert "results" in folio._items
         assert folio._items["results"]["item_type"] == "included_table"
@@ -270,7 +260,7 @@ class TestAddData:
         folio = DataFolio(tmp_path / "test")
         array = np.array([1, 2, 3, 4, 5])
 
-        folio.add_data("embeddings", array, description="Model embeddings")
+        folio.add("embeddings", array, description="Model embeddings")
 
         assert "embeddings" in folio._items
         assert folio._items["embeddings"]["item_type"] == "numpy_array"
@@ -280,7 +270,7 @@ class TestAddData:
         folio = DataFolio(tmp_path / "test")
         config = {"lr": 0.01, "batch_size": 32}
 
-        folio.add_data("config", config)
+        folio.add("config", config)
 
         assert "config" in folio._items
         assert folio._items["config"]["item_type"] == "json_data"
@@ -290,7 +280,7 @@ class TestAddData:
         folio = DataFolio(tmp_path / "test")
         classes = ["cat", "dog", "bird"]
 
-        folio.add_data("classes", classes)
+        folio.add("classes", classes)
 
         assert "classes" in folio._items
         assert folio._items["classes"]["item_type"] == "json_data"
@@ -299,36 +289,39 @@ class TestAddData:
         """Test add_data with scalar values."""
         folio = DataFolio(tmp_path / "test")
 
-        folio.add_data("accuracy", 0.95)
-        folio.add_data("epoch", 100)
-        folio.add_data("model_name", "resnet50")
+        folio.add("accuracy", 0.95)
+        folio.add("epoch", 100)
+        folio.add("model_name", "resnet50")
 
         assert folio._items["accuracy"]["item_type"] == "json_data"
         assert folio._items["epoch"]["item_type"] == "json_data"
         assert folio._items["model_name"]["item_type"] == "json_data"
 
-    def test_add_data_reference(self, tmp_path):
-        """Test add_data with reference parameter."""
+    def test_reference_table_is_the_reference_verb(self, tmp_path):
+        """External references use reference_table(), not add()."""
         folio = DataFolio(tmp_path / "test")
 
-        folio.add_data("raw", reference="s3://bucket/data.parquet")
+        folio.reference_table("raw", path="s3://bucket/data.parquet")
 
         assert "raw" in folio._items
         assert folio._items["raw"]["item_type"] == "referenced_table"
 
-    def test_add_data_no_data_or_reference(self, tmp_path):
-        """Test error when neither data nor reference provided."""
+    def test_add_requires_object(self, tmp_path):
+        """add() requires the object positionally; None is a valid JSON value."""
         folio = DataFolio(tmp_path / "test")
 
-        with pytest.raises(ValueError, match="Must provide either"):
-            folio.add_data("test")
+        with pytest.raises(TypeError):
+            folio.add("test")
 
-    def test_add_data_both_data_and_reference(self, tmp_path):
-        """Test error when both data and reference provided."""
+        folio.add("nothing", None)
+        assert folio.get("nothing") is None
+
+    def test_add_rejects_reference_kwarg(self, tmp_path):
+        """The old add_data(reference=...) form is gone — clear error."""
         folio = DataFolio(tmp_path / "test")
 
-        with pytest.raises(ValueError, match="Cannot provide both"):
-            folio.add_data("test", data=[1, 2, 3], reference="s3://bucket/file.parquet")
+        with pytest.raises(TypeError):
+            folio.add("test", [1, 2, 3], reference="s3://bucket/file.parquet")
 
     def test_add_data_unsupported_type(self, tmp_path):
         """Test error with unsupported data type."""
@@ -338,7 +331,7 @@ class TestAddData:
             pass
 
         with pytest.raises(TypeError, match="Unsupported data type"):
-            folio.add_data("test", CustomClass())
+            folio.add("test", CustomClass())
 
 
 class TestGetData:
@@ -350,9 +343,9 @@ class TestGetData:
 
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("results", df)
+        folio.add("results", df)
 
-        retrieved = folio.get_data("results")
+        retrieved = folio.get("results")
 
         assert isinstance(retrieved, pd.DataFrame)
         assert len(retrieved) == 3
@@ -361,9 +354,9 @@ class TestGetData:
         """Test get_data with numpy array."""
         folio = DataFolio(tmp_path / "test")
         array = np.array([1, 2, 3, 4, 5])
-        folio.add_numpy("embeddings", array)
+        folio.add("embeddings", array)
 
-        retrieved = folio.get_data("embeddings")
+        retrieved = folio.get("embeddings")
 
         assert isinstance(retrieved, np.ndarray)
         np.testing.assert_array_equal(retrieved, array)
@@ -372,9 +365,9 @@ class TestGetData:
         """Test get_data with JSON data."""
         folio = DataFolio(tmp_path / "test")
         config = {"lr": 0.01}
-        folio.add_json("config", config)
+        folio.add("config", config)
 
-        retrieved = folio.get_data("config")
+        retrieved = folio.get("config")
 
         assert retrieved == config
 
@@ -383,7 +376,7 @@ class TestGetData:
         folio = DataFolio(tmp_path / "test")
 
         with pytest.raises(KeyError, match="not found"):
-            folio.get_data("nonexistent")
+            folio.get("nonexistent")
 
     def test_get_data_not_data_item(self, tmp_path):
         """Test error when item is not a data item."""
@@ -392,10 +385,11 @@ class TestGetData:
         artifact_file.write_text("test content")
 
         folio = DataFolio(tmp_path / "test")
-        folio.add_artifact("artifact", artifact_file)
+        folio.add_file(artifact_file, name="artifact")
 
-        with pytest.raises(ValueError, match="not a data item"):
-            folio.get_data("artifact")
+        # Files come back as the stored payload path
+        path = folio.get("artifact")
+        assert path.endswith(".txt")
 
 
 class TestDataIntegration:
@@ -409,13 +403,13 @@ class TestDataIntegration:
 
         # Add different types of data
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_data("table", df)
+        folio.add("table", df)
 
         array = np.array([1, 2, 3, 4, 5])
-        folio.add_data("array", array)
+        folio.add("array", array)
 
         config = {"lr": 0.01, "batch_size": 32}
-        folio.add_data("config", config)
+        folio.add("config", config)
 
         # Verify all are tracked
         contents = folio.list_contents()
@@ -429,9 +423,9 @@ class TestDataIntegration:
 
         folio = DataFolio(tmp_path / "test")
 
-        folio.add_data("table", pd.DataFrame({"a": [1, 2, 3]})).add_data(
+        folio.add("table", pd.DataFrame({"a": [1, 2, 3]})).add(
             "array", np.array([1, 2, 3])
-        ).add_data("config", {"lr": 0.01})
+        ).add("config", {"lr": 0.01})
 
         contents = folio.list_contents()
         assert len(contents["included_tables"]) == 1
@@ -442,8 +436,8 @@ class TestDataIntegration:
         """Test reopening a bundle with numpy and json data."""
         # Create bundle with data
         folio1 = DataFolio(tmp_path / "test")
-        folio1.add_numpy("embeddings", np.array([1, 2, 3]))
-        folio1.add_json("config", {"lr": 0.01})
+        folio1.add("embeddings", np.array([1, 2, 3]))
+        folio1.add("config", {"lr": 0.01})
 
         # Reopen bundle
         folio2 = DataFolio(tmp_path / "test")
@@ -455,8 +449,8 @@ class TestDataIntegration:
         assert folio2._items["config"]["item_type"] == "json_data"
 
         # Verify data can be retrieved
-        embeddings = folio2.get_numpy("embeddings")
-        config = folio2.get_json("config")
+        embeddings = folio2.get("embeddings")
+        config = folio2.get("config")
         np.testing.assert_array_equal(embeddings, np.array([1, 2, 3]))
         assert config == {"lr": 0.01}
 
@@ -470,12 +464,14 @@ class TestSubdirectoryNames:
 
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"x": [1, 2, 3]})
-        folio.add_table("examples/data", df)
+        folio.add("examples/data", df)
 
         assert "examples/data" in folio._items
-        assert folio._items["examples/data"]["filename"] == "examples/data.parquet"
+        # Payload filename is versioned but keeps the subdir + extension.
+        filename = folio._items["examples/data"]["filename"]
+        assert filename.startswith("examples/data--r") and filename.endswith(".parquet")
         # Verify file exists on disk
-        expected_path = tmp_path / "test" / "tables" / "examples" / "data.parquet"
+        expected_path = tmp_path / "test" / "tables" / filename
         assert expected_path.exists()
 
     def test_roundtrip_table_with_subdir_name(self, tmp_path):
@@ -484,27 +480,27 @@ class TestSubdirectoryNames:
 
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3], "b": ["x", "y", "z"]})
-        folio.add_table("group/results", df)
+        folio.add("group/results", df)
 
-        result = folio.get_table("group/results")
+        result = folio.get("group/results")
         pd.testing.assert_frame_equal(result, df)
 
     def test_roundtrip_numpy_with_subdir_name(self, tmp_path):
         """Test that a numpy array added with a path-like name can be retrieved."""
         folio = DataFolio(tmp_path / "test")
         arr = np.array([1.0, 2.0, 3.0])
-        folio.add_numpy("run1/embeddings", arr)
+        folio.add("run1/embeddings", arr)
 
-        result = folio.get_numpy("run1/embeddings")
+        result = folio.get("run1/embeddings")
         np.testing.assert_array_equal(result, arr)
 
     def test_roundtrip_json_with_subdir_name(self, tmp_path):
         """Test that JSON data added with a path-like name can be retrieved."""
         folio = DataFolio(tmp_path / "test")
         config = {"lr": 0.01, "epochs": 10}
-        folio.add_json("run1/config", config)
+        folio.add("run1/config", config)
 
-        result = folio.get_json("run1/config")
+        result = folio.get("run1/config")
         assert result == config
 
     def test_add_data_generic_with_subdir_name(self, tmp_path):
@@ -513,9 +509,9 @@ class TestSubdirectoryNames:
 
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"v": [10, 20]})
-        folio.add_data("experiment/output", df)
+        folio.add("experiment/output", df)
 
-        result = folio.get_data("experiment/output")
+        result = folio.get("experiment/output")
         pd.testing.assert_frame_equal(result, df)
 
     def test_persist_and_reload_with_subdir_names(self, tmp_path):
@@ -523,15 +519,15 @@ class TestSubdirectoryNames:
         import pandas as pd
 
         folio1 = DataFolio(tmp_path / "test")
-        folio1.add_table("phase1/results", pd.DataFrame({"n": [1, 2]}))
-        folio1.add_numpy("phase1/weights", np.array([0.5, 0.5]))
+        folio1.add("phase1/results", pd.DataFrame({"n": [1, 2]}))
+        folio1.add("phase1/weights", np.array([0.5, 0.5]))
 
         folio2 = DataFolio(tmp_path / "test")
         assert "phase1/results" in folio2._items
         assert "phase1/weights" in folio2._items
 
         pd.testing.assert_frame_equal(
-            folio2.get_table("phase1/results"), pd.DataFrame({"n": [1, 2]})
+            folio2.get("phase1/results"), pd.DataFrame({"n": [1, 2]})
         )
 
     def test_delete_with_subdir_name(self, tmp_path):
@@ -539,7 +535,7 @@ class TestSubdirectoryNames:
         import pandas as pd
 
         folio = DataFolio(tmp_path / "test")
-        folio.add_table("group/data", pd.DataFrame({"x": [1]}))
+        folio.add("group/data", pd.DataFrame({"x": [1]}))
 
         assert "group/data" in folio._items
         folio.delete("group/data")
@@ -550,11 +546,11 @@ class TestSubdirectoryNames:
         import pandas as pd
 
         folio = DataFolio(tmp_path / "test")
-        folio.add_table("train/data", pd.DataFrame({"x": [1, 2, 3]}))
-        folio.add_table("val/data", pd.DataFrame({"x": [4, 5]}))
-        folio.add_table("test/data", pd.DataFrame({"x": [6]}))
+        folio.add("train/data", pd.DataFrame({"x": [1, 2, 3]}))
+        folio.add("val/data", pd.DataFrame({"x": [4, 5]}))
+        folio.add("test/data", pd.DataFrame({"x": [6]}))
 
         assert len(folio._items) == 3
-        assert folio.get_table("train/data").shape == (3, 1)
-        assert folio.get_table("val/data").shape == (2, 1)
-        assert folio.get_table("test/data").shape == (1, 1)
+        assert folio.get("train/data").shape == (3, 1)
+        assert folio.get("val/data").shape == (2, 1)
+        assert folio.get("test/data").shape == (1, 1)

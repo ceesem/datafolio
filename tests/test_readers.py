@@ -160,7 +160,7 @@ class TestReadReferenced:
         )
 
         # Read the referenced data
-        loaded_df = folio.get_table("test_data")
+        loaded_df = folio.get("test_data")
 
         pd.testing.assert_frame_equal(df, loaded_df)
 
@@ -178,7 +178,7 @@ class TestReadReferenced:
         folio.reference_table("test_csv", path=str(csv_file), table_format="csv")
 
         # Read the referenced data
-        loaded_df = folio.get_table("test_csv")
+        loaded_df = folio.get("test_csv")
 
         pd.testing.assert_frame_equal(df, loaded_df)
 
@@ -200,7 +200,7 @@ class TestReadReferenced:
 
         # Load folio from directory
         loaded_folio = DataFolio(path=bundle_path)
-        loaded_df = loaded_folio.get_table("external_data")
+        loaded_df = loaded_folio.get("external_data")
 
         pd.testing.assert_frame_equal(df, loaded_df)
 
@@ -216,8 +216,8 @@ class TestReadReferenced:
         folio.reference_table("data", path=str(data_file), table_format="parquet")
 
         # Read the data twice - should work without caching
-        df1 = folio.get_table("data")
-        df2 = folio.get_table("data")
+        df1 = folio.get("data")
+        df2 = folio.get("data")
 
         # Both reads should succeed and return the same data
         pd.testing.assert_frame_equal(df1, df2)

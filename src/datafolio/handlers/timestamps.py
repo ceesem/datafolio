@@ -26,7 +26,7 @@ class TimestampHandler(BaseHandler):
         >>> # Handler is used automatically by DataFolio
         >>> from datetime import datetime, timezone
         >>> event_time = datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
-        >>> folio.add_timestamp('event_time', event_time)
+        >>> folio.add('event_time', event_time)
     """
 
     @property
@@ -37,8 +37,8 @@ class TimestampHandler(BaseHandler):
     def can_handle(self, data: Any) -> bool:
         """Check if data is a datetime object.
 
-        Only auto-detects datetime objects for add_data().
-        Unix timestamps (int/float) can still be stored via explicit add_timestamp() calls.
+        Only auto-detects datetime objects for add(). Bare numbers
+        (int/float) passed to add() are stored as JSON, not as timestamps.
 
         Args:
             data: Data to check
@@ -103,8 +103,8 @@ class TimestampHandler(BaseHandler):
         iso_string = utc_dt.isoformat()
         unix_ts = utc_dt.timestamp()
 
-        # Build filename
-        filename = f"{name}.json"
+        # Build filename (folio injects a collision-safe versioned name)
+        filename = kwargs.get("_filename") or f"{name}.json"
         subdir = self.get_storage_subdir()
         filepath = folio._storage.join_paths(folio._bundle_dir, subdir, filename)
 
@@ -125,7 +125,7 @@ class TimestampHandler(BaseHandler):
         if description:
             metadata["description"] = description
         if inputs:
-            metadata["inputs"] = inputs
+            metadata["inputs"] = list(inputs)
 
         return metadata
 

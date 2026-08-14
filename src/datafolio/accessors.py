@@ -27,6 +27,15 @@ class ItemProxy:
         self._folio = folio
         self._name = name
 
+    def _item(self) -> Dict[str, Any]:
+        """The live manifest entry, with a consistent not-found error."""
+        try:
+            return self._folio._items[self._name]
+        except KeyError:
+            raise KeyError(
+                f"Item '{self._name}' not found in DataFolio (was it deleted?)"
+            ) from None
+
     @property
     def content(self) -> Any:
         """Get the content of this item.
@@ -48,27 +57,30 @@ class ItemProxy:
             >>> with open(folio.data.plot.content, 'rb') as f:  # file path
             ...     img = f.read()
         """
-        # Auto-refresh before accessing
-        self._folio._refresh_if_needed()
+        # Single read entry point: get() dispatches on the item's type and
+        # applies the same guards (eager-size, polars_only, refresh) as any
+        # direct call.
+        return self._folio.get(self._name)
 
-        item = self._folio._items[self._name]
-        item_type = item.get("item_type")
+    @property
+    def lazy(self) -> Any:
+        """Get this table as a polars LazyFrame (tables only).
 
-        # Dispatch to appropriate getter
-        if item_type in ("referenced_table", "included_table"):
-            return self._folio.get_table(self._name)
-        elif item_type == "numpy_array":
-            return self._folio.get_numpy(self._name)
-        elif item_type == "json_data":
-            return self._folio.get_json(self._name)
-        elif item_type == "timestamp":
-            return self._folio.get_timestamp(self._name)
-        elif item_type in ("model", "pytorch_model"):
-            return self._folio.get_model(self._name)
-        elif item_type == "artifact":
-            return self._folio.get_artifact_path(self._name)
-        else:
-            raise ValueError(f"Unknown item type: {item_type}")
+        Works identically for included and referenced tables — a lazy scan with
+        predicate/projection pushdown, no full download.
+
+        Returns:
+            polars LazyFrame
+
+        Raises:
+            ValueError: If this item is not a table
+            ImportError: If polars is not installed
+
+        Examples:
+            >>> lf = folio.data.big_ref.lazy
+            >>> lf.filter(pl.col("x") > 0).select("y").collect()
+        """
+        return self._folio.scan_table(self._name)
 
     @property
     def description(self) -> Optional[str]:
@@ -80,8 +92,7 @@ class ItemProxy:
         # Auto-refresh before accessing
         self._folio._refresh_if_needed()
 
-        item = self._folio._items[self._name]
-        return item.get("description")
+        return self._item().get("description")
 
     @property
     def type(self) -> str:
@@ -94,34 +105,22 @@ class ItemProxy:
         # Auto-refresh before accessing
         self._folio._refresh_if_needed()
 
-        item = self._folio._items[self._name]
-        return item.get("item_type", "unknown")
+        return self._item().get("item_type", "unknown")
 
     @property
     def path(self) -> Optional[str]:
         """Get the file path for this item.
 
         Returns:
-            - For referenced tables: external file path
-            - For artifacts: artifact file path
-            - For other types: None
+            The payload file path (external path for referenced tables,
+            in-bundle payload path for everything else).
 
         Examples:
             >>> folio.data.external_data.path  # 's3://bucket/data.parquet'
+            >>> folio.data.results.path  # '/path/to/bundle/tables/results.parquet'
             >>> folio.data.plot.path  # '/path/to/bundle/artifacts/plot.png'
         """
-        # Auto-refresh before accessing
-        self._folio._refresh_if_needed()
-
-        item = self._folio._items[self._name]
-        item_type = item.get("item_type")
-
-        if item_type == "referenced_table":
-            return item.get("path")
-        elif item_type == "artifact":
-            return self._folio.get_artifact_path(self._name)
-        else:
-            return None
+        return self._folio.item_path(self._name)
 
     @property
     def inputs(self) -> list[str]:
@@ -130,6 +129,7 @@ class ItemProxy:
         Returns:
             List of item names that were used to create this item
         """
+        self._folio._refresh_if_needed()
         return self._folio.get_inputs(self._name)
 
     @property
@@ -139,6 +139,7 @@ class ItemProxy:
         Returns:
             List of item names that use this item as input
         """
+        self._folio._refresh_if_needed()
         return self._folio.get_dependents(self._name)
 
     @property
@@ -151,16 +152,17 @@ class ItemProxy:
         # Auto-refresh before accessing
         self._folio._refresh_if_needed()
 
-        return dict(self._folio._items[self._name])
+        return dict(self._item())
 
     def __repr__(self) -> str:
-        """Return string representation."""
-        # Auto-refresh before accessing
-        self._folio._refresh_if_needed()
-
-        item = self._folio._items[self._name]
+        """Return string representation (never raises — Jupyter renders it)."""
+        try:
+            self._folio._refresh_if_needed()
+            item = self._folio._items[self._name]
+        except Exception:
+            return f"ItemProxy('{self._name}', missing)"
         item_type = item.get("item_type", "unknown")
-        desc = item.get("description", "")
+        desc = item.get("description") or ""
         desc_str = f": {desc}" if desc else ""
         return f"ItemProxy('{self._name}', type='{item_type}'{desc_str})"
 
@@ -185,44 +187,36 @@ class DataAccessor:
         self._setup_dynamic_attributes()
 
     def _setup_dynamic_attributes(self) -> None:
-        """Set up dynamic attributes on the class for autocomplete support.
+        """Bind item proxies as INSTANCE attributes for autocomplete.
 
-        This sets attributes on the class itself (not just the instance),
-        which makes them more visible to IDE autocomplete and Jedi.
+        Instance-level (not class-level) so two folios open in one process
+        never clobber each other's completions, and the pattern is
+        thread-safe per accessor. Only names that are safe as attributes get
+        one: a valid Python identifier, not underscore-prefixed, and not
+        shadowing a real attribute of the class. Skipped names remain fully
+        accessible via ``folio.data['name']``.
         """
-        # Get current items
         self._folio._refresh_if_needed()
 
-        # Get the class of this instance
-        cls = self.__class__
+        current = set(self._folio._items.keys())
+        previous = self.__dict__.get("_dynamic_attrs", set())
 
-        # Track which attributes we've added (store on the class)
-        if not hasattr(cls, "_dynamic_attrs"):
-            cls._dynamic_attrs = set()
+        # Drop attributes for items that no longer exist
+        for attr in previous - current:
+            self.__dict__.pop(attr, None)
 
-        # Get current item names
-        current_items = set(self._folio._items.keys())
-
-        # Remove attributes that no longer exist
-        for attr in list(cls._dynamic_attrs):
-            if attr not in current_items:
-                if hasattr(cls, attr):
-                    delattr(cls, attr)
-                cls._dynamic_attrs.discard(attr)
-
-        # Add new attributes as properties on the class
-        for item_name in current_items:
-            if item_name not in cls._dynamic_attrs:
-                # Create a property that returns an ItemProxy
-                # Use a default argument to capture the item_name in the closure
-                def make_property(name: str):
-                    def item_property(self) -> ItemProxy:
-                        return ItemProxy(self._folio, name)
-
-                    return property(item_property)
-
-                setattr(cls, item_name, make_property(item_name))
-                cls._dynamic_attrs.add(item_name)
+        bound = set()
+        for item_name in current:
+            if (
+                not item_name.isidentifier()
+                or item_name.startswith("_")
+                or hasattr(type(self), item_name)
+            ):
+                continue
+            if item_name not in self.__dict__:
+                self.__dict__[item_name] = ItemProxy(self._folio, item_name)
+            bound.add(item_name)
+        self.__dict__["_dynamic_attrs"] = bound
 
     def _sync_items(self) -> None:
         """Sync item attributes with current folio state.
@@ -262,6 +256,16 @@ class DataAccessor:
                 f"Item '{name}' not found in DataFolio. "
                 f"Available items: {', '.join(sorted(self._folio._items.keys()))}"
             )
+
+    def __contains__(self, name: str) -> bool:
+        """Check whether an item exists (``'results' in folio.data``)."""
+        self._folio._refresh_if_needed()
+        return name in self._folio._items
+
+    def __iter__(self):
+        """Iterate over item names (``for name in folio.data``)."""
+        self._folio._refresh_if_needed()
+        return iter(list(self._folio._items.keys()))
 
     def __getitem__(self, name: str) -> ItemProxy:
         """Get item by dictionary access.
@@ -330,6 +334,7 @@ class DataAccessor:
             ("Models", contents["models"]),
             ("Numpy Arrays", contents["numpy_arrays"]),
             ("JSON Data", contents["json_data"]),
+            ("Timestamps", contents["timestamps"]),
             ("Artifacts", contents["artifacts"]),
         ]:
             if item_list:

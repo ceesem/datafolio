@@ -25,7 +25,7 @@ class JsonHandler(BaseHandler):
         >>>
         >>> # Handler is used automatically by DataFolio
         >>> config = {'learning_rate': 0.01, 'batch_size': 32}
-        >>> folio.add_json('config', config)
+        >>> folio.add('config', config)
     """
 
     @property
@@ -47,12 +47,12 @@ class JsonHandler(BaseHandler):
         """
         # Only handle dict and list explicitly
         # Exclude primitives (int, float, str, bool, None) to avoid conflicts with other handlers
-        # These can still be stored via add_json() explicitly
+        # DataFolio.add() routes primitives to this handler directly as JSON
         if isinstance(data, (dict, list)):
             try:
                 import orjson
 
-                orjson.dumps(data)
+                orjson.dumps(data, option=orjson.OPT_SERIALIZE_NUMPY)
                 return True
             except (TypeError, ValueError, ImportError):
                 return False
@@ -92,12 +92,12 @@ class JsonHandler(BaseHandler):
 
         # Validate JSON-serializability
         try:
-            orjson.dumps(data)
+            orjson.dumps(data, option=orjson.OPT_SERIALIZE_NUMPY)
         except (TypeError, ValueError) as e:
             raise TypeError(f"Data is not JSON-serializable: {e}")
 
-        # Build filename
-        filename = f"{name}.json"
+        # Build filename (folio injects a collision-safe versioned name)
+        filename = kwargs.get("_filename") or f"{name}.json"
         subdir = self.get_storage_subdir()
         filepath = folio._storage.join_paths(folio._bundle_dir, subdir, filename)
 
@@ -121,7 +121,7 @@ class JsonHandler(BaseHandler):
         if description:
             metadata["description"] = description
         if inputs:
-            metadata["inputs"] = inputs
+            metadata["inputs"] = list(inputs)
 
         return metadata
 

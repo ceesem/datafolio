@@ -1,6 +1,7 @@
 """Utility functions for datafolio."""
 
 import random
+import re
 from pathlib import Path
 from typing import Any, Optional, Union
 
@@ -24,14 +25,21 @@ class TableReference(TypedDict, total=False):
     name: str
     item_type: str  # 'referenced_table'
     path: str
-    table_format: str  # 'parquet', 'delta', 'csv'
-    is_directory: bool  # True if path points to a directory (e.g. Delta table)
+    table_format: str  # 'parquet' (canonical) or 'csv'
+    is_directory: bool  # True if path points to a directory (sharded dataset)
     num_rows: Optional[int]
-    version: Optional[int]  # For Delta tables
+    num_cols: Optional[int]
+    columns: Optional[list[str]]
+    dtypes: Optional[dict[str, str]]
+    size_bytes: Optional[int]  # Size of the external file, if known
+    allow_full_load: Optional[bool]  # Bypass the eager-load size guard
+    polars_only: Optional[bool]  # Readable only lazily / via polars (no pandas)
+    mutable: Optional[bool]  # External content is not owned; may change over time
+    source_identity: Optional[dict]  # Point-in-time identity from inspect_table
+    version: Optional[int]  # Optional source version recorded in the manifest
     description: Optional[str]
     # Lineage fields
     inputs: Optional[list[str]]  # Names of items this was derived from
-    code: Optional[str]  # Code snippet that created this
     created_at: Optional[str]  # ISO 8601 timestamp
     # Snapshot fields (using @snapshot naming scheme)
     in_snapshots: list[str]  # List of snapshot names referencing this version
@@ -47,15 +55,15 @@ class IncludedTable(TypedDict, total=False):
     table_format: str  # 'parquet'
     is_directory: bool  # False for included tables (usually)
     checksum: str  # MD5 checksum
+    size_bytes: Optional[int]  # Size of the bundled file, if known
+    polars_only: Optional[bool]  # Readable only lazily / via polars (no pandas)
     num_rows: int
     num_cols: int
     columns: list[str]
     dtypes: dict[str, str]
     description: Optional[str]
     # Lineage fields
-    inputs: Optional[list[str]]  # Names of tables used to create this
-    models: Optional[list[str]]  # Names of models used to create this
-    code: Optional[str]  # Code snippet that created this
+    inputs: Optional[list[str]]  # Names of items used to create this
     created_at: Optional[str]  # ISO 8601 timestamp
     # Snapshot fields (using @snapshot naming scheme)
     in_snapshots: list[str]  # List of snapshot names referencing this version
@@ -73,8 +81,6 @@ class IncludedItem(TypedDict, total=False):
     description: Optional[str]
     # Lineage fields (primarily for models)
     inputs: Optional[list[str]]  # Training data, etc.
-    hyperparameters: Optional[dict[str, Any]]  # Model hyperparameters
-    code: Optional[str]  # Training code snippet
     created_at: Optional[str]  # ISO 8601 timestamp
     # Snapshot fields (using @snapshot naming scheme)
     in_snapshots: list[str]  # List of snapshot names referencing this version
@@ -92,7 +98,6 @@ class TimestampItem(TypedDict, total=False):
     description: Optional[str]
     # Lineage fields
     inputs: Optional[list[str]]  # Names of items this was derived from
-    code: Optional[str]  # Code snippet that created this
     created_at: Optional[str]  # ISO 8601 timestamp of when item was added
     # Snapshot fields (using @snapshot naming scheme)
     in_snapshots: list[str]  # List of snapshot names referencing this version
@@ -116,7 +121,6 @@ class EnvironmentInfo(TypedDict, total=False):
     python_version: str  # Python version (e.g., '3.11.5')
     platform: str  # Platform string (e.g., 'Linux-5.15.0-x86_64')
     uv_lock_hash: Optional[str]  # Hash of uv.lock file if present
-    requirements: Optional[str]  # Contents of requirements.txt or similar
 
 
 class ExecutionInfo(TypedDict, total=False):
@@ -135,7 +139,7 @@ class SnapshotMetadata(TypedDict, total=False):
     tags: list[str]  # Tags for organization
 
     # Item versions at snapshot time
-    item_versions: dict[str, int]  # Map of item_name → version_number
+    item_versions: dict[str, str]  # Map of item_name → version_id token
 
     # Metadata state at snapshot time
     metadata_snapshot: dict[str, Any]  # Full copy of metadata dict
@@ -247,19 +251,35 @@ def resolve_path(
 
 
 def validate_table_format(table_format: str) -> None:
-    """Validate that table format is supported.
+    """Validate that table format is supported end-to-end.
+
+    Only formats that work through registration, reading, lazy scanning, and
+    validation are accepted. Parquet is the canonical first-class format;
+    CSV is supported as a narrow reference format.
+
+    Delta and Iceberg are explicitly rejected: they were previously accepted
+    at creation but have no reader, so a reference to one could never be read.
+    Rather than record an unreadable item, we fail fast with guidance.
 
     Args:
         table_format: Format string to validate
 
     Raises:
-        ValueError: If format is not supported
+        ValueError: If format is not supported (includes an actionable message
+            for delta/iceberg).
     """
-    supported_formats = {"parquet", "delta", "csv"}
+    supported_formats = {"parquet", "csv"}
+    if table_format in ("delta", "iceberg"):
+        raise ValueError(
+            f"Table format '{table_format}' is not supported: datafolio has no "
+            f"{table_format} reader, so such a reference could never be read. "
+            f"Use 'parquet' (canonical) or 'csv'. To point at a "
+            f"{table_format} table, export/convert it to Parquet first."
+        )
     if table_format not in supported_formats:
         raise ValueError(
             f"Unsupported table format: {table_format}. "
-            f"Supported formats: {supported_formats}"
+            f"Supported formats: {sorted(supported_formats)}"
         )
 
 
@@ -281,8 +301,7 @@ def get_file_extension(table_format: str) -> str:
     extensions = {
         "parquet": ".parquet",
         "csv": ".csv",
-        "arrow": ".arrow",
-        "delta": "",  # Delta Lake is a directory
+        "arrow": ".arrow",  # internal reader only, not a public reference format
     }
     return extensions.get(table_format, f".{table_format}")
 
@@ -531,48 +550,74 @@ def make_bundle_name(prefix: Optional[str] = None) -> str:
     return random_suffix
 
 
-def validate_item_name(name: str) -> None:
-    """Validate that an item name is safe for use with snapshots.
+# One item-name segment: starts with an alphanumeric, then alphanumerics,
+# dots, underscores, or hyphens. Segments are joined by '/' for namespacing
+# (e.g. 'examples/weights'), which glob patterns in describe()/archive() rely
+# on. The grammar deliberately excludes anything that could escape the bundle
+# when the name becomes part of a payload filename ('..', absolute paths,
+# separators inside a segment) and leading underscores (reserved so item names
+# can never shadow internals on the ``folio.data`` accessor).
+_ITEM_NAME_SEGMENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
-    The '@' symbol is reserved as a delimiter for snapshot versioning
-    (e.g., 'model@v1.0.joblib'), so it cannot appear in item names.
+
+def validate_item_name(name: str) -> None:
+    """Validate that an item name is safe as a manifest key and filename part.
+
+    Item names may be namespaced with '/' (e.g. ``'examples/weights'``); each
+    '/'-separated segment must start with a letter or digit and contain only
+    letters, digits, ``.``, ``_``, and ``-``. Names must not contain ``..``
+    segments, start with ``/`` or ``_``, or contain ``@`` (reserved as the
+    snapshot version delimiter).
 
     Args:
         name: Item name to validate
 
     Raises:
-        ValueError: If name contains '@' symbol or is invalid
+        TypeError: If name is not a string
+        ValueError: If the name violates the grammar
 
     Examples:
-        >>> validate_item_name('my_model')  # OK
-        >>> validate_item_name('model-v1')  # OK
-        >>> validate_item_name('my@model')  # Raises ValueError
+        >>> validate_item_name('my_model')      # OK
+        >>> validate_item_name('model-v1.2')    # OK
+        >>> validate_item_name('examples/run1') # OK (namespaced)
+        >>> validate_item_name('../escape')     # Raises ValueError
         Traceback (most recent call last):
             ...
-        ValueError: Item name 'my@model' cannot contain '@' symbol (reserved for snapshots)
+        ValueError: Invalid item name '../escape': segment '..' must start with a letter or digit and contain only letters, digits, '.', '_', and '-'
     """
-    if not name:
-        raise ValueError("Item name cannot be empty")
-
     if not isinstance(name, str):
         raise TypeError(f"Item name must be a string, got {type(name).__name__}")
 
-    # Strip whitespace for validation
-    name_stripped = name.strip()
-    if name != name_stripped:
-        raise ValueError(
-            f"Item name '{name}' cannot have leading or trailing whitespace"
-        )
+    if not name:
+        raise ValueError("Item name cannot be empty")
 
-    # Check for @ symbol (reserved for snapshot delimiter)
     if "@" in name:
         raise ValueError(
             f"Item name '{name}' cannot contain '@' symbol (reserved for snapshots)"
         )
 
-    # Check reasonable length
     if len(name) > 255:
         raise ValueError(f"Item name '{name}' is too long (max 255 characters)")
+
+    for segment in name.split("/"):
+        if segment in ("", ".", ".."):
+            raise ValueError(
+                f"Invalid item name '{name}': empty, '.', or '..' path "
+                f"segments are not allowed"
+            )
+        if len(segment) > 200:
+            raise ValueError(
+                f"Invalid item name '{name}': segment '{segment[:32]}…' is "
+                f"longer than 200 characters. Payload filenames append a "
+                f"version suffix and extension, so segments need headroom "
+                f"below the filesystem's 255-character limit."
+            )
+        if not _ITEM_NAME_SEGMENT.match(segment):
+            raise ValueError(
+                f"Invalid item name '{name}': segment '{segment}' must start "
+                f"with a letter or digit and contain only letters, digits, "
+                f"'.', '_', and '-'"
+            )
 
 
 def validate_snapshot_name(name: str) -> None:
@@ -619,3 +664,13 @@ def validate_snapshot_name(name: str) -> None:
     # Check reasonable length
     if len(name) > 100:
         raise ValueError(f"Snapshot name '{name}' is too long (max 100 characters)")
+
+
+def _polars_only_error(name: str) -> ValueError:
+    """Build the standard error for pandas access to a polars-only table."""
+    return ValueError(
+        f"Table '{name}' is a sharded/partitioned (polars-only) dataset and "
+        f"cannot be loaded as pandas. Use scan_table('{name}') for a lazy "
+        f"scan, or get('{name}', frame='polars') to collect it eagerly. If "
+        f"polars is not installed: pip install 'datafolio[polars]'."
+    )

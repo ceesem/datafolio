@@ -28,19 +28,19 @@ class TestReadOnlyMode:
         """Test read-only prevents add_data()."""
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("existing", df)
+        folio.add("existing", df)
 
         # Open as read-only
         folio_ro = DataFolio(tmp_path / "test", read_only=True)
 
         with pytest.raises(RuntimeError, match="read-only"):
-            folio_ro.add_data("new", df)
+            folio_ro.add("new", df)
 
     def test_read_only_prevents_delete(self, tmp_path):
         """Test read-only prevents delete()."""
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
 
         # Open as read-only
         folio_ro = DataFolio(tmp_path / "test", read_only=True)
@@ -83,7 +83,7 @@ class TestReadOnlyMode:
         """Test read-only prevents creating snapshots."""
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
 
         # Open as read-only
         folio_ro = DataFolio(tmp_path / "test", read_only=True)
@@ -95,7 +95,7 @@ class TestReadOnlyMode:
         """Test read-only prevents deleting snapshots."""
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
         folio.create_snapshot("v1.0")
 
         # Open as read-only
@@ -108,7 +108,7 @@ class TestReadOnlyMode:
         """Test read-only prevents restoring snapshots."""
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
         folio.create_snapshot("v1.0")
 
         # Open as read-only
@@ -121,14 +121,14 @@ class TestReadOnlyMode:
         """Test read-only allows all read operations."""
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
         folio.metadata["accuracy"] = 0.89
 
         # Open as read-only
         folio_ro = DataFolio(tmp_path / "test", read_only=True)
 
         # All read operations should work
-        assert folio_ro.get_table("data") is not None
+        assert folio_ro.get("data") is not None
         assert folio_ro.metadata["accuracy"] == 0.89
         folio_ro.describe()  # Should not error
         assert len(folio_ro.list_contents()) > 0
@@ -147,7 +147,7 @@ class TestLoadSnapshot:
         """Test basic snapshot loading."""
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
         folio.metadata["accuracy"] = 0.89
         folio.create_snapshot("v1.0")
 
@@ -163,7 +163,7 @@ class TestLoadSnapshot:
         """Test snapshots load as read-only by default."""
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
         folio.create_snapshot("v1.0")
 
         snapshot = DataFolio.load_snapshot(tmp_path / "test", "v1.0")
@@ -173,7 +173,7 @@ class TestLoadSnapshot:
 
         # Cannot modify
         with pytest.raises(RuntimeError, match="read-only.*snapshot"):
-            snapshot.add_table("new", df)
+            snapshot.add("new", df)
 
     def test_load_snapshot_has_correct_items(self, tmp_path):
         """Test loaded snapshot has correct items."""
@@ -181,10 +181,10 @@ class TestLoadSnapshot:
         df1 = pd.DataFrame({"a": [1, 2, 3]})
         df2 = pd.DataFrame({"b": [4, 5, 6]})
 
-        folio.add_table("data1", df1)
+        folio.add("data1", df1)
         folio.create_snapshot("v1.0")
 
-        folio.add_table("data2", df2)
+        folio.add("data2", df2)
         folio.create_snapshot("v2.0")
 
         # Load v1.0 - should only have data1
@@ -201,7 +201,7 @@ class TestLoadSnapshot:
         """Test loaded snapshot has correct metadata."""
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
 
         folio.metadata["accuracy"] = 0.85
         folio.create_snapshot("v1.0")
@@ -220,7 +220,7 @@ class TestLoadSnapshot:
         """Test loading multiple snapshots at once."""
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
 
         for i, acc in enumerate([0.85, 0.87, 0.90], 1):
             folio.metadata["accuracy"] = acc
@@ -246,7 +246,7 @@ class TestLoadSnapshot:
         """Test get_snapshot() instance method."""
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
         folio.metadata["accuracy"] = 0.89
         folio.create_snapshot("v1.0")
 
@@ -265,7 +265,7 @@ class TestLoadSnapshot:
         """Test get_snapshot() is equivalent to load_snapshot()."""
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
         folio.metadata["accuracy"] = 0.89
         folio.create_snapshot("v1.0")
 
@@ -283,7 +283,7 @@ class TestLoadSnapshot:
         """Test __repr__ shows snapshot name."""
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
         folio.create_snapshot("v1.0")
 
         snapshot = DataFolio.load_snapshot(tmp_path / "test", "v1.0")
@@ -296,7 +296,7 @@ class TestLoadSnapshot:
         """Test describe() shows snapshot information."""
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
         folio.create_snapshot(
             "v1.0", description="Test snapshot", tags=["test", "baseline"]
         )
@@ -318,7 +318,7 @@ class TestSnapshotWorkflows:
         # Create and snapshot for paper
         folio = DataFolio(tmp_path / "research")
         df = pd.DataFrame({"data": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
         folio.metadata["accuracy"] = 0.89
         folio.create_snapshot("neurips-2025", description="Paper submission")
 
@@ -334,14 +334,14 @@ class TestSnapshotWorkflows:
 
         # Cannot modify
         with pytest.raises(RuntimeError):
-            paper.add_table("new", df)
+            paper.add("new", df)
 
     def test_ab_testing_workflow(self, tmp_path):
         """Test A/B testing workflow."""
         # Create baseline
         folio = DataFolio(tmp_path / "models")
         df = pd.DataFrame({"data": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
         folio.metadata["latency"] = 50
         folio.create_snapshot("baseline")
 
@@ -362,7 +362,7 @@ class TestSnapshotWorkflows:
         """Test comparing multiple snapshot versions."""
         folio = DataFolio(tmp_path / "tuning")
         df = pd.DataFrame({"data": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
 
         # Create multiple versions
         for lr, acc in [(0.001, 0.85), (0.01, 0.90), (0.1, 0.87)]:
@@ -396,7 +396,7 @@ class TestErrorMessages:
         df = pd.DataFrame({"a": [1, 2, 3]})
 
         with pytest.raises(RuntimeError) as exc_info:
-            folio.add_table("data", df)
+            folio.add("data", df)
 
         error_msg = str(exc_info.value)
         assert "read-only" in error_msg.lower()
@@ -406,13 +406,13 @@ class TestErrorMessages:
         """Test snapshot read-only error message mentions snapshot."""
         folio = DataFolio(tmp_path / "test")
         df = pd.DataFrame({"a": [1, 2, 3]})
-        folio.add_table("data", df)
+        folio.add("data", df)
         folio.create_snapshot("v1.0")
 
         snapshot = DataFolio.load_snapshot(tmp_path / "test", "v1.0")
 
         with pytest.raises(RuntimeError) as exc_info:
-            snapshot.add_table("new", df)
+            snapshot.add("new", df)
 
         error_msg = str(exc_info.value)
         assert "read-only" in error_msg.lower()
@@ -494,7 +494,7 @@ class TestHttpFolio:
 
         df = pd.DataFrame({"a": [1, 2, 3]})
         with pytest.raises(RuntimeError, match="read-only"):
-            folio.add_data("new", df)
+            folio.add("new", df)
 
     def test_http_path_cannot_delete(self, tmp_path):
         """delete() raises RuntimeError on HTTP-backed folio."""

@@ -87,7 +87,7 @@ metrics_df = pd.DataFrame(
     }
 )
 
-folio.add_table(
+folio.add(
     "performance_metrics",
     metrics_df,
     inputs=["training_data"],
@@ -192,12 +192,12 @@ print(f"Experiment: {loaded_folio.metadata['experiment']}")
 print(f"Accuracy: {loaded_folio.metadata['final_accuracy']}")
 
 # %% Read included table (from bundle)
-metrics = loaded_folio.get_table("performance_metrics")
+metrics = loaded_folio.get("performance_metrics")
 print("Performance metrics (from bundle):")
 metrics
 
 # %% Read referenced table (from external file)
-training = loaded_folio.get_table("training_data")
+training = loaded_folio.get("training_data")
 print(f"Training data loaded from external file: {training.shape}")
 training.head()
 

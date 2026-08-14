@@ -155,9 +155,10 @@ class TestFileSystemCloud:
         assert result is True
 
     def test_exists_cloud_path_false(self, storage):
-        """Test exists() with cloud path that doesn't exist."""
+        """Test exists() with cloud path that doesn't exist (no object, empty prefix)."""
         mock_cf = Mock()
-        mock_cf.list.side_effect = Exception("Not found")
+        mock_cf.exists.return_value = False
+        mock_cf.list.return_value = iter([])
 
         with patch("cloudfiles.CloudFiles", return_value=mock_cf):
             result = storage.exists("s3://bucket/path")
@@ -167,12 +168,28 @@ class TestFileSystemCloud:
     def test_exists_cloud_path_empty(self, storage):
         """Test exists() with cloud path that has no files (empty prefix)."""
         mock_cf = Mock()
-        mock_cf.list.return_value = []
+        mock_cf.exists.return_value = False
+        mock_cf.list.return_value = iter([])
 
         with patch("cloudfiles.CloudFiles", return_value=mock_cf):
             result = storage.exists("s3://bucket/path")
 
         assert result is False
+
+    def test_exists_cloud_error_propagates(self, storage):
+        """A transient cloud error must NOT read as 'does not exist'.
+
+        DataFolio.__init__ uses exists() to decide whether to create a fresh
+        bundle; swallowing an auth/network error here could overwrite a real
+        bundle with an empty one.
+        """
+        mock_cf = Mock()
+        mock_cf.exists.side_effect = Exception("auth failure")
+        mock_cf.list.side_effect = Exception("auth failure")
+
+        with patch("cloudfiles.CloudFiles", return_value=mock_cf):
+            with pytest.raises(Exception, match="auth failure"):
+                storage.exists("s3://bucket/path")
 
     def test_mkdir_cloud_path(self, storage):
         """Test mkdir() with cloud path (should be no-op)."""
@@ -201,7 +218,7 @@ class TestFileSystemCloud:
         mock_cf.delete.assert_called_once_with("file.txt")
 
     def test_copy_file_local_to_cloud(self, storage, temp_dir):
-        """Test copy_file() from local to cloud."""
+        """copy_file() streams a file object to the cloud (bounded memory)."""
         src = temp_dir / "source.txt"
         src.write_text("test content")
 
@@ -210,11 +227,14 @@ class TestFileSystemCloud:
         with patch("cloudfiles.CloudFiles", return_value=mock_cf):
             storage.copy_file(str(src), "s3://bucket/dest.txt")
 
-        # Verify CloudFiles.put was called with correct content
+        # Verify CloudFiles.put was called with a file object (not whole bytes)
         assert mock_cf.put.called
         call_args = mock_cf.put.call_args
         assert call_args[0][0] == "dest.txt"
-        assert call_args[0][1] == b"test content"
+        content = call_args[0][1]
+        assert hasattr(content, "read")  # streamed a BinaryIO, not bytes
+        # (file handle is read by cloudfiles; here we just confirm its identity)
+        assert getattr(content, "name", "").endswith("source.txt")
 
 
 # ============================================================================

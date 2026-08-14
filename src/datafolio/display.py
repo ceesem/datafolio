@@ -175,7 +175,7 @@ class DisplayFormatter:
                 # Show up to 5 most recent snapshots
                 for snap in snapshots[:5]:
                     name = snap["name"]
-                    desc = snap.get("description", "(no description)")
+                    desc = snap.get("description") or "(no description)"
                     timestamp = self._format_timestamp(snap.get("timestamp", ""))
                     num_items = snap.get("num_items", 0)
                     lines.append(f"  • {name}: {desc}")
@@ -209,7 +209,7 @@ class DisplayFormatter:
                 # Show referenced tables first
                 for name in ref_tables:
                     item = self._folio._items[name]
-                    desc = item.get("description", "(no description)")
+                    desc = item.get("description") or "(no description)"
                     lines.append(f"  • {name} (reference): {desc}")
                     # Show path for referenced tables (always shown — it's the key info)
                     if "path" in item:
@@ -221,10 +221,10 @@ class DisplayFormatter:
                 # Then included tables
                 for name in inc_tables:
                     item = self._folio._items[name]
-                    desc = item.get("description", "(no description)")
+                    desc = item.get("description") or "(no description)"
                     lines.append(f"  • {name}: {desc}")
                     if show_paths:
-                        lines.append(f"    ↳ path: {self._folio.get_item_path(name)}")
+                        lines.append(f"    ↳ path: {self._folio.item_path(name)}")
                     # Show file size if available
                     filesize = self._get_item_filesize(item)
                     if filesize is not None:
@@ -245,12 +245,12 @@ class DisplayFormatter:
             if numpy_arrays:
                 for name in numpy_arrays:
                     item = self._folio._items[name]
-                    desc = item.get("description", "(no description)")
+                    desc = item.get("description") or "(no description)"
                     shape = item.get("shape", "unknown")
                     dtype = item.get("dtype", "unknown")
                     lines.append(f"  • {name}: {desc}")
                     if show_paths:
-                        lines.append(f"    ↳ path: {self._folio.get_item_path(name)}")
+                        lines.append(f"    ↳ path: {self._folio.item_path(name)}")
                     lines.append(f"    ↳ shape: {shape}, dtype: {dtype}")
                     # Show file size if available
                     filesize = self._get_item_filesize(item)
@@ -270,11 +270,11 @@ class DisplayFormatter:
             if json_data:
                 for name in json_data:
                     item = self._folio._items[name]
-                    desc = item.get("description", "(no description)")
+                    desc = item.get("description") or "(no description)"
                     data_type = item.get("data_type", "unknown")
                     lines.append(f"  • {name}: {desc}")
                     if show_paths:
-                        lines.append(f"    ↳ path: {self._folio.get_item_path(name)}")
+                        lines.append(f"    ↳ path: {self._folio.item_path(name)}")
                     lines.append(f"    ↳ type: {data_type}")
                     # Show file size if available
                     filesize = self._get_item_filesize(item)
@@ -294,10 +294,10 @@ class DisplayFormatter:
             if models:
                 for name in models:
                     item = self._folio._items[name]
-                    desc = item.get("description", "(no description)")
+                    desc = item.get("description") or "(no description)"
                     lines.append(f"  • {name}: {desc}")
                     if show_paths:
-                        lines.append(f"    ↳ path: {self._folio.get_item_path(name)}")
+                        lines.append(f"    ↳ path: {self._folio.item_path(name)}")
                     # Show file size if available
                     filesize = self._get_item_filesize(item)
                     if filesize is not None:
@@ -323,12 +323,12 @@ class DisplayFormatter:
             if artifacts:
                 for name in artifacts:
                     item = self._folio._items[name]
-                    desc = item.get("description", "(no description)")
+                    desc = item.get("description") or "(no description)"
                     category = item.get("category", "")
                     category_str = f" ({category})" if category else ""
                     lines.append(f"  • {name}{category_str}: {desc}")
                     if show_paths:
-                        lines.append(f"    ↳ path: {self._folio.get_item_path(name)}")
+                        lines.append(f"    ↳ path: {self._folio.item_path(name)}")
                     # Show file size if available
                     filesize = self._get_item_filesize(item)
                     if filesize is not None:
@@ -344,10 +344,10 @@ class DisplayFormatter:
             if timestamps:
                 for name in timestamps:
                     item = self._folio._items[name]
-                    desc = item.get("description", "(no description)")
+                    desc = item.get("description") or "(no description)"
                     lines.append(f"  • {name}: {desc}")
                     if show_paths:
-                        lines.append(f"    ↳ path: {self._folio.get_item_path(name)}")
+                        lines.append(f"    ↳ path: {self._folio.item_path(name)}")
                     # Show formatted timestamp
                     iso_string = item.get("iso_string", "")
                     if iso_string:
@@ -569,7 +569,7 @@ class DisplayFormatter:
 
                 if item:
                     item_type = item.get("item_type", "unknown")
-                    desc = item.get("description", "(no description)")
+                    desc = item.get("description") or "(no description)"
 
                     if item_type in ["included_table", "referenced_table"]:
                         tables.append((item_name, desc, item_type))
