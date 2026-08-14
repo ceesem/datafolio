@@ -82,7 +82,7 @@ changes.
 
   ```python
   with folio.pinned():
-      for name in folio.tables():
+      for name in folio.tables:
           process(folio.get(name))
   ```
 

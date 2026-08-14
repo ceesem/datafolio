@@ -110,14 +110,15 @@ class DataFolio(SnapshotMixin, ContextCaptureMixin):
 
     Directory structure:
         my-experiment-blue-happy-falcon/
-        ├── metadata.json      # User metadata
-        ├── items.json         # Unified manifest for all items (tables, models, artifacts)
+        ├── items.json         # THE manifest: user metadata, item catalog, snapshots
+        ├── CONTENTS.md        # derived, human-readable inventory
+        ├── README.md          # how to read the bundle without datafolio
         ├── tables/
-        │   └── results.parquet
+        │   └── results--r2.parquet
         ├── models/
-        │   └── classifier.joblib
+        │   └── classifier--r3.joblib
         └── artifacts/
-            └── plot.png
+            └── plot--r4.png
 
     The items.json manifest uses an 'item_type' field to distinguish between:
     - 'referenced_table': External data not copied to bundle
@@ -157,7 +158,10 @@ class DataFolio(SnapshotMixin, ContextCaptureMixin):
 
         Args:
             path: Full path to bundle directory (local or cloud)
-            metadata: Optional dictionary of analysis metadata (for new bundles)
+            metadata: Optional dictionary of analysis metadata used to seed a
+                NEW bundle. Ignored when opening an existing bundle (which
+                loads the metadata already committed) — edit that through
+                ``folio.metadata``, which stays writable for the folio's life.
             random_suffix: If True, append random suffix to bundle name (default: False)
             read_only: If True, prevent all write operations (default: False)
             allow_existing: If True, allow creating a new folio inside an
@@ -1560,7 +1564,7 @@ For more information, see the [datafolio documentation](https://github.com/casey
 
         Examples:
             >>> with folio.pinned():
-            ...     for name in folio.tables():
+            ...     for name in folio.tables:
             ...         process(folio.get(name))  # no per-read round trips
         """
         if self._pin_depth == 0:
@@ -2072,7 +2076,7 @@ For more information, see the [datafolio documentation](https://github.com/casey
             >>> tables = folio.get_many(['train', 'test', 'holdout'])
             >>> tables['train'].shape
             (1000, 20)
-            >>> pl = folio.get_many(folio.tables(), frame='polars')
+            >>> pl = folio.get_many(folio.tables, frame='polars')
         """
         from concurrent.futures import ThreadPoolExecutor
 
@@ -2186,8 +2190,10 @@ For more information, see the [datafolio documentation](https://github.com/casey
             description: Optional description.
             inputs: Optional lineage (e.g. training data item names).
             overwrite: Must be True to replace an existing item.
-            custom: If True, use the skops format (portable pipelines with
-                custom transformers; safer loading). Default joblib.
+            custom: If True, use the skops format, which does not execute
+                arbitrary code on load (unknown types are refused unless
+                ``get_model(..., trusted=True)``). The defining classes must
+                still be importable at load time. Default joblib.
 
         Returns:
             Self for method chaining.

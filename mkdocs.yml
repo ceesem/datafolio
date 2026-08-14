@@ -5,17 +5,20 @@ repo_name: ceesem/datafolio
 
 nav:
 - About: index.md
-- Getting Started: guides/getting-started.md
+- Your First Folio: guides/getting-started.md
 - Guides:
     - guides/index.md
-    - Working with Models: guides/models.md
-    - Polars & References: guides/polars.md
-    - Using a folio without Datafolio: guides/format.md
+    - Everyday Patterns: guides/everyday.md
+    - Tables: guides/tables.md
+    - Models: guides/models.md
+    - Sharing a Folio: guides/sharing.md
     - Snapshots: guides/snapshots.md
+    - Reading a Folio without DataFolio: guides/format.md
+    - What DataFolio Is Not: guides/limits.md
     - Migrating to 2.0: guides/migrating-to-2.0.md
-- API Reference:
-    - DataFolio Methods: reference/datafolio-api.md
-    - CLI Reference: reference/cli.md
+- Reference:
+    - API Cheat Sheet: reference/datafolio-api.md
+    - CLI: reference/cli.md
     - Package API: reference/api.md
 - Changelog: changelog.md
 

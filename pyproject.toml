@@ -103,8 +103,23 @@ cmd = "uv run pytest --cov=datafolio tests"
 help = "Run pytest with code coverage."
 
 [tool.poe.tasks.doc-preview]
-cmd = "uv run mkdocs serve"
-help = "Preview documentation build locally"
+help = "Preview documentation build locally (port 8000, or next free port)"
+shell = """
+port=$(uv run python -c "
+import socket
+for p in range(8000, 8100):
+    with socket.socket() as s:
+        try:
+            s.bind(('127.0.0.1', p))
+        except OSError:
+            continue
+    print(p)
+    break
+else:
+    raise SystemExit('No free port found in 8000-8099')
+")
+exec uv run mkdocs serve --dev-addr "127.0.0.1:$port"
+"""
 
 [tool.poe.tasks.profile-all]
 cmd = "uv run scalene"

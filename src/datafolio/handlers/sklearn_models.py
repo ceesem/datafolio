@@ -161,8 +161,9 @@ class SklearnHandler(BaseHandler):
             model: Model to store (sklearn estimator or any sklearn-compatible object)
             description: Optional description
             inputs: Optional lineage inputs
-            custom: If True, use skops format for portable pipelines with custom
-                transformers. If False (default), use joblib format.
+            custom: If True, use skops format, which refuses non-standard
+                types on load unless explicitly trusted (the defining classes
+                must still be importable). If False (default), use joblib.
             **kwargs: Additional arguments (currently unused)
 
         Returns:
