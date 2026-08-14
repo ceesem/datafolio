@@ -131,6 +131,14 @@ analysis = folio2.get('analysis')  # Works immediately ✅
 
 All read operations (`describe()`, `list_contents()`, `get()`/`get_model()`, and `folio.data` accessors) automatically refresh from disk when changes are detected. Datafolio supports many readers and one active writer. Local writers are serialized; a stale writer fails with `ConcurrentWriteError` and must `refresh()` and retry. Cloud folios should be treated as single-writer.
 
+That freshness check is two round trips per read on cloud storage. For a loop of many reads, `pinned()` checks once and suspends the recheck for the block — other writers' changes then aren't visible until it exits:
+
+```python
+with folio.pinned():
+    for name in folio.tables():
+        process(folio.get(name))  # no per-read round trips
+```
+
 ### Data Lineage
 
 Track dependencies between datasets and models:

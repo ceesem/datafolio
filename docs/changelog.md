@@ -49,6 +49,25 @@
 - Git context for snapshots is captured from the working directory (the
   running code), not the bundle directory.
 
+### Added
+
+- `pinned()` — a re-entrant context manager that suspends the per-read
+  staleness recheck. Every read entry point normally re-verifies the on-disk
+  manifest, which on cloud storage is two round trips (`read_json` +
+  `exists`) per call and dominates a loop of small reads. Inside
+  `pinned()` the check happens once, on entry: 60 `get()` calls drop from
+  ~120 manifest round trips to 2. The trade is explicit — other writers'
+  changes are not seen until the block exits, so reads are internally
+  consistent rather than up to date. Writes inside the block behave
+  normally, including the fail-closed stale-writer check that rejects a
+  pinned write over an externally advanced manifest.
+
+  ```python
+  with folio.pinned():
+      for name in folio.tables():
+          process(folio.get(name))
+  ```
+
 ### Changed
 
 - `add(..., preserve_index=True)` (still supported) now stores the index as

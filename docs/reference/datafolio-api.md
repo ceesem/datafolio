@@ -245,6 +245,11 @@ Methods for managing the DataFolio bundle itself.
         show_source: false
         heading_level: 3
 
+::: datafolio.DataFolio.pinned
+    options:
+        show_source: false
+        heading_level: 3
+
 ---
 
 ## Properties
@@ -337,7 +342,7 @@ print(folio.loaded_snapshot)  # e.g., 'v1.0' or None
 | **Managing Items** | `update_item()`, `delete()`, `archive()`, `unarchive()`, `copy()`, `validate()`, `is_valid()` |
 | **Lineage** | `get_inputs()`, `get_dependents()`, `get_lineage_graph()` |
 | **Snapshots** | `create_snapshot()`, `list_snapshots()`, `delete_snapshot()`, `load_snapshot()`, `get_snapshot()`, `get_snapshot_info()`, `compare_snapshots()`, `diff_from_snapshot()`, `restore_snapshot()`, `export_snapshot()` |
-| **Bundle Management** | `refresh()`, `batch()` |
+| **Bundle Management** | `refresh()`, `pinned()`, `batch()` |
 
 ---
 

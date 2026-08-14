@@ -5,7 +5,7 @@ import copy
 import fnmatch
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Iterator, Optional, Union
 
 import cloudfiles
 from typing_extensions import Self
@@ -242,6 +242,9 @@ class DataFolio(SnapshotMixin, ContextCaptureMixin):
         self._lock_timeout: float = DEFAULT_LOCK_TIMEOUT
         # Depth of the active mutation guard (reentrancy counter).
         self._mutation_depth: int = 0
+        # Depth of the active pinned() block (reentrancy counter). While > 0,
+        # per-read staleness rechecks are suspended (see :meth:`pinned`).
+        self._pin_depth: int = 0
         # Whether the current transaction has committed its manifest write
         # (set by _save_items; consulted by the guard's rollback).
         self._tx_published: bool = False
@@ -1443,6 +1446,11 @@ For more information, see the [datafolio documentation](https://github.com/casey
         # drop the snapshot view. Never refresh in snapshot mode.
         if self._in_snapshot_mode:
             return
+        # Inside pinned(): the caller has declared the manifest fixed for the
+        # duration of the block, having paid for one check on entry. Skipping
+        # the recheck is the entire point (see :meth:`pinned`).
+        if self._pin_depth > 0:
+            return
         if self._check_if_stale():
             self.refresh()
 
@@ -1502,6 +1510,59 @@ For more information, see the [datafolio documentation](https://github.com/casey
 
         self._pending_obsolete_payloads = []
         self._sync_data_accessor()
+
+    @contextlib.contextmanager
+    def pinned(self) -> Iterator[Self]:
+        """Context manager that pins the manifest for a block of reads.
+
+        Every read entry point (:meth:`get`, :meth:`list_contents`,
+        :meth:`item_info`, the ``data`` accessor, ...) normally rechecks
+        whether another writer has advanced the on-disk manifest. On cloud
+        storage that recheck is two round trips per call, which dominates the
+        cost of a loop of small reads. Inside ``pinned()`` the check happens
+        ONCE, on entry; every read in the block then serves the manifest state
+        that check established.
+
+        The trade is explicit and is the point of the block: **changes made by
+        other writers while the block is open are not seen until it exits.**
+        Reads stay internally consistent (one manifest for the whole block)
+        rather than up to date. Use it for a batch of reads you want to be a
+        coherent view, or when the latency of rechecking dominates; do not
+        hold one open across a long-running loop that must observe another
+        process's writes.
+
+        Only staleness *rechecks* are suspended. Nothing else changes:
+
+        - Local bookkeeping and writes work normally. :meth:`add` and friends
+          still run the fail-closed stale-writer check inside the mutation
+          guard, so a pinned write over an externally advanced manifest is
+          still rejected rather than silently clobbering it; items written in
+          the block are readable inside it and after it.
+        - Nesting is re-entrant: a depth counter means an inner block's exit
+          does not unpin the outer one, and only the outermost entry pays for
+          the check.
+        - An exception escaping the block still unpins (normal ``finally``).
+        - :meth:`refresh` still refreshes explicitly if you ask for it.
+        - On local paths the check is cheap, so the pin costs nothing and
+          changes nothing but the recheck.
+
+        Yields:
+            Self, so ``with folio.pinned() as f:`` works.
+
+        Examples:
+            >>> with folio.pinned():
+            ...     for name in folio.tables():
+            ...         process(folio.get(name))  # no per-read round trips
+        """
+        if self._pin_depth == 0:
+            # Pay for exactly one check, so the block opens on a state as
+            # fresh as an unpinned read would have seen.
+            self._refresh_if_needed()
+        self._pin_depth += 1
+        try:
+            yield self
+        finally:
+            self._pin_depth -= 1
 
     @contextlib.contextmanager
     def batch(self):
