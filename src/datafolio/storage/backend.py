@@ -7,7 +7,7 @@ local and cloud storage (via cloudfiles).
 import io
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Iterable, Optional, Union
 
 from datafolio.utils import is_cloud_path
 
@@ -144,6 +144,58 @@ class StorageBackend:
             return next(iter(cf.list()), None) is not None
         else:
             return Path(path).exists()
+
+    def exists_many(self, paths: Iterable[str]) -> Dict[str, bool]:
+        """Check existence of many paths at once (local or cloud).
+
+        Cloud paths sharing a directory are checked in a single batched,
+        threaded ``CloudFiles.exists()`` call instead of one round trip each,
+        which is what makes whole-bundle sweeps (:meth:`DataFolio.validate`)
+        cheap against object storage. Local paths are checked directly.
+
+        Semantics match :meth:`exists` exactly, including the directory
+        fallback: the batch answers the exact-object question, and any path
+        it reports missing is re-checked individually so directory-style
+        payloads (sharded datasets) are still found via a prefix listing.
+
+        Args:
+            paths: Paths to check. Duplicates are collapsed.
+
+        Returns:
+            Dict mapping every input path to its existence.
+
+        Examples:
+            >>> storage = StorageBackend()
+            >>> storage.exists_many(['gs://b/d/a.parquet', 'gs://b/d/x.npy'])
+            {'gs://b/d/a.parquet': True, 'gs://b/d/x.npy': False}
+        """
+        unique = list(dict.fromkeys(paths))
+        results: Dict[str, bool] = {}
+        by_dir: Dict[str, list] = {}
+
+        for path in unique:
+            dir_path = ""
+            if is_cloud_path(path) and not path.startswith("file://"):
+                dir_path, filename = self._split_cloud_path(path)
+            if dir_path:
+                by_dir.setdefault(dir_path, []).append((filename, path))
+            else:
+                # Local paths, and cloud paths with no directory component,
+                # have nothing to batch.
+                results[path] = self.exists(path)
+
+        if by_dir:
+            from cloudfiles import CloudFiles
+
+            for dir_path, entries in by_dir.items():
+                cf = CloudFiles(dir_path, use_https=self._use_https)
+                found = cf.exists([filename for filename, _ in entries])
+                for filename, path in entries:
+                    # A miss falls back to the single-path check, which adds
+                    # the prefix listing that finds directory payloads.
+                    results[path] = True if found.get(filename) else self.exists(path)
+
+        return results
 
     def mkdir(self, path: str, parents: bool = True, exist_ok: bool = True) -> None:
         """Create a directory (local or cloud).

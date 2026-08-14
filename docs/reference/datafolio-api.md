@@ -31,6 +31,11 @@ get back on read.
         show_source: false
         heading_level: 3
 
+::: datafolio.DataFolio.get_many
+    options:
+        show_source: false
+        heading_level: 3
+
 ::: datafolio.DataFolio.item_path
     options:
         show_source: false
@@ -334,7 +339,7 @@ print(folio.loaded_snapshot)  # e.g., 'v1.0' or None
 
 | Category | Methods |
 |----------|---------|
-| **Core item API** | `add()`, `get()`, `item_path()`, `item_info()` |
+| **Core item API** | `add()`, `get()`, `get_many()`, `item_path()`, `item_info()` |
 | **Models** | `add_model()`, `get_model()` |
 | **Files** | `add_file()` |
 | **External references** | `reference_table()`, `inspect_table()`, `scan_table()`, `mutable_references()` |

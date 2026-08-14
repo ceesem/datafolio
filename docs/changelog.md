@@ -51,22 +51,50 @@
 
 ### Added
 
+Cloud reads are round-trip bound, and datafolio was paying for far more
+round trips than the data required. Measured on 60 items at a 250ms round
+trip, reading them all went from **45.9s to 1.1s** across these four
+changes.
+
+- **The staleness check is one round trip, not two.** Every read re-verifies
+  the on-disk manifest revision; it used to probe with `exists()` before
+  reading. A missing manifest already reads as "not stale" via the read's
+  own error path, so the probe was pure latency — and on cloud it could cost
+  two operations by itself (object check, then a prefix listing).
+
 - `pinned()` — a re-entrant context manager that suspends the per-read
-  staleness recheck. Every read entry point normally re-verifies the on-disk
-  manifest, which on cloud storage is two round trips (`read_json` +
-  `exists`) per call and dominates a loop of small reads. Inside
-  `pinned()` the check happens once, on entry: 60 `get()` calls drop from
-  ~120 manifest round trips to 2. The trade is explicit — other writers'
-  changes are not seen until the block exits, so reads are internally
-  consistent rather than up to date. Writes inside the block behave
-  normally, including the fail-closed stale-writer check that rejects a
-  pinned write over an externally advanced manifest.
+  staleness recheck entirely. Inside the block the check happens once, on
+  entry: 60 `get()` calls drop from 60 manifest round trips to 1. The trade
+  is explicit — other writers' changes are not seen until the block exits,
+  so reads are internally consistent rather than up to date. Writes inside
+  the block behave normally, including the fail-closed stale-writer check
+  that rejects a pinned write over an externally advanced manifest.
 
   ```python
   with folio.pinned():
       for name in folio.tables():
           process(folio.get(name))
   ```
+
+- `get_many(names, threads=20)` — read several items concurrently, returning
+  `{name: content}`. Pure sugar: it is exactly a `pinned()` block around a
+  thread pool mapping `get()`, and writing that loop yourself is equally
+  supported and equally fast. Overlapping round trips is what pays — 60
+  reads go from 15.6s pinned-sequential to 1.1s at 20 threads.
+
+  ```python
+  tables = folio.get_many(['train', 'test', 'holdout'])
+  ```
+
+  The pin is a correctness requirement there, not only a speed one: a
+  concurrent auto-refresh rebuilds the item table in place, so a thread
+  reading it mid-rebuild can miss an item that is really there.
+
+- `validate()` resolves existence for every item in one batched call
+  (`StorageBackend.exists_many`), so validating a cloud bundle costs a few
+  threaded round trips rather than one per item. Semantics are unchanged,
+  including the directory fallback for sharded payloads and the rule that a
+  per-item failure is reported as `False` rather than raising.
 
 ### Changed
 

@@ -82,7 +82,7 @@ class TestPinSuppressesStalenessChecks:
         assert calls[0] == 1  # the entry check, and nothing else
 
     def test_manifest_round_trips_drop_to_one_check(self, folio, monkeypatch):
-        """Round trips, not just check count: ~2 per read → 2 for the block."""
+        """Round trips, not just check count: one per read → one per block."""
         counts = _count_manifest_round_trips(monkeypatch)
 
         for i in range(5):
@@ -95,8 +95,9 @@ class TestPinSuppressesStalenessChecks:
                 folio.get(f"cfg_{i}")
         pinned = counts["total"]
 
-        assert unpinned == 10  # 5 reads x (exists + read_json)
-        assert pinned == 2  # one entry check for the whole block
+        assert unpinned == 5  # one manifest read per staleness check
+        assert pinned == 1  # one entry check for the whole block
+        assert counts["exists"] == 0  # the check never probes with exists()
 
     def test_entry_check_still_picks_up_external_writes(self, tmp_path, folio):
         """Entering a pin is as fresh as an unpinned read would have been."""
@@ -278,7 +279,7 @@ class TestPinLocalPaths:
 
 
 class TestPinBenchmark:
-    """Acceptance: ~60 reads, manifest round trips 120 -> 2."""
+    """Acceptance: 60 reads, manifest round trips 60 -> 1."""
 
     def test_sixty_gets_round_trip_count(self, tmp_path, monkeypatch):
         f = DataFolio(tmp_path / "bench")
@@ -297,5 +298,5 @@ class TestPinBenchmark:
                 f.get(f"item_{i}")
         pinned = counts["total"]
 
-        assert unpinned == 120
-        assert pinned == 2
+        assert unpinned == 60
+        assert pinned == 1

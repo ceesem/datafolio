@@ -606,26 +606,47 @@ advanced the folio since yours last loaded it, your write raises
 and retry. Local writers are serialized with a lock file; cloud folios have
 no cross-machine lock and should be treated as single-writer.
 
-### Pinning a Batch of Reads
+### Reading Many Items at Once
 
-That per-read freshness check costs two round trips against cloud storage,
-which dominates a loop of small reads. `pinned()` checks once on entry and
-suspends the recheck for the block:
+Cloud reads are round-trip bound, so a loop of small reads spends its time
+waiting, not moving data. Two things help, and they compose.
+
+`pinned()` checks freshness once on entry and suspends the per-read recheck
+for the block:
 
 ```python
 with folio.pinned():
     for name in folio.tables():
-        process(folio.get(name))   # no per-read round trips
+        process(folio.get(name))   # no per-read staleness round trips
 ```
 
-Sixty `get()` calls go from ~120 manifest round trips to 2 — on a `gs://`
-folio, about 30 seconds of pure latency saved. The trade is explicit and is
-the point: **another writer's changes are not visible until the block
-exits**, so the reads are one coherent view rather than individually
-up-to-date. Writes inside the block work normally (including the
-stale-writer check), nesting is re-entrant, and an exception still unpins.
+The trade is explicit and is the point: **another writer's changes are not
+visible until the block exits**, so the reads are one coherent view rather
+than individually up-to-date. Nesting is re-entrant, writes inside work
+normally (including the stale-writer check), and an exception still unpins.
 Don't hold one open across a long loop that must observe another process's
 writes.
+
+`get_many()` goes further and overlaps the payload reads themselves:
+
+```python
+tables = folio.get_many(folio.tables())     # {name: DataFrame}
+```
+
+It is pure sugar for a `pinned()` block around a thread pool mapping
+`get()` — write that loop yourself if you prefer, it is equally fast:
+
+```python
+with folio.pinned():
+    with ThreadPoolExecutor(20) as ex:
+        results = list(ex.map(folio.get, names))
+```
+
+Measured on 60 items at a 250ms round trip: 45.9s naive, 15.6s pinned,
+**1.1s with `get_many`**. Use the pin whenever you thread reads by hand —
+it isn't only about speed. A concurrent auto-refresh rebuilds the item
+table in place, and a thread reading it mid-rebuild can miss an item that
+is really there.
 
 ## Taking a Cloud Folio Offline
 
