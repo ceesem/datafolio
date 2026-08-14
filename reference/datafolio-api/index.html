@@ -1,0 +1,1076 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://ceesem.github.io/datafolio/reference/datafolio-api/">
+      
+      
+        <link rel="prev" href="../../guides/migrating-to-2.0/">
+      
+      
+        <link rel="next" href="../cli/">
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.6.21">
+    
+    
+      
+        <title>API cheat sheet - DataFolio Documentation</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.2a3383ac.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Bitter:300,300i,400,400i,700,700i%7CInconsolata:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Bitter";--md-code-font:"Inconsolata"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="blue-grey" data-md-color-accent="deep-orange">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#api-cheat-sheet" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="DataFolio Documentation" class="md-header__button md-logo" aria-label="DataFolio Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            DataFolio Documentation
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              API cheat sheet
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/ceesem/datafolio" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.0.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    ceesem/datafolio
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  About
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../guides/getting-started/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Your First Folio
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../guides/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Guides
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="./" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../changelog/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Changelog
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+  
+
+<nav class="md-nav md-nav--primary md-nav--lifted md-nav--integrated" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="DataFolio Documentation" class="md-nav__button md-logo" aria-label="DataFolio Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    DataFolio Documentation
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/ceesem/datafolio" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.0.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    ceesem/datafolio
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    About
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Your First Folio
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+    
+    
+      
+        
+        
+      
+    
+    <li class="md-nav__item md-nav__item--pruned md-nav__item--nested">
+      
+        
+  
+  
+  
+    <a href="../../guides/" class="md-nav__link">
+      
+  
+  
+  <span class="md-ellipsis">
+    Guides
+    
+  </span>
+  
+
+      
+        <span class="md-nav__icon md-icon"></span>
+      
+    </a>
+  
+
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+    
+    
+      
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    Reference
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            Reference
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    API Cheat Sheet
+    
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    API Cheat Sheet
+    
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#open-a-folio" class="md-nav__link">
+    <span class="md-ellipsis">
+      Open a folio
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#add-items" class="md-nav__link">
+    <span class="md-ellipsis">
+      Add items
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#read-items" class="md-nav__link">
+    <span class="md-ellipsis">
+      Read items
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#inspect" class="md-nav__link">
+    <span class="md-ellipsis">
+      Inspect
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Inspect">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-data-accessor" class="md-nav__link">
+    <span class="md-ellipsis">
+      The data accessor
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#change-and-remove" class="md-nav__link">
+    <span class="md-ellipsis">
+      Change and remove
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#lineage" class="md-nav__link">
+    <span class="md-ellipsis">
+      Lineage
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#copy-and-export" class="md-nav__link">
+    <span class="md-ellipsis">
+      Copy and export
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#snapshots" class="md-nav__link">
+    <span class="md-ellipsis">
+      Snapshots
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#exceptions" class="md-nav__link">
+    <span class="md-ellipsis">
+      Exceptions
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#common-option-quick-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      Common option quick-reference
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    CLI
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Package API
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Changelog
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="api-cheat-sheet">API cheat sheet</h1>
+<p>Every public method, grouped by what you are trying to do. Full docstrings are
+on the <a href="../api/">Package API</a> page and in <code>help(DataFolio)</code>.</p>
+<p>The shape of the API in one line: <strong>one write verb (<code>add</code>), one read verb
+(<code>get</code>), and a short list of explicit verbs for the cases where guessing would
+be wrong.</strong></p>
+<h2 id="open-a-folio">Open a folio</h2>
+<pre><code class="language-python">DataFolio(
+    path,                                # local path or gs:// / s3:// URI
+    metadata=None,                       # INITIAL folio metadata; ignored when
+                                         # opening an existing folio (write via
+                                         # folio.metadata instead)
+    random_suffix=False,                 # append a memorable suffix to the name
+    read_only=False,                     # refuse every write
+    allow_existing=False,                # allow creating inside a non-folio directory
+    use_https=False,                     # HTTPS reads of public buckets
+    max_eager_bytes=500 * 1024 * 1024,   # eager-read ceiling; None disables
+)
+</code></pre>
+<p>Creates the folio if the path is empty, opens it if it already holds one.
+<code>http(s)://</code> paths are always read-only.</p>
+<pre><code class="language-python">DataFolio.load_snapshot(path, snapshot)   # classmethod -&gt; read-only folio
+</code></pre>
+<h2 id="add-items">Add items</h2>
+<table>
+<thead>
+<tr>
+<th>Call</th>
+<th>For</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>add(name, obj, *, description=None, inputs=None, overwrite=False, **type_opts)</code></td>
+<td>DataFrames, arrays, dicts/lists/scalars/strings, tz-aware datetimes, estimators</td>
+</tr>
+<tr>
+<td><code>add_model(name, model, *, description=None, inputs=None, overwrite=False, custom=False)</code></td>
+<td>any picklable model-like object; <code>custom=True</code> uses skops</td>
+</tr>
+<tr>
+<td><code>add_file(path, name=None, *, category=None, description=None, overwrite=False)</code></td>
+<td>copy a file into the folio</td>
+</tr>
+<tr>
+<td><code>reference_table(name, path, table_format="parquet", num_rows=None, version=None, description=None, inputs=None, overwrite=False, allow_full_load=False, polars_only=None)</code></td>
+<td>link an external table without copying</td>
+</tr>
+</tbody>
+</table>
+<p><code>**type_opts</code> for <code>add()</code>: <code>preserve_index=True</code> (tables), <code>custom=True</code>
+(models), <code>category=...</code> (files). Unknown options raise <code>TypeError</code>.</p>
+<p>Replacing any existing item requires <code>overwrite=True</code>. A version pinned by a
+snapshot is preserved via copy-on-write.</p>
+<h2 id="read-items">Read items</h2>
+<table>
+<thead>
+<tr>
+<th>Call</th>
+<th>Returns</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>get(name, **type_opts)</code></td>
+<td>the natural object; a <strong>path</strong> for file items</td>
+</tr>
+<tr>
+<td><code>get_many(names, *, threads=20, **type_opts)</code></td>
+<td><code>{name: object}</code>, read concurrently</td>
+</tr>
+<tr>
+<td><code>get_model(name, trusted=False)</code></td>
+<td>the loaded model (<code>trusted=True</code> for skops)</td>
+</tr>
+<tr>
+<td><code>scan_table(name, **kwargs)</code></td>
+<td>a genuinely lazy <code>polars.LazyFrame</code></td>
+</tr>
+<tr>
+<td><code>item_path(name)</code></td>
+<td>the payload path (external path for references)</td>
+</tr>
+<tr>
+<td><code>item_info(name)</code></td>
+<td>a copy of the catalog entry</td>
+</tr>
+</tbody>
+</table>
+<p><code>**type_opts</code> for <code>get()</code>: <code>frame="pandas"|"polars"</code> and <code>allow_full_load=True</code>
+(tables), <code>as_unix=True</code> (timestamps), <code>trusted=True</code> (models).</p>
+<pre><code class="language-python">with folio.pinned():     # one staleness check for the whole block
+    ...
+folio.refresh()          # force a reload from disk
+</code></pre>
+<h2 id="inspect">Inspect</h2>
+<pre><code class="language-python">folio.describe(pattern=None, return_string=False, show_empty=False,
+               max_metadata_fields=10, snapshot=None,
+               include_archived=False, show_paths=False)
+
+folio.list_contents(include_archived=False)   # {kind: [names]}
+folio.tables                                  # names of included + referenced tables
+folio.models
+folio.artifacts                               # file items
+&quot;features&quot; in folio                           # True exactly when get() would work
+
+folio.inspect_table(name)     # read the source, record schema/size/identity
+folio.validate()              # {name: bool}
+folio.is_valid()              # all of the above
+</code></pre>
+<p>Properties: <code>path</code>, <code>metadata</code>, <code>read_only</code>, <code>in_snapshot_mode</code>,
+<code>loaded_snapshot</code>, <code>data</code>.</p>
+<h3 id="the-data-accessor">The <code>data</code> accessor</h3>
+<pre><code class="language-python">folio.data.features.content        # == folio.get('features')
+folio.data.features.lazy           # == folio.scan_table('features')
+folio.data.features.description
+folio.data.features.type
+folio.data.features.path
+folio.data.features.inputs
+folio.data.features.dependents
+folio.data.features.metadata
+folio.data[&quot;qc/step1&quot;].content     # names that are not valid identifiers
+</code></pre>
+<p>Built for tab completion in Jupyter. Equivalent to the plain methods.</p>
+<h2 id="change-and-remove">Change and remove</h2>
+<pre><code class="language-python">folio.update_item(name, description=None, inputs=None)   # &quot;&quot; / [] clear a field
+folio.delete(name_or_names, warn_dependents=True)
+folio.archive(name_or_names_or_glob)
+folio.unarchive(name_or_names_or_glob)
+
+folio.metadata[&quot;key&quot;] = value        # commits immediately
+folio.metadata.update({...})
+folio.metadata = {...}               # wholesale replacement
+
+with folio.batch():                  # one commit for the whole block
+    ...
+</code></pre>
+<h2 id="lineage">Lineage</h2>
+<pre><code class="language-python">folio.get_inputs(name)          # what this was derived from
+folio.get_dependents(name)      # what was derived from this
+folio.get_lineage_graph()       # {name: [inputs]}
+</code></pre>
+<p>Recorded by <code>inputs=</code> at write time (or <code>update_item</code>). Documentation, not
+enforcement.</p>
+<h2 id="copy-and-export">Copy and export</h2>
+<pre><code class="language-python">folio.copy(path, name=None, metadata_updates=None, include_items=None,
+           exclude_items=None, random_suffix=False, follow_lineage=False,
+           include_archived=False)
+</code></pre>
+<p>A <strong>fork</strong>: current versions only, no snapshot history, archived items excluded,
+fresh identity. To <em>mirror</em> a folio, use <code>rsync</code>/<code>gsutil rsync</code>/<code>aws s3 sync</code>.</p>
+<h2 id="snapshots">Snapshots</h2>
+<pre><code class="language-python">folio.create_snapshot(name, description=None, tags=None,
+                      capture_git=True, capture_environment=False,
+                      capture_execution=False)
+
+folio.snapshots                     # dict-like accessor -&gt; SnapshotView
+folio.list_snapshots()              # [{name, timestamp, description, tags, …}]
+folio.get_snapshot_info(name)       # full record incl. pinned versions and git
+folio.mutable_references()          # references whose bytes are not owned
+
+folio.get_snapshot(name)                        # read-only DataFolio
+DataFolio.load_snapshot(path, name)             # same, without an open folio
+
+folio.compare_snapshots(a, b)
+folio.diff_from_snapshot(name=None)             # None -&gt; newest snapshot
+
+folio.restore_snapshot(name, confirm=True)      # DESTRUCTIVE
+folio.export_snapshot(name, target_path, *, include_snapshot_metadata=True)
+
+folio.delete_snapshot(name, cleanup_orphans=False)
+folio.cleanup_orphaned_versions(dry_run=False)
+</code></pre>
+<p>A <code>SnapshotView</code> (<code>folio.snapshots["v1"]</code>) exposes <code>name</code>, <code>description</code>,
+<code>timestamp</code>, <code>tags</code>, <code>metadata</code>, <code>item_versions</code>, <code>get(name)</code>,
+<code>get_table(name)</code>, and <code>scan_table(name)</code>.</p>
+<h2 id="exceptions">Exceptions</h2>
+<table>
+<thead>
+<tr>
+<th>Exception</th>
+<th>Raised when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ConcurrentWriteError</code></td>
+<td>another writer advanced the catalog; <code>refresh()</code> and retry</td>
+</tr>
+<tr>
+<td><code>ManifestReadError</code></td>
+<td>the catalog is missing, unreadable, or was replaced externally</td>
+</tr>
+<tr>
+<td><code>UnsupportedManifestVersionError</code></td>
+<td>the folio was written by a newer DataFolio</td>
+</tr>
+</tbody>
+</table>
+<pre><code class="language-python">from datafolio import (
+    DataFolio, ConcurrentWriteError, ManifestReadError,
+    UnsupportedManifestVersionError,
+)
+</code></pre>
+<p>Everything else in the package — handlers, storage backends, readers — is
+internal.</p>
+<h2 id="common-option-quick-reference">Common option quick-reference</h2>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Where</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>overwrite=True</code></td>
+<td>every add verb</td>
+<td>required to replace an existing item</td>
+</tr>
+<tr>
+<td><code>inputs=[...]</code></td>
+<td>add verbs, <code>update_item</code></td>
+<td>lineage</td>
+</tr>
+<tr>
+<td><code>description="..."</code></td>
+<td>add verbs, <code>update_item</code></td>
+<td>the sentence future-you reads</td>
+</tr>
+<tr>
+<td><code>preserve_index=True</code></td>
+<td><code>add</code> (tables)</td>
+<td>store a non-default pandas index as columns</td>
+</tr>
+<tr>
+<td><code>custom=True</code></td>
+<td><code>add_model</code></td>
+<td>skops instead of joblib</td>
+</tr>
+<tr>
+<td><code>frame="polars"</code></td>
+<td><code>get</code> (tables)</td>
+<td>Polars DataFrame instead of pandas</td>
+</tr>
+<tr>
+<td><code>allow_full_load=True</code></td>
+<td><code>get</code> (tables), <code>reference_table</code></td>
+<td>bypass the eager-size guard</td>
+</tr>
+<tr>
+<td><code>trusted=True</code></td>
+<td><code>get_model</code></td>
+<td>accept a skops file's non-standard types</td>
+</tr>
+<tr>
+<td><code>as_unix=True</code></td>
+<td><code>get</code> (timestamps)</td>
+<td>float seconds instead of a datetime</td>
+</tr>
+<tr>
+<td><code>read_only=True</code></td>
+<td>constructor</td>
+<td>refuse every write</td>
+</tr>
+<tr>
+<td><code>follow_lineage=True</code></td>
+<td><code>copy</code></td>
+<td>pull in upstream dependencies of <code>include_items</code></td>
+</tr>
+<tr>
+<td><code>dry_run=True</code></td>
+<td><code>cleanup_orphaned_versions</code></td>
+<td>list, do not delete</td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+
+
+
+  
+  
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      <script id="__config" type="application/json">{"base": "../..", "features": ["navigation.indexes", "navigation.instant", "navigation.prune", "navigation.tabs", "navigation.tabs.sticky", "toc.follow", "toc.integrate", "navigation.top", "search.suggest", "search.highlight", "search.share", "content.code.copy", "header.autohide"], "search": "../../assets/javascripts/workers/search.973d3a69.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.f55a23d4.min.js"></script>
+      
+    
+  </body>
+</html>
