@@ -16,7 +16,7 @@ nav:
 - API Reference:
     - DataFolio Methods: reference/datafolio-api.md
     - CLI Reference: reference/cli.md
-    - Complete API: reference/api.md
+    - Package API: reference/api.md
 - Changelog: changelog.md
 
   
@@ -59,7 +59,7 @@ plugins:
       default_handler: python
       handlers:
         python:
-          paths: [.]
+          paths: [., src]
           inventories:
             - https://docs.python.org/3/objects.inv
             - https://numpy.org/doc/stable/objects.inv

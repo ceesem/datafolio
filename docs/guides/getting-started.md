@@ -224,6 +224,20 @@ pl_df = folio.get('data', frame='polars')  # eager Polars DataFrame
 plot_path = folio.get('plot.png')
 ```
 
+### Checking What's There
+
+`in` tests membership by name:
+
+```python
+if 'results' not in folio:
+    folio.add('results', df)
+```
+
+Membership mirrors `get()`: `name in folio` is True exactly when
+`folio.get(name)` would succeed, so archived items count as present. Like
+every other read, it refreshes from disk first, so it sees another writer's
+commits.
+
 ### Autocomplete-Friendly Access
 
 For a better developer experience, use the `folio.data` accessor:

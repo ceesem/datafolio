@@ -96,6 +96,10 @@ folio.add('my_data', data)  # Works with DataFrame, array, dict, list, scalar
 
 # get() automatically detects stored type and returns correct format
 data = folio.get('my_data')  # Returns original type
+
+# in tests membership by name, mirroring get()
+if 'my_data' not in folio:
+    folio.add('my_data', data)
 ```
 
 Supported data types:

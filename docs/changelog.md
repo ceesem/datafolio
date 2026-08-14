@@ -27,6 +27,16 @@
   `get_model` (any picklable object; skops models need `trusted=True`),
   `add_file` (files never enter via string sniffing), and
   `reference_table`/`inspect_table`/`scan_table`.
+- **Membership**: `name in folio` mirrors `get()` — True exactly when
+  `folio.get(name)` would succeed, so archived items count as present and
+  non-string keys are simply not members. It auto-refreshes like every other
+  read entry point.
+
+  ```python
+  if 'results' not in folio:
+      folio.add('results', df)
+  ```
+
 - Existing 1.x folios open in 2.0 without a manual conversion step and migrate
   to the unified manifest on their first write.
 

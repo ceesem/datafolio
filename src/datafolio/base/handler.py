@@ -195,7 +195,7 @@ class BaseHandler(ABC):
     def delete(self, folio: "DataFolio", name: str) -> None:
         """Delete data files for this item.
 
-        Default implementation deletes file at items[name]['filename']
+        Default implementation deletes file at ``items[name]['filename']``
         from the appropriate subdirectory. Override if custom logic needed
         (e.g., for external references that have no local files).
 
