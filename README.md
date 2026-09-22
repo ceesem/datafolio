@@ -58,8 +58,9 @@ object's type; `get()` reads the catalog and returns the matching Python object.
 
 ```python
 folio.add("table", dataframe)            # pandas / Polars / LazyFrame -> Parquet
+folio.add("counts", series)              # pandas / Polars Series -> Parquet
 folio.add("embeddings", array)           # numpy -> .npy
-folio.add("params", {"alpha": 0.1})      # dict / list / scalar / str -> JSON
+folio.add("params", {"alpha": 0.1})      # dict / list / tuple / set / scalar -> JSON
 folio.add_model("classifier", clf)       # -> joblib (or skops)
 folio.add_file("plots/qc.png")           # -> the file, unchanged
 folio.reference_table("raw", "gs://lab-data/raw.parquet")   # link, don't copy

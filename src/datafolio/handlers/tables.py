@@ -225,6 +225,9 @@ class DataframeHandler(BaseHandler):
         if index_columns:
             metadata["index_columns"] = index_columns
             metadata["index_names"] = index_names
+        if "_series_name" in kwargs:
+            # Stored from a Series: the pandas read path hands one back.
+            metadata["series"] = {"name": kwargs["_series_name"]}
 
         if description:
             metadata["description"] = description
@@ -242,7 +245,8 @@ class DataframeHandler(BaseHandler):
             **kwargs: Additional arguments passed to read_parquet
 
         Returns:
-            pandas DataFrame
+            pandas DataFrame, or a pandas Series if the item was added from a
+            Series (the polars and lazy read paths always return frames).
 
         Raises:
             KeyError: If item doesn't exist
@@ -270,6 +274,9 @@ class DataframeHandler(BaseHandler):
             elif index_columns == ["index"]:
                 # Legacy manifests without index_names
                 df.index.name = None
+        series = item.get("series")
+        if series is not None and df.shape[1] == 1:
+            return df.iloc[:, 0].rename(series.get("name"))
         return df
 
     def get_lazy(self, folio: "DataFolio", name: str, **kwargs) -> Any:
