@@ -1833,6 +1833,10 @@ For more information, see the [datafolio documentation](https://github.com/casey
         self._check_read_only()
         validate_item_name(name)
 
+        private = sorted(k for k in type_opts if k.startswith("_"))
+        if private:
+            raise TypeError(f"Unknown option(s) for add(): {private}")
+
         input_type = type(obj).__name__
         obj, implied_opts = self._coerce_for_add(obj)
         clashing = sorted(set(implied_opts) & set(type_opts))
@@ -1891,10 +1895,24 @@ For more information, see the [datafolio documentation](https://github.com/casey
     def _coerce_for_add(obj: Any) -> tuple[Any, Dict[str, Any]]:
         """Convert near-miss input types into ones ``add()`` stores natively.
 
-        Returns the converted object and any type options the conversion
-        implies (e.g. a Series is stored as a table that remembers it was a
-        Series). pandas/polars are only consulted if already imported — an
-        object of their types can't exist otherwise.
+        No new item types are introduced: each input maps onto an existing
+        handler (JSON, table, or numpy). pandas/polars are only consulted if
+        already imported — an object of their types can't exist otherwise.
+
+        Args:
+            obj: The object passed to :meth:`add`.
+
+        Returns:
+            ``(converted, implied_opts)``. ``implied_opts`` are private type
+            options the conversion requires, e.g. ``preserve_index`` and
+            ``_series_name`` for a Series (so the pandas read returns a
+            Series), or ``_data_type`` naming a dataclass for ``describe()``.
+
+        Examples:
+            >>> DataFolio._coerce_for_add((1, 2))
+            ([1, 2], {})
+            >>> DataFolio._coerce_for_add(pd.Series([1], name="n"))[1]
+            {'preserve_index': True, '_series_name': 'n'}
         """
         import sys
 

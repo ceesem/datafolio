@@ -59,7 +59,7 @@ def to_json_compatible(obj: Any) -> tuple[Any, list[str]]:
 
     def convert(value: Any) -> Any:
         if isinstance(value, dict):
-            out: dict[str, Any] = {}
+            out: Dict[str, Any] = {}
             for key, item in value.items():
                 if not isinstance(key, str):
                     notes.add("non-str dict keys")

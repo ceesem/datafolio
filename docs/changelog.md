@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### `add()` accepts more everyday types
+
+No new item types; each input maps onto an existing one.
+
+- `tuple` and `range` store as JSON lists, silently (nested tuples already
+  did). `set`/`frozenset` store as sorted lists and non-string dict keys as
+  strings, each with a `UserWarning`; keys that collide once stringified
+  raise `ValueError`.
+- pandas and polars `Series` store as a one-column table including the
+  index; a pandas `get()` returns a `Series` again (catalog field `series`).
+- pandas `Index` stores as a numpy array (numeric/datetime) or a JSON list.
+- Dataclass instances store as the JSON of `dataclasses.asdict()`; `get()`
+  returns the dict (`MyConfig(**folio.get(name))` rebuilds it) and
+  `describe()` shows the class name.
+
 ## 2.0.0
 
 ### Unified manifest (format v2)

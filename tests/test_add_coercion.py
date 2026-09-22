@@ -140,6 +140,13 @@ class TestSeries:
         result = _roundtrip(tmp_path, pl.Series("z", [1, 2]))
         pd.testing.assert_series_equal(result, pd.Series([1, 2], name="z"))
 
+    @pytest.mark.parametrize("opt", ["_series_name", "_data_type"])
+    def test_private_options_rejected(self, tmp_path, opt):
+        folio = DataFolio(tmp_path / "f")
+        with pytest.raises(TypeError, match="Unknown option"):
+            folio.add("item", pd.DataFrame({"a": [1]}), **{opt: "x"})
+        assert "item" not in folio
+
     def test_preserve_index_cannot_be_passed_for_series(self, tmp_path):
         folio = DataFolio(tmp_path / "f")
         with pytest.raises(TypeError, match="set automatically for Series"):
