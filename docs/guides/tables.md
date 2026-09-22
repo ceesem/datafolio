@@ -30,7 +30,7 @@ folio.item_info("features")
 Column names, dtypes, and row count are in the catalog, so `describe()` and any
 reader can answer "what is in this table" without opening it.
 
-### Two pandas gotchas
+### Indexes, Series, and LazyFrames
 
 **A non-default index is dropped.** Parquet stores columns. DataFolio warns
 when it drops one, and gives you the escape hatch:
@@ -47,6 +47,16 @@ folio.add("indexed", df, preserve_index=True)   # index stored as ordinary colum
 With `preserve_index=True` the index becomes real columns (readable by any
 tool) and is recorded in the catalog as `index_columns`, so a pandas `get()`
 restores it. Polars and direct file readers just see the columns.
+
+**A Series is stored as a one-column table.** `add()` accepts a pandas or
+Polars Series and keeps its index (a default `RangeIndex` is skipped). The
+catalog records it as `series` (with the original name), so a pandas `get()`
+returns a Series again. Polars and direct file readers see a one-column table.
+
+```python
+folio.add("counts", df["cell_type"].value_counts())
+folio.get("counts")    # pandas Series, index and name restored
+```
 
 **Writing a LazyFrame is streamed.** `add()` accepts a Polars LazyFrame and
 sinks it to Parquet with bounded memory — the full result is never held at

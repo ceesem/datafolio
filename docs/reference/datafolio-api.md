@@ -38,13 +38,21 @@ DataFolio.load_snapshot(path, snapshot)   # classmethod -> read-only folio
 
 | Call | For |
 | --- | --- |
-| `add(name, obj, *, description=None, inputs=None, overwrite=False, **type_opts)` | DataFrames, arrays, dicts/lists/scalars/strings, tz-aware datetimes, estimators |
+| `add(name, obj, *, description=None, inputs=None, overwrite=False, **type_opts)` | DataFrames, Series, arrays, dicts/lists/tuples/sets/scalars/strings, dataclasses, tz-aware datetimes, estimators |
 | `add_model(name, model, *, description=None, inputs=None, overwrite=False, custom=False)` | any picklable model-like object; `custom=True` uses skops |
 | `add_file(path, name=None, *, category=None, description=None, overwrite=False)` | copy a file into the folio |
 | `reference_table(name, path, table_format="parquet", num_rows=None, version=None, description=None, inputs=None, overwrite=False, allow_full_load=False, polars_only=None)` | link an external table without copying |
 
 `**type_opts` for `add()`: `preserve_index=True` (tables), `custom=True`
 (models), `category=...` (files). Unknown options raise `TypeError`.
+
+A pandas Series is stored as a one-column table that includes its index, and
+`get()` returns it as a Series again. JSON has no tuples, sets, or non-string
+keys, so tuples and ranges load back as lists. Sets load back as sorted lists
+and non-string dict keys as strings; those two conversions emit a
+`UserWarning`.
+A dataclass instance is stored as the JSON of its fields, and `get()` returns
+that dict. Rebuild it with `MyConfig(**folio.get("cfg"))`.
 
 Replacing any existing item requires `overwrite=True`. A version pinned by a
 snapshot is preserved via copy-on-write.

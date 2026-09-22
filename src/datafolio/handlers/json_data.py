@@ -9,6 +9,82 @@ if TYPE_CHECKING:
     from datafolio.folio import DataFolio
 
 
+def _json_key(key: Any) -> str:
+    """Return the string orjson would write for a non-str dict key."""
+    import orjson
+
+    try:
+        encoded = orjson.dumps(
+            {key: None},
+            option=orjson.OPT_NON_STR_KEYS | orjson.OPT_SERIALIZE_NUMPY,
+        )
+    except (TypeError, orjson.JSONEncodeError) as exc:
+        raise TypeError(
+            f"dict key {key!r} ({type(key).__name__}) cannot be stored as JSON"
+        ) from exc
+    return next(iter(orjson.loads(encoded)))
+
+
+def to_json_compatible(obj: Any) -> tuple[Any, list[str]]:
+    """Normalize container types that JSON has no direct equivalent for.
+
+    Recursively converts tuples, ranges, sets and frozensets to lists and
+    non-str dict keys to strings, so the result can be written by orjson.
+    Other values are passed through untouched (unsupported leaves still fail
+    at serialization time with the usual error).
+
+    Tuples and ranges convert silently — orjson already writes nested tuples
+    as arrays. Sets and non-str keys change how the data reads back, so they
+    are reported in ``notes`` for the caller to warn about.
+
+    Args:
+        obj: Object to normalize.
+
+    Returns:
+        ``(converted, notes)`` where ``notes`` is a sorted list of the lossy
+        conversions performed (``"set"``, ``"non-str dict keys"``).
+
+    Raises:
+        ValueError: If two dict keys map to the same string
+            (e.g. ``{1: 'a', '1': 'b'}``), which would silently drop data.
+        TypeError: If a dict key has no JSON string form.
+
+    Examples:
+        >>> to_json_compatible({'a': (1, 2), 'b': {3, 1}})
+        ({'a': [1, 2], 'b': [1, 3]}, ['set'])
+        >>> to_json_compatible({1: 'x'})
+        ({'1': 'x'}, ['non-str dict keys'])
+    """
+    notes: set[str] = set()
+
+    def convert(value: Any) -> Any:
+        if isinstance(value, dict):
+            out: Dict[str, Any] = {}
+            for key, item in value.items():
+                if not isinstance(key, str):
+                    notes.add("non-str dict keys")
+                    key = _json_key(key)
+                if key in out:
+                    raise ValueError(
+                        f"dict keys collide as JSON key {key!r}; rename one "
+                        f"of them before storing."
+                    )
+                out[key] = convert(item)
+            return out
+        if isinstance(value, (set, frozenset)):
+            notes.add("set")
+            items = [convert(item) for item in value]
+            try:
+                return sorted(items)
+            except TypeError:
+                return items
+        if isinstance(value, (list, tuple, range)):
+            return [convert(item) for item in value]
+        return value
+
+    return convert(obj), sorted(notes)
+
+
 class JsonHandler(BaseHandler):
     """Handler for JSON-serializable data stored in bundle.
 
@@ -113,7 +189,7 @@ class JsonHandler(BaseHandler):
             "item_type": self.item_type,
             "filename": filename,
             "checksum": checksum,
-            "data_type": type(data).__name__,
+            "data_type": kwargs.get("_data_type") or type(data).__name__,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
 

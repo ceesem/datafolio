@@ -76,6 +76,10 @@ and are stored as `null`, coming back as `None`. This applies to JSON items and
 to folio metadata values. Store numeric data with NaNs as a numpy array or a
 table.
 
+**JSON has no tuples, sets, or non-string keys.** Tuples and ranges come back
+as lists. Sets come back as sorted lists and non-string dict keys as strings,
+with a warning at write time. A dataclass comes back as a dict of its fields.
+
 **A non-default pandas index is dropped.** Parquet stores columns. You get a
 warning and an opt-in (`preserve_index=True`), not a silent round trip.
 

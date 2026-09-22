@@ -2,6 +2,7 @@
 
 import contextlib
 import copy
+import dataclasses
 import fnmatch
 from datetime import datetime, timezone
 from pathlib import Path
@@ -100,6 +101,13 @@ class UnsupportedManifestVersionError(RuntimeError):
     reinterpreted — reading it under the wrong assumptions could corrupt data on
     the next write. Upgrade the ``datafolio`` package to open the folio.
     """
+
+
+def _series_name(name: Any) -> Any:
+    """Return a Series name in a form the JSON manifest can round-trip."""
+    if name is None or isinstance(name, (str, int, float, bool)):
+        return name
+    return str(name)
 
 
 class DataFolio(SnapshotMixin, ContextCaptureMixin):
@@ -1762,8 +1770,14 @@ For more information, see the [datafolio documentation](https://github.com/casey
         The object's type selects the storage format automatically:
 
         - pandas / polars DataFrame, polars LazyFrame → Parquet table
-        - numpy array → ``.npy``
-        - dict / list / scalar (int, float, str, bool, None) → JSON
+        - pandas / polars Series → single-column Parquet table (the pandas
+          read returns a Series again, with its name and index)
+        - numpy array or numeric/datetime pandas Index → ``.npy``
+        - dict / list / tuple / range / set / scalar (int, float, str,
+          bool, None), or a string-valued pandas Index → JSON
+        - dataclass instance → JSON of its fields (``dataclasses.asdict``);
+          ``get()`` returns the dict, so rebuild with
+          ``MyClass(**folio.get(name))``
         - timezone-aware datetime (or Unix timestamp via add()'s datetime
           detection is not applied to bare numbers — those store as JSON)
           → timestamp
@@ -1780,7 +1794,10 @@ For more information, see the [datafolio documentation](https://github.com/casey
         JSON caveat: non-finite floats (``nan``/``inf``) have no JSON
         representation and are serialized as ``null``; they come back as
         ``None``. Store numeric arrays with NaNs as numpy arrays or tables
-        instead.
+        instead. JSON also has no tuples, sets, or non-string keys: tuples
+        and ranges load back as lists (silently, as nested tuples always
+        have), while sets load back as sorted lists and non-string dict keys
+        as strings (both with a ``UserWarning``).
 
         Args:
             name: Unique item name. May be namespaced with '/'
@@ -1816,16 +1833,19 @@ For more information, see the [datafolio documentation](https://github.com/casey
         self._check_read_only()
         validate_item_name(name)
 
-        # numpy scalars (np.float64, np.int64, np.bool_, ...) are everyday
-        # values pulled out of arrays/aggregations; store them as their plain
-        # Python equivalents rather than bouncing users to .item().
-        try:
-            import numpy as _np
+        private = sorted(k for k in type_opts if k.startswith("_"))
+        if private:
+            raise TypeError(f"Unknown option(s) for add(): {private}")
 
-            if isinstance(obj, _np.generic):
-                obj = obj.item()
-        except ImportError:
-            pass
+        input_type = type(obj).__name__
+        obj, implied_opts = self._coerce_for_add(obj)
+        clashing = sorted(set(implied_opts) & set(type_opts))
+        if clashing:
+            raise TypeError(
+                f"Option(s) {clashing} are set automatically for "
+                f"{input_type} input and cannot be passed explicitly."
+            )
+        type_opts.update(implied_opts)
 
         from datafolio.base.registry import detect_handler
 
@@ -1854,7 +1874,8 @@ For more information, see the [datafolio documentation](https://github.com/casey
         if item_type is None:
             raise TypeError(
                 f"Unsupported data type: {type(obj).__name__}. add() accepts "
-                f"DataFrames/LazyFrames, numpy arrays, dicts/lists/scalars, "
+                f"DataFrames/LazyFrames, Series, numpy arrays, pandas "
+                f"Indexes, dicts/lists/tuples/sets/scalars, dataclasses, "
                 f"timezone-aware datetimes, and scikit-learn estimators. For "
                 f"arbitrary picklable objects use add_model(); for files use "
                 f"add_file(); for external tables use reference_table()."
@@ -1869,6 +1890,84 @@ For more information, see the [datafolio documentation](https://github.com/casey
             overwrite=overwrite,
             **type_opts,
         )
+
+    @staticmethod
+    def _coerce_for_add(obj: Any) -> tuple[Any, Dict[str, Any]]:
+        """Convert near-miss input types into ones ``add()`` stores natively.
+
+        No new item types are introduced: each input maps onto an existing
+        handler (JSON, table, or numpy). pandas/polars are only consulted if
+        already imported — an object of their types can't exist otherwise.
+
+        Args:
+            obj: The object passed to :meth:`add`.
+
+        Returns:
+            ``(converted, implied_opts)``. ``implied_opts`` are private type
+            options the conversion requires, e.g. ``preserve_index`` and
+            ``_series_name`` for a Series (so the pandas read returns a
+            Series), or ``_data_type`` naming a dataclass for ``describe()``.
+
+        Examples:
+            >>> DataFolio._coerce_for_add((1, 2))
+            ([1, 2], {})
+            >>> DataFolio._coerce_for_add(pd.Series([1], name="n"))[1]
+            {'preserve_index': True, '_series_name': 'n'}
+        """
+        import sys
+
+        # numpy scalars (np.float64, np.int64, np.bool_, ...) are everyday
+        # values pulled out of arrays/aggregations; store them as their plain
+        # Python equivalents rather than bouncing users to .item().
+        np = sys.modules.get("numpy")
+        if np is not None and isinstance(obj, np.generic):
+            obj = obj.item()
+
+        pd = sys.modules.get("pandas")
+        if pd is not None:
+            if isinstance(obj, pd.Series):
+                # A Series index is usually the point (value_counts, groupby
+                # results), so keep it; a default RangeIndex is still skipped.
+                column = str(obj.name) if obj.name is not None else "value"
+                return obj.to_frame(name=column), {
+                    "preserve_index": True,
+                    "_series_name": _series_name(obj.name),
+                }
+            if isinstance(obj, pd.Index):
+                if obj.dtype.kind in "biufcmM":
+                    return obj.to_numpy(), {}
+                obj = obj.tolist()
+
+        pl = sys.modules.get("polars")
+        if pl is not None and isinstance(obj, pl.Series):
+            column = obj.name or "value"
+            return obj.to_frame(column), {"_series_name": obj.name}
+
+        implied: Dict[str, Any] = {}
+        if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
+            # Stored as its field dict (nested dataclasses included); get()
+            # returns that dict, so rebuild with MyClass(**folio.get(name)).
+            implied["_data_type"] = type(obj).__qualname__
+            obj = dataclasses.asdict(obj)
+
+        if isinstance(obj, (dict, list, tuple, range, set, frozenset)):
+            from datafolio.handlers.json_data import to_json_compatible
+
+            obj, notes = to_json_compatible(obj)
+            if notes:
+                import warnings
+
+                effects = {
+                    "set": "sets are stored as lists (sorted when possible)",
+                    "non-str dict keys": "non-str dict keys are stored as strings",
+                }
+                warnings.warn(
+                    f"{'; '.join(effects[n] for n in notes)}. The item will "
+                    f"load back in that form.",
+                    UserWarning,
+                    stacklevel=3,
+                )
+        return obj, implied
 
     def _add_item(
         self,
@@ -1906,10 +2005,16 @@ For more information, see the [datafolio documentation](https://github.com/casey
             extension = get_file_extension("parquet")
             if type_opts.pop("preserve_index", False):
                 handler_kwargs["preserve_index"] = True
+            if "_series_name" in type_opts:
+                # Set by add() for Series input; the name may itself be None.
+                handler_kwargs["_series_name"] = type_opts.pop("_series_name")
         elif item_type == "numpy_array":
             extension = ".npy"
         elif item_type == "json_data":
             extension = ".json"
+            if "_data_type" in type_opts:
+                # Set by add() for dataclass input, so describe() names it.
+                handler_kwargs["_data_type"] = type_opts.pop("_data_type")
         elif item_type == "timestamp":
             extension = ".json"
         elif item_type == "model":
