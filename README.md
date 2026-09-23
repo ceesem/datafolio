@@ -17,15 +17,45 @@ folio = DataFolio("analysis/experiment-12")
 
 folio.add("features", features, description="One row per neuron; normalized morphology")
 folio.add("labels", labels, description="Manual labels after the March review")
-folio.add("params", {"alpha": 0.1, "seed": 7})
-folio.add_model("classifier", clf, inputs=["features", "labels"])
+folio.add("params", {"alpha": 0.1, "seed": 7}, description="Settings used for the paper figures")
+folio.add_model("classifier", clf, inputs=["features", "labels"],
+                description="Cell-type classifier on reviewed labels")
 ```
 
 ```python
 # A different notebook, six months later. One path, no filenames.
 folio = DataFolio("analysis/experiment-12")
-
 folio.describe()
+```
+
+```text
+DataFolio: analysis/experiment-12
+=================================
+
+Created: March 14, 2026 at 2:05 PM EDT
+Updated: March 20, 2026 at 11:42 AM EDT
+
+Tables (2):
+  • features: One row per neuron; normalized morphology
+    ↳ size: 70.2 KB
+  • labels: Manual labels after the March review
+    ↳ size: 8.3 KB
+
+JSON Data (1):
+  • params: Settings used for the paper figures
+    ↳ type: dict
+    ↳ size: 31 B
+
+Models (1):
+  • classifier: Cell-type classifier on reviewed labels
+    ↳ size: 1.4 KB
+    ↳ inputs: features, labels
+```
+
+Every item, what it is, and what it was made from — without opening a file.
+The same call works on a folio someone sends you as a cloud path.
+
+```python
 features = folio.get("features")
 clf = folio.get_model("classifier")
 ```
