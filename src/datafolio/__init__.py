@@ -8,11 +8,17 @@ from datafolio.folio import (
     ManifestReadError,
     UnsupportedManifestVersionError,
 )
+from datafolio.folio_registry import list_folios, remove_alias, set_alias
+from datafolio.search import find
 
 __all__ = [
     "DataFolio",
     "ConcurrentWriteError",
     "ManifestReadError",
     "UnsupportedManifestVersionError",
+    "find",
+    "list_folios",
+    "remove_alias",
+    "set_alias",
     "__version__",
 ]

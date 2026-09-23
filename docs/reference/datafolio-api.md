@@ -24,8 +24,14 @@ DataFolio(
     allow_existing=False,                # allow creating inside a non-folio directory
     use_https=False,                     # HTTPS reads of public buckets
     max_eager_bytes=500 * 1024 * 1024,   # eager-read ceiling; None disables
+    alias=None,                          # register under this alias; or, with
+                                         # no path, open the aliased folio
+    overwrite_alias=False,               # rebind an alias that points elsewhere
 )
 ```
+
+`DataFolio(alias="exp12")` opens a registered folio. `DataFolio(path)` alone
+never touches the registry.
 
 Creates the folio if the path is empty, opens it if it already holds one.
 `http(s)://` paths are always read-only.
@@ -41,6 +47,7 @@ DataFolio.load_snapshot(path, snapshot)   # classmethod -> read-only folio
 | `add(name, obj, *, description=None, inputs=None, overwrite=False, **type_opts)` | DataFrames, Series, arrays, dicts/lists/tuples/sets/scalars/strings, dataclasses, tz-aware datetimes, estimators |
 | `add_model(name, model, *, description=None, inputs=None, overwrite=False, custom=False)` | any picklable model-like object; `custom=True` uses skops |
 | `add_file(path, name=None, *, category=None, description=None, overwrite=False)` | copy a file into the folio |
+| `import_table(name, path, *, table_format=None, description=None, inputs=None, overwrite=False, block_size=None)` | parquet/CSV/feather file → table, without loading it into memory |
 | `reference_table(name, path, table_format="parquet", num_rows=None, version=None, description=None, inputs=None, overwrite=False, allow_full_load=False, polars_only=None)` | link an external table without copying |
 
 `**type_opts` for `add()`: `preserve_index=True` (tables), `custom=True`
@@ -215,3 +222,16 @@ internal.
 | `read_only=True` | constructor | refuse every write |
 | `follow_lineage=True` | `copy` | pull in upstream dependencies of `include_items` |
 | `dry_run=True` | `cleanup_orphaned_versions` | list, do not delete |
+
+## Folio registry and search
+
+Module-level functions for the per-user registry in `~/.datafolio`
+(`DATAFOLIO_HOME` overrides the location).
+
+| Call | For |
+| --- | --- |
+| `folio.set_alias(alias, overwrite=False)` | register this folio under an alias |
+| `datafolio.set_alias(alias, path, overwrite=False)` | register any folio path or URI |
+| `datafolio.remove_alias(alias)` | remove an alias (the folio is untouched) |
+| `datafolio.list_folios()` | DataFrame of aliases and CLI-recent folios |
+| `datafolio.find(pattern="*", *, regex=False, item_type=None, metadata=False, folios=None, aliases_only=False, local_only=False, include_archived=False, case_sensitive=False, descriptions=False)` | DataFrame of matching items (or metadata keys) across the registry |

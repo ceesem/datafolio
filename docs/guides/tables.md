@@ -69,6 +69,30 @@ folio.add("clean", lf)
 
 Cloud writes are streamed to a temp file and uploaded, so they are bounded too.
 
+## Bringing in a table file
+
+A parquet, CSV, or feather file on disk doesn't need to go through a
+DataFrame first:
+
+```python
+folio.import_table("cells", "~/Downloads/cells.parquet")
+folio.import_table(None, "measurements.csv")      # name from the file: 'measurements'
+```
+
+The result is an ordinary included table. `import_table` never holds the
+table in memory, so it works for files larger than RAM:
+
+- **parquet** is copied byte for byte, with no re-encoding.
+- **feather / Arrow IPC** is converted one record batch at a time.
+- **CSV** is parsed and converted one block at a time. Column types are
+  inferred from the first block. A later value that doesn't fit raises
+  `ValueError`; read that file with pandas and `add()` it, or keep it
+  unchanged with `add_file()`.
+
+Writing to a cloud folio stages the parquet file locally first, so you need
+local disk space for the output. `datafolio add` in the CLI uses the same
+path.
+
 ## When the table is too big to load
 
 DataFolio has no query API and will never grow one. For anything that should

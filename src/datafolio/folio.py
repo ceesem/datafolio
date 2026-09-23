@@ -62,6 +62,16 @@ SUPPORTED_MANIFEST_VERSIONS = frozenset({0, 1, 2})
 # Bounded wait (seconds) for the per-folio local write lock before giving up.
 DEFAULT_LOCK_TIMEOUT = 30.0
 
+# File extensions import_table() recognises, mapped to their table format.
+_TABLE_FILE_FORMATS: Dict[str, str] = {
+    ".parquet": "parquet",
+    ".pq": "parquet",
+    ".csv": "csv",
+    ".feather": "feather",
+    ".arrow": "arrow",
+    ".ipc": "arrow",
+}
+
 # Default concurrency for get_many(). Cloud reads are round-trip bound, so the
 # useful width is set by latency, not cores; this matches cloudfiles' own
 # default pool size.
@@ -151,13 +161,15 @@ class DataFolio(SnapshotMixin, ContextCaptureMixin):
 
     def __init__(
         self,
-        path: Union[str, Path],
+        path: Optional[Union[str, Path]] = None,
         metadata: Optional[Dict[str, Any]] = None,
         random_suffix: bool = False,
         read_only: bool = False,
         allow_existing: bool = False,
         use_https: bool = False,
         max_eager_bytes: Optional[int] = 500 * 1024 * 1024,
+        alias: Optional[str] = None,
+        overwrite_alias: bool = False,
     ):
         """Initialize a new or open an existing DataFolio.
 
@@ -181,6 +193,20 @@ class DataFolio(SnapshotMixin, ContextCaptureMixin):
                 this raises unless it is flagged ``allow_full_load`` — use
                 ``scan_table`` instead. Set to ``None`` to disable the guard
                 (default: 500 MB).
+            alias: Optional name in the per-user folio registry
+                (``~/.datafolio``). With no ``path``, the folio registered
+                under this alias is opened. With a ``path``, the folio is
+                opened (or created) and then registered under this alias.
+                Without ``alias`` the registry is never touched.
+            overwrite_alias: With both ``path`` and ``alias``, rebind the
+                alias if it already points to a different folio
+                (default: False, which raises instead).
+
+        Raises:
+            ValueError: If neither ``path`` nor ``alias`` is given, or the
+                alias already points to a different folio.
+            KeyError: If ``alias`` is given without ``path`` and is not
+                registered.
 
         Examples:
             Create new bundle with exact name:
@@ -207,7 +233,26 @@ class DataFolio(SnapshotMixin, ContextCaptureMixin):
             >>> folio = DataFolio('experiments/production-model', read_only=True)
             >>> model = folio.get_model('classifier')  # OK
             >>> folio.add('new', df)  # Error: read-only
+
+            Register an alias, then open by alias from anywhere:
+            >>> folio = DataFolio('experiments/protein-analysis', alias='protein')
+            >>> folio = DataFolio(alias='protein')
         """
+        if path is None:
+            if alias is None:
+                raise ValueError("DataFolio requires a path or an alias.")
+            from datafolio.folio_registry import FolioRegistry
+
+            path = FolioRegistry().get_alias(alias)
+            register_alias = False
+        else:
+            register_alias = alias is not None
+        if register_alias:
+            from datafolio.folio_registry import validate_alias
+
+            # Fail before creating anything on disk.
+            validate_alias(alias)  # type: ignore[arg-type]
+
         # Read-only mode flag
         self._read_only = read_only
 
@@ -373,6 +418,39 @@ class DataFolio(SnapshotMixin, ContextCaptureMixin):
         # Initialize data accessor for autocomplete support
         # Create it here (not lazily) so autocomplete is immediately available
         self._data_accessor = DataAccessor(self)
+
+        if register_alias:
+            self.set_alias(alias, overwrite=overwrite_alias)  # type: ignore[arg-type]
+
+    def set_alias(self, alias: str, overwrite: bool = False) -> Self:
+        """Register this folio under ``alias`` in the per-user registry.
+
+        The registry lives in ``~/.datafolio`` (or ``$DATAFOLIO_HOME``). Once
+        registered, the folio can be opened from anywhere with
+        ``DataFolio(alias=...)``, targeted from the CLI with ``-a``, and
+        searched with :func:`datafolio.find`.
+
+        Args:
+            alias: Alias name (letters, digits, ``.``, ``_``, ``-``).
+            overwrite: Rebind the alias if it already points to a different
+                folio (default: False, which raises instead).
+
+        Returns:
+            Self for method chaining.
+
+        Raises:
+            ValueError: If the alias is invalid, or already points elsewhere
+                and ``overwrite`` is False.
+
+        Examples:
+            >>> folio = DataFolio('experiments/protein-analysis')
+            >>> folio.set_alias('protein')
+            >>> DataFolio(alias='protein').list_contents()
+        """
+        from datafolio.folio_registry import FolioRegistry
+
+        FolioRegistry().set_alias(alias, self._bundle_dir, overwrite=overwrite)
+        return self
 
     @property
     def metadata(self) -> MetadataDict:
@@ -2366,6 +2444,102 @@ For more information, see the [datafolio documentation](https://github.com/casey
             description=description,
             overwrite=overwrite,
             category=category,
+        )
+
+    def import_table(
+        self,
+        name: Optional[str],
+        path: Union[str, Path],
+        *,
+        table_format: Optional[str] = None,
+        description: Optional[str] = None,
+        inputs: Optional[list[str]] = None,
+        overwrite: bool = False,
+        block_size: Optional[int] = None,
+    ) -> Self:
+        """Import a table file into the folio as a Parquet table.
+
+        Unlike reading the file and calling :meth:`add`, the table is never
+        held in memory, so this works for files larger than RAM:
+
+        - **parquet**: the bytes are copied unchanged (no re-encoding); the
+          schema and row count come from the file footer.
+        - **feather / arrow** (Arrow IPC): converted one record batch at a
+          time.
+        - **csv**: parsed and converted block by block. Column types are
+          inferred from the first block; a later value that doesn't fit
+          raises ``ValueError``.
+
+        The result is an ordinary included table — ``get``, ``scan_table``,
+        snapshots and ``describe`` treat it exactly like one added from a
+        DataFrame. To keep the file's original format use :meth:`add_file`;
+        to link it without copying use :meth:`reference_table`.
+
+        Args:
+            name: Item name. ``None`` derives it from the filename (without
+                extension).
+            path: Local path to the table file.
+            table_format: ``'parquet'``, ``'csv'``, ``'feather'`` or
+                ``'arrow'``. Inferred from the extension when omitted
+                (``.parquet``/``.pq``, ``.csv``, ``.feather``, ``.arrow``/``.ipc``).
+            description: Optional description.
+            inputs: Optional lineage — names of items this was derived from.
+            overwrite: Must be True to replace an existing item.
+            block_size: CSV block size in bytes for parsing (pyarrow's default
+                if None). Smaller blocks lower peak memory.
+
+        Returns:
+            Self for method chaining.
+
+        Raises:
+            FileNotFoundError: If the file doesn't exist.
+            ValueError: If the format can't be inferred or isn't supported, the
+                name is invalid or already exists (and ``overwrite=False``), or
+                a CSV value doesn't fit its inferred column type.
+
+        Examples:
+            >>> folio.import_table('cells', '~/Downloads/cells.parquet')
+            >>> folio.import_table(None, 'measurements.csv')   # name: 'measurements'
+            >>> folio.import_table('big', 'export.feather', description='raw export')
+        """
+        from datafolio.handlers.tables import TableFileSource
+
+        self._check_read_only()
+        src = Path(path).expanduser()
+        if not src.is_file():
+            raise FileNotFoundError(f"Table file not found: {src}")
+
+        if table_format is None:
+            table_format = _TABLE_FILE_FORMATS.get(src.suffix.lower())
+            if table_format is None:
+                raise ValueError(
+                    f"Cannot infer a table format from '{src.name}'. Pass "
+                    f"table_format= (parquet, csv, feather, arrow), or use "
+                    f"add_file() to store the file unchanged."
+                )
+        elif table_format not in set(_TABLE_FILE_FORMATS.values()):
+            raise ValueError(
+                f"Unsupported table_format '{table_format}' "
+                f"(supported: parquet, csv, feather, arrow)"
+            )
+
+        if name is None:
+            name = src.stem
+            try:
+                validate_item_name(name)
+            except ValueError as exc:
+                raise ValueError(
+                    f"{exc}. The name was derived from the filename — pass "
+                    f"a name explicitly to choose a valid one."
+                ) from None
+
+        return self._add_item(
+            name,
+            TableFileSource(str(src), table_format, block_size),
+            "included_table",
+            description=description,
+            inputs=inputs,
+            overwrite=overwrite,
         )
 
     def item_path(self, name: str) -> str:

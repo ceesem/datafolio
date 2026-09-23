@@ -4,10 +4,33 @@ title: API documentation
 
 # Package API
 
-`datafolio` exports one class and three exceptions. The class has its own
-page — see [DataFolio Methods](datafolio-api.md) for every method and
-property. Everything else in the package (handlers, storage backends,
-readers) is internal and not part of the public API.
+`datafolio` exports one class, three exceptions, and four registry
+functions. The class has its own page — see
+[DataFolio Methods](datafolio-api.md) for every method and property.
+Everything else in the package (handlers, storage backends, readers) is
+internal and not part of the public API.
+
+## Folio registry and search
+
+::: datafolio.find
+    options:
+        show_source: false
+        heading_level: 3
+
+::: datafolio.list_folios
+    options:
+        show_source: false
+        heading_level: 3
+
+::: datafolio.set_alias
+    options:
+        show_source: false
+        heading_level: 3
+
+::: datafolio.remove_alias
+    options:
+        show_source: false
+        heading_level: 3
 
 ## Exceptions
 

@@ -6,13 +6,14 @@ Provides command-line interface for snapshot and bundle management.
 import os
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 import click
 from rich.console import Console
 from rich.table import Table
 
 from datafolio import DataFolio
+from datafolio.utils import is_cloud_path
 
 # Global console for Rich output. Disable automatic syntax highlighting so
 # status messages render as plain text — otherwise Rich splits tokens like a
@@ -20,42 +21,169 @@ from datafolio import DataFolio
 console = Console(highlight=False)
 
 
-def find_folio_dir(ctx_folio: Optional[str] = None) -> Path:
-    """Find folio directory from multiple sources.
+def _alias_path(alias: str) -> str:
+    """Look up an alias in the user registry, as a ClickException on failure."""
+    from datafolio.folio_registry import FolioRegistry
+
+    try:
+        return FolioRegistry().get_alias(alias)
+    except KeyError as exc:
+        raise click.ClickException(
+            f"{exc.args[0]}\nTip: register one with 'datafolio folios alias NAME PATH'."
+        ) from None
+
+
+def resolve_folio_target(
+    path: Optional[str] = None, alias: Optional[str] = None
+) -> str:
+    """Resolve which folio a command targets, as a path string.
 
     Priority:
-    1. Explicit --folio/-f flag
-    2. DATAFOLIO_PATH environment variable
-    3. Current working directory
+    1. Alias (``-a/--alias``), looked up in the user registry
+    2. Explicit path (``-f/--folio`` or ``--to``), with ``~`` expanded
+    3. ``DATAFOLIO_PATH`` environment variable
+    4. Current working directory
+
+    Cloud URIs are returned unchanged; existence is not checked here.
+
+    Args:
+        path: Explicit folio path, if given.
+        alias: Folio alias, if given.
+
+    Returns:
+        Folio path (local path or cloud URI).
+
+    Raises:
+        click.UsageError: If both a path and an alias are given.
+        click.ClickException: If the alias is not registered.
+    """
+    if path and alias:
+        raise click.UsageError("Pass either a folio path or an alias (-a), not both.")
+    if alias:
+        return _alias_path(alias)
+    if path:
+        return path if is_cloud_path(path) else str(Path(path).expanduser())
+    env_folio = os.environ.get("DATAFOLIO_PATH")
+    if env_folio:
+        return (
+            env_folio if is_cloud_path(env_folio) else str(Path(env_folio).expanduser())
+        )
+    return str(Path.cwd())
+
+
+def find_folio_dir(
+    ctx_folio: Optional[str] = None, ctx_alias: Optional[str] = None
+) -> Path:
+    """Find a local folio directory from multiple sources.
+
+    Priority:
+    1. Alias (-a/--alias), looked up in the user registry
+    2. Explicit --folio/-f flag
+    3. DATAFOLIO_PATH environment variable
+    4. Current working directory
 
     Args:
         ctx_folio: Folio path from CLI context
+        ctx_alias: Folio alias from CLI context
 
     Returns:
         Path to folio directory
 
     Raises:
-        click.ClickException: If folio cannot be found
+        click.ClickException: If folio cannot be found, or resolves to a
+            cloud folio (not supported by the commands using this helper)
     """
-    # Check explicit flag
-    if ctx_folio:
-        path = Path(ctx_folio)
-        if path.exists():
-            return path
-        raise click.ClickException(f"Folio not found: {ctx_folio}")
-
-    # Check environment variable
-    env_folio = os.environ.get("DATAFOLIO_PATH")
-    if env_folio:
-        path = Path(env_folio)
-        if path.exists():
-            return path
+    target = resolve_folio_target(ctx_folio, ctx_alias)
+    if is_cloud_path(target):
         raise click.ClickException(
-            f"Folio not found (from DATAFOLIO_PATH): {env_folio}"
+            f"Cloud folios are not supported by this command: {target}"
         )
+    path = Path(target)
+    if not path.exists():
+        if ctx_alias:
+            raise click.ClickException(
+                f"Folio not found (from alias '{ctx_alias}'): {target}"
+            )
+        if ctx_folio:
+            raise click.ClickException(
+                f"Folio not found: {ctx_folio}{_alias_hint(ctx_folio)}"
+            )
+        if os.environ.get("DATAFOLIO_PATH"):
+            raise click.ClickException(
+                f"Folio not found (from DATAFOLIO_PATH): {os.environ['DATAFOLIO_PATH']}"
+            )
+    return path
 
-    # Use current directory
-    return Path.cwd()
+
+def _note_used_folio(path: Union[str, Path]) -> None:
+    """Remember the folio this command used, for the recents list.
+
+    Recorded by the root group's result callback only if the command
+    finishes successfully.
+    """
+    ctx = click.get_current_context(silent=True)
+    if ctx is not None:
+        root = ctx.find_root()
+        root.ensure_object(dict)
+        root.obj["used_folio"] = str(path)
+
+
+def _alias_hint(value: Optional[str]) -> str:
+    """Suggest ``-a`` when a path argument is actually a registered alias.
+
+    Args:
+        value: The path as the user typed it.
+
+    Returns:
+        A tip to append to an error message, or ``""``.
+    """
+    if not value or is_cloud_path(value):
+        return ""
+    from datafolio.folio_registry import FolioRegistry
+
+    try:
+        aliases = FolioRegistry().aliases()
+    except Exception:  # noqa: BLE001 - a hint must never mask the real error
+        return ""
+    if value not in aliases:
+        return ""
+    return (
+        f"\nTip: '{value}' is a registered alias (→ {aliases[value]}). "
+        f"Use -a {value}; -f/--to take a path."
+    )
+
+
+def open_existing_folio(target: str, read_only: bool = False) -> DataFolio:
+    """Open an existing local or cloud folio, never creating a new one.
+
+    Args:
+        target: Folio path or cloud URI.
+        read_only: Open read-only.
+
+    Returns:
+        The opened DataFolio.
+
+    Raises:
+        click.ClickException: If no folio exists at ``target``.
+    """
+    from datafolio.search import open_existing
+
+    if not is_cloud_path(target):
+        try:
+            validate_existing_folio(Path(target))
+        except click.ClickException as exc:
+            hint = _alias_hint(target)
+            if hint:
+                exc.message = exc.message.split("\nTip:")[0] + hint
+            raise
+    try:
+        folio = open_existing(target, read_only=read_only)
+    except FileNotFoundError as exc:
+        raise click.ClickException(
+            f"{exc}\nTip: Use 'datafolio init' to create a new folio."
+        ) from None
+    _note_used_folio(folio._bundle_dir)
+    return folio
 
 
 def validate_existing_folio(path: Path) -> None:
@@ -82,6 +210,8 @@ def validate_existing_folio(path: Path) -> None:
             f"Missing required files: items.json and metadata.json\n"
             "Tip: Use 'datafolio init' to create a new folio, or use --folio/-f to specify the correct path."
         )
+
+    _note_used_folio(path.resolve())
 
 
 def validate_snapshot_name(name: str) -> None:
@@ -134,15 +264,36 @@ def _get_version():
     type=click.Path(),
     help="Path to DataFolio (default: current directory or DATAFOLIO_PATH env var)",
 )
+@click.option(
+    "--alias",
+    "-a",
+    help="Alias of a registered DataFolio (see 'datafolio folios list')",
+)
 @click.version_option(version=None, prog_name="datafolio", message=_get_version())
 @click.pass_context
-def cli(ctx, folio):
+def cli(ctx, folio, alias):
     """DataFolio CLI - Manage data bundles and snapshots.
 
-    Use --folio/-f to specify folio path, or set DATAFOLIO_PATH environment variable.
+    Use --folio/-f to specify folio path, -a/--alias for a registered alias,
+    or set DATAFOLIO_PATH environment variable.
     """
     ctx.ensure_object(dict)
+    if folio and alias:
+        raise click.UsageError("Pass either --folio/-f or --alias/-a, not both.")
     ctx.obj["folio"] = folio
+    ctx.obj["alias"] = alias
+
+
+@cli.result_callback()
+@click.pass_context
+def _record_recent_folio(ctx, result, **kwargs):
+    """After a successful command, record the folio it used as recent."""
+    used = (ctx.obj or {}).get("used_folio")
+    if used:
+        from datafolio.folio_registry import FolioRegistry
+
+        FolioRegistry().record_recent(used)
+    return result
 
 
 @cli.group()
@@ -196,7 +347,7 @@ def snapshot_create(ctx, name, description, tag, no_git, env, exec):
         # Validate snapshot name
         validate_snapshot_name(name)
 
-        bundle_path = find_folio_dir(ctx.obj.get("folio"))
+        bundle_path = find_folio_dir(ctx.obj.get("folio"), ctx.obj.get("alias"))
         validate_existing_folio(bundle_path)
         folio = DataFolio(bundle_path)
 
@@ -238,7 +389,7 @@ def snapshot_list(ctx, tag):
         datafolio --folio /path/to/folio snapshot list
     """
     try:
-        bundle_path = find_folio_dir(ctx.obj.get("folio"))
+        bundle_path = find_folio_dir(ctx.obj.get("folio"), ctx.obj.get("alias"))
         validate_existing_folio(bundle_path)
         folio = DataFolio(bundle_path)
 
@@ -309,7 +460,7 @@ def snapshot_show(ctx, name):
         datafolio --folio /path/to/folio snapshot show v1.0
     """
     try:
-        bundle_path = find_folio_dir(ctx.obj.get("folio"))
+        bundle_path = find_folio_dir(ctx.obj.get("folio"), ctx.obj.get("alias"))
         validate_existing_folio(bundle_path)
         folio = DataFolio(bundle_path)
 
@@ -404,7 +555,7 @@ def snapshot_compare(ctx, snapshot1, snapshot2):
         datafolio --folio /path/to/folio snapshot compare v1.0 v2.0
     """
     try:
-        bundle_path = find_folio_dir(ctx.obj.get("folio"))
+        bundle_path = find_folio_dir(ctx.obj.get("folio"), ctx.obj.get("alias"))
         validate_existing_folio(bundle_path)
         folio = DataFolio(bundle_path)
 
@@ -485,7 +636,7 @@ def snapshot_delete(ctx, name, cleanup, yes):
         datafolio --folio /path/to/folio snapshot delete v1.0 -y
     """
     try:
-        bundle_path = find_folio_dir(ctx.obj.get("folio"))
+        bundle_path = find_folio_dir(ctx.obj.get("folio"), ctx.obj.get("alias"))
         validate_existing_folio(bundle_path)
         folio = DataFolio(bundle_path)
 
@@ -523,7 +674,7 @@ def snapshot_gc(ctx, dry_run):
         datafolio snapshot gc
     """
     try:
-        bundle_path = find_folio_dir(ctx.obj.get("folio"))
+        bundle_path = find_folio_dir(ctx.obj.get("folio"), ctx.obj.get("alias"))
         validate_existing_folio(bundle_path)
         folio = DataFolio(bundle_path)
 
@@ -564,7 +715,7 @@ def snapshot_status(ctx):
         datafolio snapshot status
     """
     try:
-        bundle_path = find_folio_dir(ctx.obj.get("folio"))
+        bundle_path = find_folio_dir(ctx.obj.get("folio"), ctx.obj.get("alias"))
         validate_existing_folio(bundle_path)
         folio = DataFolio(bundle_path)
 
@@ -674,7 +825,7 @@ def snapshot_diff(ctx, snapshot):
         datafolio snapshot diff v1.0      # Compare to specific snapshot
     """
     try:
-        bundle_path = find_folio_dir(ctx.obj.get("folio"))
+        bundle_path = find_folio_dir(ctx.obj.get("folio"), ctx.obj.get("alias"))
         validate_existing_folio(bundle_path)
         folio = DataFolio(bundle_path)
 
@@ -778,7 +929,7 @@ def validate(ctx, path):
         if path:
             folio_path = Path(path)
         else:
-            folio_path = find_folio_dir(ctx.obj.get("folio"))
+            folio_path = find_folio_dir(ctx.obj.get("folio"), ctx.obj.get("alias"))
 
         # Validate the path structure
         validate_existing_folio(folio_path)
@@ -830,7 +981,7 @@ def describe(ctx, max_metadata, snapshot):
         datafolio describe --snapshot v1.0
     """
     try:
-        bundle_path = find_folio_dir(ctx.obj.get("folio"))
+        bundle_path = find_folio_dir(ctx.obj.get("folio"), ctx.obj.get("alias"))
         validate_existing_folio(bundle_path)
         folio = DataFolio(bundle_path)
 
@@ -848,8 +999,13 @@ def describe(ctx, max_metadata, snapshot):
 @click.argument("path", type=click.Path(), required=False)
 @click.option("--description", "-d", help="Bundle description")
 @click.option("--name", "-n", help="Bundle name (default: directory name)")
+@click.option(
+    "--alias",
+    "alias_name",
+    help="Register the new folio under this alias in the user registry",
+)
 @click.pass_context
-def init(ctx, path, description, name):
+def init(ctx, path, description, name, alias_name):
     """Initialize a new DataFolio bundle.
 
     If no path is provided, initializes in the current directory.
@@ -871,7 +1027,7 @@ def init(ctx, path, description, name):
         if is_cloud:
             bundle_path = str(path).rstrip("/")
         elif path:
-            bundle_path = Path(path).resolve()
+            bundle_path = Path(path).expanduser().resolve()
         else:
             bundle_path = Path.cwd()
 
@@ -919,19 +1075,412 @@ def init(ctx, path, description, name):
         console.print(f"  Path: {bundle_path}")
         if description:
             console.print(f"  Description: {description}")
+        if alias_name:
+            folio.set_alias(alias_name)
+            console.print(f"  Alias: {alias_name}")
+        _note_used_folio(folio._bundle_dir)
 
+        target = f"-a {alias_name}" if alias_name else f"--to {bundle_path}"
         console.print("\n[cyan]Next steps:[/cyan]")
         console.print("  # Add data to your bundle")
-        console.print("  cd", bundle_path)
-        console.print(
-            "  python -c \"from datafolio import DataFolio; folio = DataFolio('.'); ...\""
-        )
+        console.print(f"  datafolio add {target} my_table.parquet -d 'What it is'")
         console.print("\n  # Create a snapshot when ready")
-        console.print("  datafolio snapshot create v1.0 -d 'Initial version'")
+        prefix = f"datafolio -a {alias_name}" if alias_name else "datafolio"
+        console.print(f"  {prefix} snapshot create v1.0 -d 'Initial version'")
 
     except Exception as e:
         console.print(f"[red]✗[/red] Error: {e}", style="red")
         sys.exit(1)
+
+
+# ==================== Adding Data ====================
+
+# Extensions `datafolio add` imports as tables (converted to parquet).
+TABLE_EXTENSIONS = {".parquet", ".pq", ".csv", ".feather", ".arrow", ".ipc"}
+# Table formats reference_table() can link without copying.
+REFERENCE_FORMATS = {".parquet": "parquet", ".pq": "parquet", ".csv": "csv"}
+
+
+@cli.command("add")
+@click.argument(
+    "file_path", metavar="FILE", type=click.Path(exists=True, dir_okay=False)
+)
+@click.option("--to", "to", help="Path of the folio to add to (local or cloud)")
+@click.option(
+    "--alias", "-a", "alias", help="Alias of the folio to add to (instead of --to)"
+)
+@click.option("--name", "-n", help="Item name (default: file name without extension)")
+@click.option("--description", "-d", help="Item description")
+@click.option(
+    "--reference",
+    is_flag=True,
+    help="Link a parquet/csv file without copying it (referenced table)",
+)
+@click.option(
+    "--as-file",
+    is_flag=True,
+    help="Store the file unchanged as an artifact (no conversion)",
+)
+@click.option("--overwrite", is_flag=True, help="Replace an existing item")
+@click.pass_context
+def add(ctx, file_path, to, alias, name, description, reference, as_file, overwrite):
+    """Add FILE to a folio.
+
+    \b
+    What gets stored depends on the file:
+      .parquet .csv .feather .arrow   table, stored as parquet (streamed,
+                                      so files larger than memory work)
+      .npy                            numpy array
+      .json                           JSON data
+      anything else                   the file, unchanged (artifact)
+
+    Use --as-file to store any file unchanged, or --reference to link a
+    parquet/csv file in place without copying it.
+
+    The folio is chosen by --to/-a here, else by the global -f/-a,
+    DATAFOLIO_PATH, or the current directory.
+
+    \b
+    Examples:
+        datafolio add --to ~/analysis/exp ~/Downloads/blah.parquet
+        datafolio add -a my-folio synapses.parquet -d "Synapse table"
+        datafolio add -a my-folio cells.csv --name cells
+        datafolio add -a my-folio notes.csv --as-file
+        datafolio add -a my-folio /data/huge.parquet --reference
+    """
+    if reference and as_file:
+        raise click.UsageError("--reference and --as-file cannot be combined.")
+    try:
+        if to or alias:
+            target = resolve_folio_target(to, alias)
+        else:
+            target = resolve_folio_target(ctx.obj.get("folio"), ctx.obj.get("alias"))
+        folio = open_existing_folio(target)
+
+        src = Path(file_path).expanduser().resolve()
+        ext = src.suffix.lower()
+        if name is None:
+            name = src.stem
+            try:
+                from datafolio.utils import validate_item_name
+
+                validate_item_name(name)
+            except ValueError as exc:
+                raise click.ClickException(
+                    f"{exc}. The name was derived from the file name; "
+                    f"pass --name to choose a valid one."
+                ) from None
+
+        with console.status(f"Adding {src.name}..."):
+            if reference:
+                if ext not in REFERENCE_FORMATS:
+                    raise click.ClickException(
+                        f"--reference only supports parquet and csv files, "
+                        f"not '{ext or src.name}'. Drop --reference to import "
+                        f"the table, or use --as-file."
+                    )
+                folio.reference_table(
+                    name,
+                    str(src),
+                    table_format=REFERENCE_FORMATS[ext],
+                    description=description,
+                    overwrite=overwrite,
+                )
+            elif as_file:
+                folio.add_file(src, name, description=description, overwrite=overwrite)
+            elif ext in TABLE_EXTENSIONS:
+                folio.import_table(
+                    name, src, description=description, overwrite=overwrite
+                )
+            elif ext == ".npy":
+                import numpy as np
+
+                folio.add(
+                    name,
+                    np.load(src, mmap_mode="r"),
+                    description=description,
+                    overwrite=overwrite,
+                )
+            elif ext == ".json":
+                import orjson
+
+                folio.add(
+                    name,
+                    orjson.loads(src.read_bytes()),
+                    description=description,
+                    overwrite=overwrite,
+                )
+            else:
+                folio.add_file(src, name, description=description, overwrite=overwrite)
+
+        item_type = folio.item_info(name)["item_type"]
+        where = f"'{alias}'" if alias else folio._bundle_dir
+        console.print(
+            f"[green]✓[/green] Added [cyan]{name}[/cyan] ({item_type}) to {where}"
+        )
+
+    except click.ClickException:
+        raise
+    except Exception as e:
+        console.print(f"[red]✗[/red] Error: {e}", style="red")
+        sys.exit(1)
+
+
+# ==================== Folio Registry ====================
+
+
+@cli.group()
+def folios():
+    """Manage folio aliases and the recently used list (~/.datafolio).
+
+    Set DATAFOLIO_HOME to keep the registry somewhere else.
+    """
+
+
+@folios.command("list")
+def folios_list():
+    """List folio aliases and recently used folios.
+
+    Examples:
+        datafolio folios list
+    """
+    from datafolio.folio_registry import list_folios
+
+    df = list_folios()
+    if df.empty:
+        console.print("[yellow]No folios registered yet.[/yellow]")
+        console.print(
+            "Register one with 'datafolio folios alias NAME PATH'; "
+            "folios used from the CLI are also remembered here."
+        )
+        return
+
+    table = Table(title="Folios")
+    table.add_column("Alias", style="cyan")
+    table.add_column("Path")
+    table.add_column("Last used (CLI)", style="dim")
+    table.add_column("Exists")
+    for row in df.itertuples(index=False):
+        exists = "?" if row.exists is None else ("✓" if row.exists else "[red]✗[/red]")
+        table.add_row(
+            row.alias or "",
+            row.path,
+            (row.last_accessed or "")[:19].replace("T", " "),
+            exists,
+        )
+    console.print(table)
+
+
+@folios.command("alias")
+@click.argument("alias_name")
+@click.argument("path", required=False)
+@click.option("--overwrite", is_flag=True, help="Rebind an alias that already exists")
+@click.pass_context
+def folios_alias(ctx, alias_name, path, overwrite):
+    """Register ALIAS_NAME for the folio at PATH.
+
+    PATH defaults to the current folio (-f, DATAFOLIO_PATH, or the current
+    directory). Cloud URIs are accepted.
+
+    Examples:
+        datafolio folios alias my-folio ~/analysis/my-folio
+        datafolio folios alias shared gs://bucket/folios/shared
+        datafolio -f ~/analysis/my-folio folios alias my-folio
+    """
+    from datafolio.folio_registry import FolioRegistry
+
+    target = path or resolve_folio_target(ctx.obj.get("folio"), ctx.obj.get("alias"))
+    if not is_cloud_path(target):
+        validate_existing_folio(Path(target).expanduser())
+    try:
+        resolved = FolioRegistry().set_alias(alias_name, target, overwrite=overwrite)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from None
+    console.print(f"[green]✓[/green] {alias_name} → {resolved}")
+
+
+@folios.command("unalias")
+@click.argument("alias_name")
+def folios_unalias(alias_name):
+    """Remove an alias (the folio itself is untouched).
+
+    Examples:
+        datafolio folios unalias my-folio
+    """
+    from datafolio.folio_registry import FolioRegistry
+
+    try:
+        FolioRegistry().remove_alias(alias_name)
+    except KeyError as exc:
+        raise click.ClickException(exc.args[0]) from None
+    console.print(f"[green]✓[/green] Removed alias {alias_name}")
+
+
+@folios.command("forget")
+@click.argument("path")
+def folios_forget(path):
+    """Remove PATH from the recently used list (aliases are kept).
+
+    Examples:
+        datafolio folios forget ~/scratch/tmp-folio
+    """
+    from datafolio.folio_registry import FolioRegistry
+
+    if FolioRegistry().forget(path):
+        console.print(f"[green]✓[/green] Forgot {path}")
+    else:
+        raise click.ClickException(f"Not in the recent list: {path}")
+
+
+@folios.command("prune")
+def folios_prune():
+    """Drop aliases and recents whose local folio no longer exists.
+
+    Cloud folios are never pruned.
+
+    Examples:
+        datafolio folios prune
+    """
+    from datafolio.folio_registry import FolioRegistry
+
+    removed = FolioRegistry().prune()
+    if not removed:
+        console.print("Nothing to prune.")
+        return
+    for p in removed:
+        console.print(f"  [red]✗[/red] {p}")
+    console.print(f"[green]✓[/green] Pruned {len(removed)} missing folio(s)")
+
+
+# ==================== Search ====================
+
+
+@cli.command("find")
+@click.argument("pattern", default="*")
+@click.option("--regex", is_flag=True, help="Treat PATTERN as a regular expression")
+@click.option(
+    "--type",
+    "item_types",
+    multiple=True,
+    type=click.Choice(["table", "model", "artifact", "array", "json", "timestamp"]),
+    help="Only items of this type (repeatable)",
+)
+@click.option(
+    "--metadata",
+    is_flag=True,
+    help="Match folio metadata keys (KEY or KEY=VALUE) instead of item names",
+)
+@click.option(
+    "--in",
+    "in_folios",
+    multiple=True,
+    help="Only search this alias or path (repeatable)",
+)
+@click.option(
+    "--aliases-only", is_flag=True, help="Skip recently used, unaliased folios"
+)
+@click.option("--local-only", is_flag=True, help="Skip cloud folios")
+@click.option("--include-archived", is_flag=True, help="Include archived items")
+@click.option("--case-sensitive", is_flag=True, help="Match case-sensitively")
+@click.option(
+    "--desc",
+    "descriptions",
+    is_flag=True,
+    help="Also match text anywhere in item descriptions",
+)
+def find_cmd(
+    pattern,
+    regex,
+    item_types,
+    metadata,
+    in_folios,
+    aliases_only,
+    local_only,
+    include_archived,
+    case_sensitive,
+    descriptions,
+):
+    """Find items across registered and recently used folios.
+
+    PATTERN is a glob matched against item names (default: '*'). Only each
+    folio's manifest is read, so this is fast. Exits 1 if nothing matches.
+
+    \b
+    Examples:
+        datafolio find 'cells*'
+        datafolio find 'synapse|soma' --regex --type table
+        datafolio find '*' --in my-folio --type model
+        datafolio find 'dataset=minnie*' --metadata
+        datafolio find synapse --desc
+    """
+    import warnings
+
+    from datafolio.search import find
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        try:
+            df = find(
+                pattern,
+                regex=regex,
+                item_type=list(item_types) or None,
+                metadata=metadata,
+                folios=list(in_folios) or None,
+                aliases_only=aliases_only,
+                local_only=local_only,
+                include_archived=include_archived,
+                case_sensitive=case_sensitive,
+                descriptions=descriptions,
+            )
+        except ValueError as exc:
+            raise click.ClickException(str(exc)) from None
+    for w in caught:
+        if issubclass(w.category, UserWarning):
+            console.print(f"[yellow]⚠[/yellow] {w.message}")
+
+    if df.empty:
+        console.print(f"[yellow]No matches for '{pattern}'.[/yellow]")
+        if not descriptions and not metadata:
+            # The manifests are local and small; a second pass is cheap and
+            # only happens when nothing matched.
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                in_desc = find(
+                    pattern,
+                    regex=regex,
+                    item_type=list(item_types) or None,
+                    folios=list(in_folios) or None,
+                    aliases_only=aliases_only,
+                    local_only=local_only,
+                    include_archived=include_archived,
+                    case_sensitive=case_sensitive,
+                    descriptions=True,
+                )
+            if not in_desc.empty:
+                n = len(in_desc)
+                console.print(
+                    f"{n} item{'s' if n != 1 else ''} mention{'' if n != 1 else 's'} "
+                    f"it in {'their descriptions' if n != 1 else 'its description'}; "
+                    f"add --desc to include {'them' if n != 1 else 'it'}."
+                )
+        sys.exit(1)
+
+    table = Table(title=f"Matches for '{pattern}'")
+    table.add_column("Folio", style="cyan")
+    if metadata:
+        table.add_column("Key")
+        table.add_column("Value")
+    else:
+        table.add_column("Item")
+        table.add_column("Type", style="dim")
+        table.add_column("Description")
+    for row in df.itertuples(index=False):
+        folio_label = row.alias or row.folio_path
+        if metadata:
+            table.add_row(folio_label, str(row.key), str(row.value))
+        else:
+            table.add_row(folio_label, row.name, row.item_type, row.description or "")
+    console.print(table)
 
 
 if __name__ == "__main__":

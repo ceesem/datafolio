@@ -1,5 +1,34 @@
 # Changelog
 
+## 2.2.0
+
+### Adding files from the command line
+
+- New `datafolio add FILE [--to PATH | -a ALIAS] [-d DESCRIPTION]`. Parquet, CSV,
+  feather, and Arrow files become parquet tables. `.npy` and `.json` become
+  arrays and JSON. Anything else, or any file with `--as-file`, is stored
+  unchanged. `--reference` links a parquet/CSV file without copying it.
+- New `folio.import_table(name, path)` brings a table file in without
+  loading it into memory. Parquet is copied as-is; CSV and feather are
+  converted one batch at a time.
+
+### Folio aliases and search
+
+- A per-user registry in `~/.datafolio` (`DATAFOLIO_HOME` overrides it).
+- `DataFolio(path, alias="x")` and `folio.set_alias("x")` register a folio.
+  `DataFolio(alias="x")` opens it. Opening by path alone never touches the
+  registry. Rebinding an alias needs `overwrite_alias=True` /
+  `overwrite=True`.
+- CLI: global `-a/--alias` on every command, `init --alias`, and a
+  `datafolio folios` group (`list`, `alias`, `unalias`, `forget`, `prune`).
+  The CLI remembers the 50 most recently used folios.
+- `datafolio.find()` and `datafolio find` search item names (glob or
+  regex, filtered by type), optionally item descriptions
+  (`descriptions=True` / `--desc`), or folio metadata across all aliased
+  and recent folios, reading only manifests. Also exported: `datafolio.list_folios()`,
+  `datafolio.set_alias()`, `datafolio.remove_alias()`.
+- `add`, `find`, `folios`, and `init` accept cloud folios.
+
 ## 2.1.0
 
 ### `add()` accepts more everyday types

@@ -238,6 +238,13 @@ poe bump patch     # or minor/major
 ```
 
 This automatically:
+- Refuses to bump if the current version is not on PyPI yet
+  (`.bmv-check-released.py`; override with `BUMP_ALLOW_UNRELEASED=1`)
 - Updates version in `pyproject.toml` and `src/datafolio/__init__.py`
-- Creates git commit and tag
-- Runs pre/post commit hooks including `uv sync`
+- Runs `uv sync`, then creates the git commit and tag
+- Pushes the branch and tag with `git push --follow-tags`
+
+Publishing is a separate step: create a GitHub Release for the tag (e.g.
+`gh release create v2.2.0 --generate-notes`). `.github/workflows/publish.yml`
+checks the tag matches the package version, runs the tests, builds, and
+uploads to PyPI via trusted publishing.

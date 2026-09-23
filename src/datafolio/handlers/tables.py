@@ -1,5 +1,6 @@
 """Table handlers for DataFrames and external references."""
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
@@ -8,6 +9,25 @@ from datafolio.utils import get_file_extension
 
 if TYPE_CHECKING:
     from datafolio.folio import DataFolio
+
+
+@dataclass(frozen=True)
+class TableFileSource:
+    """A local table file to import as an included table.
+
+    Passed by :meth:`DataFolio.import_table` in place of a DataFrame so the
+    handler can stream (or copy) the file instead of loading it into memory.
+    Never auto-detected by ``add()``.
+
+    Attributes:
+        path: Local source file path.
+        table_format: ``'parquet'``, ``'csv'``, ``'feather'`` or ``'arrow'``.
+        block_size: Optional CSV block size in bytes.
+    """
+
+    path: str
+    table_format: str
+    block_size: Optional[int] = None
 
 
 class DataframeHandler(BaseHandler):
@@ -150,7 +170,13 @@ class DataframeHandler(BaseHandler):
                 f"DataFrames (table '{name}' is "
                 f"{type(data).__name__}; polars frames have no index)."
             )
-        if self._is_polars_lazy(data):
+        if isinstance(data, TableFileSource):
+            # Copy (parquet) or stream-convert (csv/feather) with bounded
+            # memory; schema and row count come from the written file.
+            arrow_schema, num_rows = folio._storage.import_table_file(
+                filepath, data.path, data.table_format, block_size=data.block_size
+            )
+        elif self._is_polars_lazy(data):
             # Streaming, bounded-memory materialization. The footer is read from
             # the local staging file, so a cloud write never re-downloads the
             # just-uploaded object just to learn its schema/row count.

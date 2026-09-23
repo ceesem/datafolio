@@ -4,8 +4,9 @@ title: CLI
 
 # Command line
 
-The CLI is for looking at a folio and managing snapshots without opening a
-notebook. It does not add or read data — that is Python's job.
+The CLI is for looking at a folio, adding files to it, finding things across
+folios, and managing snapshots without opening a notebook. Reading data is
+Python's job.
 
 ```bash
 datafolio --help
@@ -14,19 +15,26 @@ datafolio --version
 
 ## Choosing the folio
 
-Three ways, highest priority first:
+Four ways, highest priority first:
 
 ```bash
-datafolio -f analysis/experiment-12 describe   # explicit flag
-export DATAFOLIO_PATH=analysis/experiment-12   # environment variable
-cd analysis/experiment-12 && datafolio describe # current directory
+datafolio -a exp12 describe                     # registered alias
+datafolio -f analysis/experiment-12 describe    # explicit path
+export DATAFOLIO_PATH=analysis/experiment-12    # environment variable
+cd analysis/experiment-12 && datafolio describe  # current directory
 ```
 
-!!! note "Local folios only"
-    `-f` resolves a filesystem path, so cloud folios (`gs://…`, `s3://…`)
-    cannot be targeted by `describe`, `validate`, or the snapshot commands.
-    `init` is the exception — it can create a cloud folio. Use Python for
-    everything else on a cloud folio, or sync it down first.
+`-a` and `-f` are separate flags, so a name is never mistaken for a path.
+If you pass an alias to `-f` or `--to` by mistake, the error suggests `-a`.
+Register aliases with [`datafolio folios alias`](#datafolio-folios) or
+`init --alias`. Every folio a command uses successfully is also remembered
+in a recent list, which [`datafolio find`](#datafolio-find) searches.
+
+!!! note "Cloud folios"
+    `add`, `find`, `folios` and `init` accept cloud folios (`gs://…`,
+    `s3://…`), by path or by alias. `describe`, `validate`, and the snapshot
+    commands work on local folios only. Use Python for those on a cloud
+    folio, or sync it down first.
 
 Commands exit `0` on success and `1` on failure (folio not found, invalid
 bundle, unknown snapshot, validation failure).
@@ -45,6 +53,108 @@ datafolio init gs://my-bucket/experiment -d "Cloud experiment"
 | --- | --- |
 | `-d, --description TEXT` | bundle description, stored in metadata |
 | `-n, --name TEXT` | bundle name (default: the directory name) |
+| `--alias TEXT` | register the new folio under this alias |
+
+## `datafolio add`
+
+Add a file to a folio: `datafolio add [--to PATH | -a ALIAS] FILE`.
+
+```bash
+datafolio add --to analysis/experiment-12 ~/Downloads/blah.parquet
+datafolio add -a exp12 synapses.parquet -d "synapse table I thought was interesting"
+datafolio add -a exp12 cells.csv --name cells
+datafolio add -a exp12 notes.csv --as-file
+datafolio add -a exp12 /data/huge.parquet --reference
+```
+
+The file type decides what gets stored:
+
+| File | Stored as |
+| --- | --- |
+| `.parquet`, `.csv`, `.feather`, `.arrow` | table, as parquet (via `folio.import_table`) |
+| `.npy` | numpy array |
+| `.json` | JSON data |
+| anything else | the file unchanged (artifact) |
+
+Tables are streamed rather than loaded, so files larger than memory work.
+Parquet is copied byte for byte. CSV and feather are converted a block at a
+time. CSV column types are inferred from the start of the file; if a later
+row doesn't fit, the command fails and suggests `--as-file` or
+`--reference`.
+
+| Option | |
+| --- | --- |
+| `--to PATH` | folio path, local or cloud |
+| `-a, --alias TEXT` | folio alias (instead of `--to`) |
+| `-n, --name TEXT` | item name (default: file name without extension) |
+| `-d, --description TEXT` | item description |
+| `--as-file` | store any file unchanged, with no conversion |
+| `--reference` | link a parquet/csv file in place, without copying |
+| `--overwrite` | replace an existing item |
+
+Without `--to` or `-a`, the folio comes from the global `-f`/`-a`,
+`DATAFOLIO_PATH`, or the current directory. `add` never creates a folio; use
+`init` first.
+
+## `datafolio folios`
+
+Manage the per-user registry in `~/.datafolio` (set `DATAFOLIO_HOME` to keep
+it elsewhere). It holds aliases you choose, and a list of the 50 folios most
+recently used from the CLI.
+
+```bash
+datafolio folios list                               # aliases, then recents
+datafolio folios alias exp12 analysis/experiment-12 # register an alias
+datafolio folios alias shared gs://team/folios/shared
+datafolio folios alias exp12 other/path --overwrite # rebind
+datafolio folios unalias exp12
+datafolio folios forget ~/scratch/tmp-folio         # drop from recents
+datafolio folios prune                              # drop missing local folios
+```
+
+`folios alias NAME` with no path aliases the current folio. Rebinding an
+existing alias needs `--overwrite`. `prune` never removes cloud folios.
+
+## `datafolio find`
+
+Find items by name across every aliased and recently used folio. Only each
+folio's `items.json` is read, so this is fast even across many folios.
+
+```bash
+datafolio find 'cells*'                        # glob on the whole name
+datafolio find 'synapse|soma' --regex --type table
+datafolio find --in exp12 --type model         # everything of a type in one folio
+datafolio find 'dataset=minnie*' --metadata    # folio metadata key=value
+datafolio find synapse --desc                  # also search descriptions
+```
+
+```text
+                  Matches for 'cells*'
+┏━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━┓
+┃ Folio  ┃ Item      ┃ Type           ┃ Description  ┃
+┡━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━┩
+│ exp12  │ cells     │ included_table │ cell table   │
+│ exp13  │ cells_raw │ numpy_array    │              │
+└────────┴───────────┴────────────────┴──────────────┘
+```
+
+| Option | |
+| --- | --- |
+| `--regex` | treat the pattern as a regular expression (matched anywhere) |
+| `--type TYPE` | `table`, `model`, `artifact`, `array`, `json`, `timestamp`; repeatable |
+| `--metadata` | match folio metadata keys (`KEY` or `KEY=VALUE`) instead of item names |
+| `--in ALIAS_OR_PATH` | only search this folio; repeatable |
+| `--aliases-only` | skip recent folios that have no alias |
+| `--local-only` | skip cloud folios |
+| `--include-archived` | include archived items |
+| `--case-sensitive` | match case-sensitively (default: case-insensitive) |
+| `--desc` | also match items whose description contains the pattern |
+
+A folio that can't be opened (moved, deleted, no credentials) is reported
+with a warning and skipped. Exits `1` when nothing matches; if the
+pattern does appear in item descriptions, the message says so and suggests
+`--desc`. The same search
+is available in Python as `datafolio.find()`, which returns a DataFrame.
 
 ## `datafolio describe`
 
@@ -218,7 +328,7 @@ Nothing is garbage-collected automatically; `gc` is the sweep.
 
 `restore_snapshot()` and `export_snapshot()` are Python-only — both rewrite or
 create bundles, which is not something to trigger from a one-line command by
-accident. Adding and reading data is Python-only by design; see the
+accident. Reading data is Python-only by design; see the
 [API cheat sheet](datafolio-api.md).
 
 ## Scripting against a folio

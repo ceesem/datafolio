@@ -226,8 +226,50 @@ datafolio -f analysis/experiment-12 describe
 export DATAFOLIO_PATH=analysis/experiment-12
 ```
 
-The CLI is read-oriented (plus `init` and snapshot management) and works on
-local folios. See the [CLI reference](../reference/cli.md).
+Or add a file without opening Python:
+
+```bash
+datafolio add --to analysis/experiment-12 ~/Downloads/cells.parquet -d "Cell table"
+```
+
+See the [CLI reference](../reference/cli.md).
+
+## Find a folio again
+
+Give the folios you come back to an alias. Aliases live in a small per-user
+registry in `~/.datafolio`. Opening a folio by path never writes there; only
+an explicit alias does.
+
+```python
+folio = DataFolio("analysis/experiment-12", alias="exp12")  # open + register
+folio.set_alias("exp12")                                    # or afterwards
+
+folio = DataFolio(alias="exp12")                            # from anywhere
+```
+
+The CLI takes the same alias with `-a`:
+
+```bash
+datafolio add -a exp12 ~/Downloads/synapses.parquet -d "synapse table I thought was interesting"
+datafolio -a exp12 describe
+```
+
+Then search across every registered folio. Only manifests are read, so this
+is quick:
+
+```python
+import datafolio
+
+datafolio.find("cells*")                        # DataFrame: alias, folio_path, name, …
+datafolio.find("syn|soma", regex=True, item_type="table")
+datafolio.find("dataset=minnie*", metadata=True)
+datafolio.find("synapse", descriptions=True)    # names or descriptions
+datafolio.list_folios()                         # what the registry knows about
+```
+
+`datafolio find` does the same from the terminal. Folios used from the CLI
+are also remembered in a recent list, so they are searched even without an
+alias.
 
 ## Two notebooks, one folio
 

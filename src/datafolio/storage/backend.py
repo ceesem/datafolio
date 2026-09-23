@@ -7,9 +7,13 @@ local and cloud storage (via cloudfiles).
 import io
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional, Union
+from typing import Any, Dict, Iterable, Iterator, Optional, Union
 
 from datafolio.utils import is_cloud_path
+
+# Target in-memory size of each Parquet row group written when streaming a
+# table file (see StorageBackend.import_table_file).
+ROW_GROUP_BYTES = 64 * 1024 * 1024
 
 
 class StorageBackend:
@@ -577,6 +581,147 @@ class StorageBackend:
             self._ensure_parent_dir(path)
             lazyframe.sink_parquet(path)
             return self.parquet_footer(path)
+
+    def import_table_file(
+        self,
+        dst: str,
+        src: Union[str, Path],
+        table_format: str,
+        block_size: Optional[int] = None,
+    ) -> tuple[Any, int]:
+        """Bring a local table file into ``dst`` as Parquet with bounded memory.
+
+        - ``parquet``: the footer is read first (so an unreadable file fails
+          before anything is written), then the bytes are copied unchanged.
+        - ``feather``/``arrow`` (Arrow IPC): read one record batch at a time
+          and written through a ``ParquetWriter``.
+        - ``csv``: parsed block by block with pyarrow's streaming CSV reader
+          and written through a ``ParquetWriter``. Column types are inferred
+          from the first block.
+
+        Cloud destinations are staged in a local temporary file and uploaded
+        (see :meth:`_upload_file`), so local disk roughly equal to the output
+        size is needed.
+
+        Args:
+            dst: Destination Parquet path (local or cloud).
+            src: Local source file.
+            table_format: One of ``'parquet'``, ``'csv'``, ``'feather'``,
+                ``'arrow'``.
+            block_size: CSV block size in bytes (pyarrow default if None).
+                Smaller blocks lower peak memory.
+
+        Returns:
+            Tuple of (pyarrow.Schema, number of rows) of the written file.
+
+        Raises:
+            ValueError: For an unsupported format, or a CSV row whose values
+                don't fit the column types inferred from the first block.
+        """
+        import os
+
+        src = str(src)
+        if table_format == "parquet":
+            footer = self.parquet_footer(src)
+            self.copy_file(src, dst)
+            return footer
+
+        if table_format not in ("csv", "feather", "arrow"):
+            raise ValueError(
+                f"Cannot import table format '{table_format}' "
+                f"(supported: parquet, csv, feather, arrow)"
+            )
+
+        if is_cloud_path(dst):
+            import tempfile
+
+            fd, local = tempfile.mkstemp(suffix=".parquet")
+            os.close(fd)
+        else:
+            self._ensure_parent_dir(dst)
+            local = dst
+        try:
+            footer = self._stream_to_parquet(local, src, table_format, block_size)
+            if local != dst:
+                self._upload_file(dst, local)
+            return footer
+        except BaseException:
+            if os.path.exists(local):
+                os.unlink(local)
+            raise
+        finally:
+            if local != dst and os.path.exists(local):
+                os.unlink(local)
+
+    @staticmethod
+    def _stream_to_parquet(
+        out: str, src: str, table_format: str, block_size: Optional[int]
+    ) -> tuple[Any, int]:
+        """Write ``src`` to the local Parquet file ``out`` batch by batch."""
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        def _batches_csv() -> tuple[Any, Iterator[Any]]:
+            import pyarrow.csv as pacsv
+
+            read_options = (
+                pacsv.ReadOptions(block_size=block_size)
+                if block_size
+                else pacsv.ReadOptions()
+            )
+            reader = pacsv.open_csv(src, read_options=read_options)
+            return reader.schema, iter(reader)
+
+        def _batches_ipc() -> tuple[Any, Iterator[Any]]:
+            source = pa.memory_map(src, "r")
+            try:
+                ipc = pa.ipc.open_file(source)
+                return ipc.schema, (
+                    ipc.get_batch(i) for i in range(ipc.num_record_batches)
+                )
+            except pa.ArrowInvalid:
+                # Arrow IPC *stream* format (or legacy feather v1).
+                try:
+                    stream = pa.ipc.open_stream(source)
+                    return stream.schema, iter(stream)
+                except pa.ArrowInvalid:
+                    import pyarrow.feather as feather
+
+                    table = feather.read_table(src, memory_map=True)
+                    return table.schema, iter(table.to_batches())
+
+        schema, batches = _batches_csv() if table_format == "csv" else _batches_ipc()
+        # Each write creates at least one row group, so small input batches
+        # (a CSV block is ~1 MB) are buffered up to ROW_GROUP_BYTES before
+        # writing. Peak memory is bounded by that buffer, not the file size.
+        num_rows = 0
+        buffer: list = []
+        buffered_bytes = 0
+        try:
+            with pq.ParquetWriter(out, schema) as writer:
+                for batch in batches:
+                    if not batch.num_rows:
+                        continue
+                    buffer.append(batch)
+                    buffered_bytes += batch.nbytes
+                    num_rows += batch.num_rows
+                    if buffered_bytes >= ROW_GROUP_BYTES:
+                        writer.write_table(pa.Table.from_batches(buffer, schema))
+                        buffer, buffered_bytes = [], 0
+                if buffer:
+                    writer.write_table(pa.Table.from_batches(buffer, schema))
+        except pa.ArrowInvalid as exc:
+            if table_format == "csv":
+                raise ValueError(
+                    f"Could not convert CSV '{src}' to Parquet: {exc}. Column "
+                    f"types are inferred from the start of the file; a later "
+                    f"value did not fit. Store the file unchanged instead "
+                    f"(add_file / CLI --as-file), reference it "
+                    f"(reference_table / CLI --reference), or read it with "
+                    f"pandas and use add()."
+                ) from exc
+            raise
+        return schema, num_rows
 
     def source_identity(self, path: str) -> Dict[str, Any]:
         """Best-effort point-in-time identity for an external object.
