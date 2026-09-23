@@ -13,6 +13,11 @@ from datafolio.cli.main import cli
 from datafolio.folio_registry import FolioRegistry
 
 
+def _unwrapped(output: str) -> str:
+    """Collapse Rich's line wrapping, which depends on the tmp path length."""
+    return " ".join(output.split())
+
+
 @pytest.fixture
 def runner():
     return CliRunner()
@@ -252,13 +257,14 @@ class TestAddTargets:
             cli, ["add", "--to", "demo", str(downloads / "cells.csv")]
         )
         assert result.exit_code == 1
-        assert "'demo' is a registered alias" in result.output
-        assert "Use -a demo" in result.output
+        output = _unwrapped(result.output)
+        assert "'demo' is a registered alias" in output
+        assert "Use -a demo" in output
 
     def test_global_f_with_alias_name_hints_dash_a(self, runner, folio_dir):
         result = runner.invoke(cli, ["-f", "demo", "describe"])
         assert result.exit_code == 1
-        assert "Use -a demo" in result.output
+        assert "Use -a demo" in _unwrapped(result.output)
 
     def test_no_hint_for_unregistered_name(self, runner, downloads):
         result = runner.invoke(

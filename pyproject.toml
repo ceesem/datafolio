@@ -96,8 +96,19 @@ cmd = "uv run bump-my-version bump --dry-run --verbose"
 help = "Dry run of version bump for the project. Use with 'patch', 'minor', or 'major' to specify the version change."
 
 [tool.poe.tasks.bump]
-cmd = "uv run bump-my-version bump"
 help = "Bump the version number in the project. Use with 'patch', 'minor', or 'major' to specify the version change."
+shell = """
+set -e
+old=$(uv run bump-my-version show current_version)
+uv run bump-my-version bump "$part"
+echo "Bumped version: $old → $(uv run bump-my-version show current_version)"
+"""
+
+[[tool.poe.tasks.bump.args]]
+name = "part"
+positional = true
+required = true
+help = "Version part to bump: patch, minor, or major"
 
 [tool.poe.tasks.test]
 cmd = "uv run pytest --cov=datafolio tests"
