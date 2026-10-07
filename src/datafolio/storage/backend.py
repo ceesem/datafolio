@@ -5,6 +5,8 @@ local and cloud storage (via cloudfiles).
 """
 
 import io
+import os
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, Optional, Union
@@ -14,6 +16,42 @@ from datafolio.utils import is_cloud_path
 # Target in-memory size of each Parquet row group written when streaming a
 # table file (see StorageBackend.import_table_file).
 ROW_GROUP_BYTES = 64 * 1024 * 1024
+
+# Staged uploads are flushed with CloudFiles.puts in chunks so memory stays
+# bounded no matter how many items a batch writes: a chunk closes once it
+# holds this many bytes (or STAGED_CHUNK_FILES files). A single staged file
+# larger than STAGED_STREAM_BYTES is streamed from disk on its own instead of
+# being read into memory.
+STAGED_CHUNK_BYTES = 256 * 1024 * 1024
+STAGED_CHUNK_FILES = 200
+STAGED_STREAM_BYTES = 64 * 1024 * 1024
+
+
+@dataclass
+class _StagedUpload:
+    """One cloud upload deferred by :meth:`StorageBackend.begin_staging`.
+
+    Exactly one of ``data`` (in-memory bytes) or ``local_path`` (a local file
+    read at flush time) is set. ``owned`` marks a temp file the backend
+    created and must delete once the upload is flushed or discarded.
+    """
+
+    data: Optional[bytes] = None
+    local_path: Optional[str] = None
+    owned: bool = False
+    cache_control: Optional[str] = None
+
+    @property
+    def size(self) -> int:
+        """Payload size in bytes."""
+        if self.data is not None:
+            return len(self.data)
+        return os.path.getsize(self.local_path)  # type: ignore[arg-type]
+
+    def release(self) -> None:
+        """Delete the backing temp file, if the backend owns one."""
+        if self.owned and self.local_path and os.path.exists(self.local_path):
+            os.unlink(self.local_path)
 
 
 class StorageBackend:
@@ -37,6 +75,8 @@ class StorageBackend:
             use_https: If True, use HTTPS URLs for CloudFiles read operations (default: False)
         """
         self._use_https = use_https
+        # Cloud path -> deferred upload, or None when staging is off.
+        self._staging: Optional[Dict[str, _StagedUpload]] = None
 
     def _split_cloud_path(self, path: str) -> tuple[str, str]:
         """Split cloud path into directory and filename.
@@ -91,6 +131,8 @@ class StorageBackend:
         Examples:
             >>> storage._cloud_write_bytes('s3://bucket/file.txt', b'data')
         """
+        if self._stage(path, _StagedUpload(data=data)):
+            return
         cf, filename = self._get_cloud_client(path)
         cf.put(filename, data)
 
@@ -106,8 +148,152 @@ class StorageBackend:
         Examples:
             >>> data = storage._cloud_read_bytes('s3://bucket/file.txt')
         """
+        self._flush_if_staged(path)
         cf, filename = self._get_cloud_client(path, use_https=self._use_https)
         return cf.get(filename)
+
+    # =========================================================================
+    # Deferred (staged) cloud uploads
+    # =========================================================================
+
+    @property
+    def staging(self) -> bool:
+        """Whether cloud writes are currently being staged."""
+        return self._staging is not None
+
+    def begin_staging(self) -> None:
+        """Start deferring cloud uploads until :meth:`flush_staged`.
+
+        While staging, every cloud write made through this backend is
+        recorded instead of uploaded: serialized bytes are kept in memory and
+        file-based writes keep their local temp file. :meth:`flush_staged`
+        then uploads everything in parallel with ``CloudFiles.puts``. Local
+        writes are unaffected.
+
+        Writing the same path twice keeps only the last write. Reading a staged
+        path (or checking whether it exists) flushes all staged uploads first,
+        so read-after-write behaves as if nothing were deferred.
+
+        Raises:
+            RuntimeError: If staging is already active.
+        """
+        if self._staging is not None:
+            raise RuntimeError("Upload staging is already active.")
+        self._staging = {}
+
+    def discard_staged(self) -> None:
+        """Stop staging and drop every staged upload without uploading it."""
+        staged, self._staging = self._staging, None
+        for entry in (staged or {}).values():
+            entry.release()
+
+    def flush_staged(self, threads: Optional[int] = None) -> int:
+        """Upload every staged write in parallel, then stop staging.
+
+        Uploads are grouped by directory and sent with ``CloudFiles.puts``,
+        in chunks bounded by :data:`STAGED_CHUNK_BYTES` and
+        :data:`STAGED_CHUNK_FILES` so memory does not grow with the number of
+        staged items. Owned temp files are deleted whether or not the upload
+        succeeds. Staging is off afterwards in every case.
+
+        Args:
+            threads: Upload concurrency per ``puts`` call (cloudfiles' own
+                default when None).
+
+        Returns:
+            Number of files uploaded.
+
+        Raises:
+            Exception: Whatever the upload raised; staged files that were not
+                yet uploaded are discarded.
+        """
+        staged, self._staging = self._staging, None
+        if not staged:
+            return 0
+        try:
+            by_dir: Dict[str, list[tuple[str, _StagedUpload]]] = {}
+            for path, entry in staged.items():
+                dir_path, filename = self._split_cloud_path(path)
+                by_dir.setdefault(dir_path, []).append((filename, entry))
+            for dir_path, entries in by_dir.items():
+                self._puts_chunked(dir_path, entries, threads)
+            return len(staged)
+        finally:
+            for entry in staged.values():
+                entry.release()
+
+    def _puts_chunked(
+        self,
+        dir_path: str,
+        entries: list[tuple[str, _StagedUpload]],
+        threads: Optional[int],
+    ) -> None:
+        """Upload one directory's staged entries with bounded memory."""
+        from cloudfiles import CloudFiles
+
+        kwargs: Dict[str, Any] = {}
+        if threads is not None:
+            kwargs["num_threads"] = threads
+        cf = CloudFiles(dir_path, progress=False, **kwargs)
+
+        chunk: list[Dict[str, Any]] = []
+        chunk_bytes = 0
+
+        def send() -> None:
+            nonlocal chunk, chunk_bytes
+            if chunk:
+                cf.puts(chunk, total=len(chunk), progress=False)
+            chunk, chunk_bytes = [], 0
+
+        for filename, entry in entries:
+            if entry.data is None and entry.size > STAGED_STREAM_BYTES:
+                # Too big to hold in a chunk: stream it from disk alone.
+                with open(entry.local_path, "rb") as f:  # type: ignore[arg-type]
+                    cf.put(filename, f, cache_control=entry.cache_control)
+                continue
+            content = entry.data
+            if content is None:
+                with open(entry.local_path, "rb") as f:  # type: ignore[arg-type]
+                    content = f.read()
+            item: Dict[str, Any] = {"path": filename, "content": content}
+            if entry.cache_control is not None:
+                item["cache_control"] = entry.cache_control
+            chunk.append(item)
+            chunk_bytes += len(content)
+            if chunk_bytes >= STAGED_CHUNK_BYTES or len(chunk) >= STAGED_CHUNK_FILES:
+                send()
+        send()
+
+    def _stage(self, path: str, entry: _StagedUpload) -> bool:
+        """Record ``entry`` as the pending upload for ``path`` if staging.
+
+        Returns:
+            True if the write was staged (the caller must not upload it, and
+            ownership of an ``owned`` temp file passes to the backend); False
+            if staging is off and the caller should upload immediately.
+        """
+        if self._staging is None:
+            return False
+        previous = self._staging.pop(path, None)
+        if previous is not None:
+            previous.release()
+        self._staging[path] = entry
+        return True
+
+    def _flush_if_staged(self, path: str) -> None:
+        """Flush all staged uploads if ``path`` (or anything under it) is staged.
+
+        Keeps reads inside a staging window consistent with the writes made
+        in it. Staging stays active afterwards.
+        """
+        if not self._staging:
+            return
+        prefix = path.rstrip("/") + "/"
+        if path in self._staging or any(p.startswith(prefix) for p in self._staging):
+            try:
+                self.flush_staged()
+            finally:
+                self._staging = {}
 
     def exists(self, path: str) -> bool:
         """Check if a path exists (local or cloud).
@@ -123,6 +309,7 @@ class StorageBackend:
             >>> storage.exists('/path/to/file.json')
             True
         """
+        self._flush_if_staged(path)
         if path.startswith("file://"):
             return Path(path[7:]).exists()
 
@@ -174,6 +361,8 @@ class StorageBackend:
             {'gs://b/d/a.parquet': True, 'gs://b/d/x.npy': False}
         """
         unique = list(dict.fromkeys(paths))
+        for path in unique:
+            self._flush_if_staged(path)
         results: Dict[str, bool] = {}
         by_dir: Dict[str, list] = {}
 
@@ -264,6 +453,8 @@ class StorageBackend:
             >>> storage = StorageBackend()
             >>> storage.delete_file('/path/to/file.json')
         """
+        if self._staging is not None and path in self._staging:
+            self._staging.pop(path).release()
         if is_cloud_path(path):
             cf, filename = self._get_cloud_client(path)
             cf.delete(filename)
@@ -285,6 +476,8 @@ class StorageBackend:
         """
         if is_cloud_path(dst):
             # Stream the file object rather than buffering the whole file.
+            # While staging, the source is read at flush time, so it must not
+            # change or disappear before then.
             self._upload_file(dst, str(src))
         else:
             import shutil
@@ -335,6 +528,9 @@ class StorageBackend:
         Returns:
             Size in bytes, or ``None`` if it can't be determined.
         """
+        if self._staging and path in self._staging:
+            return self._staging[path].size
+
         if path.startswith("file://"):
             path = path[7:]
 
@@ -381,8 +577,10 @@ class StorageBackend:
         )
 
         if is_cloud_path(path):
-            cf, filename = self._get_cloud_client(path)
             # Disable caching for manifest files to ensure fresh reads
+            if self._stage(path, _StagedUpload(data=content, cache_control="no-cache")):
+                return
+            cf, filename = self._get_cloud_client(path)
             cf.put(filename, content, cache_control="no-cache")
         else:
             import os
@@ -465,11 +663,12 @@ class StorageBackend:
 
             fd, tmp = tempfile.mkstemp(suffix=".parquet")
             os.close(fd)
+            kept = False
             try:
                 self._write_parquet_local(tmp, df)
-                self._upload_file(path, tmp)
+                kept = self._upload_file(path, tmp, owned=True)
             finally:
-                if os.path.exists(tmp):
+                if not kept and os.path.exists(tmp):
                     os.unlink(tmp)
         else:
             self._ensure_parent_dir(path)
@@ -505,20 +704,32 @@ class StorageBackend:
         )
         pq.write_table(table, path)
 
-    def _upload_file(self, dst: str, local_src: str) -> None:
+    def _upload_file(self, dst: str, local_src: str, owned: bool = False) -> bool:
         """Upload a local file to a cloud destination without buffering it.
 
         Passes an open file object to CloudFiles.put (which accepts a
         ``BinaryIO``), so the whole file is never read into a Python bytes
         buffer. This is the bounded-memory cloud upload path.
 
+        While staging, the upload is deferred instead (see
+        :meth:`begin_staging`).
+
         Args:
             dst: Cloud destination path
             local_src: Local source file path
+            owned: ``local_src`` is a temp file the caller would delete; if
+                the upload is staged, the backend takes it over instead.
+
+        Returns:
+            True if the upload was staged and the backend took ownership of
+            an ``owned`` file (the caller must not delete it).
         """
+        if self._stage(dst, _StagedUpload(local_path=local_src, owned=owned)):
+            return owned
         cf, filename = self._get_cloud_client(dst)
         with open(local_src, "rb") as f:
             cf.put(filename, f)
+        return False
 
     def sink_parquet(self, path: str, lazyframe: Any) -> None:
         """Stream a Polars LazyFrame to Parquet with bounded memory.
@@ -538,11 +749,12 @@ class StorageBackend:
 
             fd, tmp_path = tempfile.mkstemp(suffix=".parquet")
             os.close(fd)
+            kept = False
             try:
                 lazyframe.sink_parquet(tmp_path)
-                self._upload_file(path, tmp_path)
+                kept = self._upload_file(path, tmp_path, owned=True)
             finally:
-                if os.path.exists(tmp_path):
+                if not kept and os.path.exists(tmp_path):
                     os.unlink(tmp_path)
         else:
             self._ensure_parent_dir(path)
@@ -569,13 +781,14 @@ class StorageBackend:
 
             fd, tmp_path = tempfile.mkstemp(suffix=".parquet")
             os.close(fd)
+            kept = False
             try:
                 lazyframe.sink_parquet(tmp_path)
                 footer = self.parquet_footer(tmp_path)  # local read, no download
-                self._upload_file(path, tmp_path)
+                kept = self._upload_file(path, tmp_path, owned=True)
                 return footer
             finally:
-                if os.path.exists(tmp_path):
+                if not kept and os.path.exists(tmp_path):
                     os.unlink(tmp_path)
         else:
             self._ensure_parent_dir(path)
@@ -640,17 +853,18 @@ class StorageBackend:
         else:
             self._ensure_parent_dir(dst)
             local = dst
+        kept = False
         try:
             footer = self._stream_to_parquet(local, src, table_format, block_size)
             if local != dst:
-                self._upload_file(dst, local)
+                kept = self._upload_file(dst, local, owned=True)
             return footer
         except BaseException:
             if os.path.exists(local):
                 os.unlink(local)
             raise
         finally:
-            if local != dst and os.path.exists(local):
+            if local != dst and not kept and os.path.exists(local):
                 os.unlink(local)
 
     @staticmethod
@@ -1093,6 +1307,7 @@ class StorageBackend:
         """
         from datafolio.readers import read_table
 
+        self._flush_if_staged(path)
         return read_table(path, table_format, **kwargs)
 
     def scan_table(self, path: str, table_format: str, **kwargs) -> Any:
@@ -1120,4 +1335,5 @@ class StorageBackend:
         """
         from datafolio.readers import scan_table
 
+        self._flush_if_staged(path)
         return scan_table(path, table_format, use_https=self._use_https, **kwargs)

@@ -389,11 +389,12 @@ class TestBoundedCloudWrites:
         backend = StorageBackend()
         captured = {}
 
-        def fake_upload(dst, local_src):
+        def fake_upload(dst, local_src, owned=False):
             # Proof it's a real on-disk file, not an in-memory buffer.
             assert os.path.exists(local_src)
             captured["dst"] = dst
             shutil.copy(local_src, tmp_path / "uploaded.parquet")
+            return False
 
         def boom_bytes(*a, **k):  # pragma: no cover
             raise AssertionError("whole-file BytesIO path was used")
@@ -442,7 +443,7 @@ class TestBoundedCloudWrites:
         backend = StorageBackend()
         before = set(glob.glob(os.path.join(tempfile.gettempdir(), "*.parquet")))
 
-        def failing_upload(dst, local_src):
+        def failing_upload(dst, local_src, owned=False):
             raise RuntimeError("upload failed")
 
         monkeypatch.setattr(backend, "_upload_file", failing_upload)

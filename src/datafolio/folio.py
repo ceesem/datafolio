@@ -170,10 +170,12 @@ class DataFolio(SnapshotMixin, ContextCaptureMixin):
         max_eager_bytes: Optional[int] = 500 * 1024 * 1024,
         alias: Optional[str] = None,
         overwrite_alias: bool = False,
+        create: bool = True,
     ):
         """Initialize a new or open an existing DataFolio.
 
-        If the directory doesn't exist, creates a new bundle.
+        If the directory doesn't exist, creates a new bundle (unless
+        ``create=False`` or ``read_only=True``, which raise instead).
         If it exists, opens the existing bundle and reads manifests.
 
         Args:
@@ -201,10 +203,17 @@ class DataFolio(SnapshotMixin, ContextCaptureMixin):
             overwrite_alias: With both ``path`` and ``alias``, rebind the
                 alias if it already points to a different folio
                 (default: False, which raises instead).
+            create: If True, create a new bundle when no folio exists at
+                ``path``. Pass False to only open an existing folio, so a
+                mistyped or misremembered path raises instead of silently
+                creating an empty folio. A read-only folio never creates one
+                (default: True).
 
         Raises:
             ValueError: If neither ``path`` nor ``alias`` is given, or the
                 alias already points to a different folio.
+            FileNotFoundError: If no folio exists at ``path`` and
+                ``create=False`` or ``read_only=True``.
             KeyError: If ``alias`` is given without ``path`` and is not
                 registered.
 
@@ -222,6 +231,10 @@ class DataFolio(SnapshotMixin, ContextCaptureMixin):
 
             Open existing bundle:
             >>> folio = DataFolio('experiments/protein-analysis')
+
+            Open only if it exists (a typo raises instead of creating):
+            >>> folio = DataFolio('experiments/protein-analysys', create=False)
+            FileNotFoundError: No datafolio found at 'experiments/protein-analysys'...
 
             With metadata:
             >>> folio = DataFolio(
@@ -349,6 +362,14 @@ class DataFolio(SnapshotMixin, ContextCaptureMixin):
         else:
             is_existing_bundle = self._storage.exists(path_str) and (
                 self._storage.exists(metadata_path) or self._storage.exists(items_path)
+            )
+
+        if not is_existing_bundle and (not create or self._read_only):
+            reason = "read_only=True" if self._read_only else "create=False"
+            raise FileNotFoundError(
+                f"No datafolio found at '{path_str}', and {reason} prevents "
+                "creating one. Check the path for typos, or omit "
+                "create=False / read_only=True to create a new folio."
             )
 
         if is_existing_bundle:
@@ -1231,6 +1252,12 @@ For more information, see the [datafolio documentation](https://github.com/casey
             # the category dir; validate_item_name guarantees no segment can
             # escape it ('..', absolute paths, and empty segments are rejected).
             filename = f"{version_id}{extension}"
+            # During staged uploads the payload files don't exist on storage
+            # yet, and _next_version_id + _reserved_version_ids already
+            # guarantee uniqueness within this session, so skip the GCS round
+            # trip entirely.
+            if self._storage.staging:
+                return version_id, filename
             full = self._storage.join_paths(self._bundle_dir, subdir, filename)
             if not self._storage.exists(full):
                 return version_id, filename
@@ -1377,6 +1404,7 @@ For more information, see the [datafolio documentation](https://github.com/casey
             if is_cloud_path(src_path)
             else f"file://{Path(src_path).resolve()}"
         )
+        self._storage._flush_if_staged(src_path)
         src_dir, _, src_filename = src_cf_path.rpartition("/")
         src_cf = cloudfiles.CloudFiles(src_dir, use_https=self._use_https)
         content = src_cf.get(src_filename)
@@ -1664,11 +1692,21 @@ For more information, see the [datafolio documentation](https://github.com/casey
             self._pin_depth -= 1
 
     @contextlib.contextmanager
-    def batch(self):
+    def batch(self, upload_threads: Optional[int] = None) -> Iterator[None]:
         """Context manager for batch operations.
 
         Delays saving items.json until the context exits. This is useful
         when adding many items at once to avoid repeated disk I/O.
+
+        On cloud folios, payload uploads are deferred too: each item is
+        serialized when added, but nothing is uploaded until the block exits,
+        when all payloads are sent in parallel with ``CloudFiles.puts`` and
+        only then is items.json published. Serialized payloads wait in memory
+        or in local temp files, so local disk roughly equal to the batch's
+        file-based payloads (tables) is needed. A file passed to
+        :meth:`add_file` is read at exit, so it must not change before then.
+        Reading an item added earlier in the same batch uploads the pending
+        payloads first, so reads always see the batch's writes.
 
         The mutation guard (local write lock + stale-writer check) is held for
         the *entire* batch, so the whole batch either commits or is rejected as
@@ -1678,10 +1716,16 @@ For more information, see the [datafolio documentation](https://github.com/casey
 
         If an exception escapes the block, NOTHING is committed: all staged
         item, metadata, and copy-on-write changes are discarded and the folio
-        returns to the committed on-disk state. Payload files already written
-        remain as harmless unreferenced orphans. Nested batch() blocks raise.
+        returns to the committed on-disk state. Pending cloud uploads are
+        dropped; payload files already written (local folios, or uploads
+        forced by a read) remain as harmless unreferenced orphans. A failed
+        upload at exit likewise commits nothing. Nested batch() blocks raise.
         Snapshot creation/deletion inside a batch raises (the batch's items
         are not committed yet).
+
+        Args:
+            upload_threads: Upload concurrency for the deferred cloud uploads
+                (cloudfiles' default when None). Ignored for local folios.
 
         Examples:
             >>> with folio.batch():
@@ -1697,14 +1741,23 @@ For more information, see the [datafolio documentation](https://github.com/casey
             )
         with self._mutation_guard():
             self._batch_mode = True
+            stage_uploads = is_cloud_path(self._bundle_dir)
+            if stage_uploads:
+                self._storage.begin_staging()
             try:
                 yield
+                if stage_uploads:
+                    # Every payload must land before the manifest that
+                    # references it is published.
+                    self._storage.flush_staged(threads=upload_threads)
             except BaseException:
                 # The guard's transaction spine restores the committed state
                 # (staged items, metadata, copy-on-write moves, and deferred
-                # deletions alike). Payload files already written stay behind
-                # as harmless unreferenced orphans; no committed payload was
-                # deleted (deletions were deferred, and are now discarded).
+                # deletions alike). Pending uploads are dropped; payload files
+                # already written stay behind as harmless unreferenced
+                # orphans; no committed payload was deleted (deletions were
+                # deferred, and are now discarded).
+                self._storage.discard_staged()
                 self._batch_mode = False
                 raise
             self._batch_mode = False

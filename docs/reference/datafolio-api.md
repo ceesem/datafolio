@@ -20,13 +20,14 @@ DataFolio(
                                          # opening an existing folio (write via
                                          # folio.metadata instead)
     random_suffix=False,                 # append a memorable suffix to the name
-    read_only=False,                     # refuse every write
+    read_only=False,                     # refuse every write; never creates
     allow_existing=False,                # allow creating inside a non-folio directory
     use_https=False,                     # HTTPS reads of public buckets
     max_eager_bytes=500 * 1024 * 1024,   # eager-read ceiling; None disables
     alias=None,                          # register under this alias; or, with
                                          # no path, open the aliased folio
     overwrite_alias=False,               # rebind an alias that points elsewhere
+    create=True,                         # False: raise if no folio exists
 )
 ```
 
@@ -34,7 +35,10 @@ DataFolio(
 never touches the registry.
 
 Creates the folio if the path is empty, opens it if it already holds one.
-`http(s)://` paths are always read-only.
+Pass `create=False` to only open: a mistyped path then raises
+`FileNotFoundError` instead of leaving a new empty folio behind. A
+`read_only=True` folio never creates one either. `http(s)://` paths are always
+read-only.
 
 ```python
 DataFolio.load_snapshot(path, snapshot)   # classmethod -> read-only folio
@@ -219,7 +223,8 @@ internal.
 | `allow_full_load=True` | `get` (tables), `reference_table` | bypass the eager-size guard |
 | `trusted=True` | `get_model` | accept a skops file's non-standard types |
 | `as_unix=True` | `get` (timestamps) | float seconds instead of a datetime |
-| `read_only=True` | constructor | refuse every write |
+| `read_only=True` | constructor | refuse every write (and never create) |
+| `create=False` | constructor | open only; raise if no folio exists |
 | `follow_lineage=True` | `copy` | pull in upstream dependencies of `include_items` |
 | `dry_run=True` | `cleanup_orphaned_versions` | list, do not delete |
 

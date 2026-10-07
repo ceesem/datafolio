@@ -135,6 +135,7 @@ class TestReadOnlyMode:
 
     def test_repr_shows_read_only(self, tmp_path):
         """Test __repr__ shows READ-ONLY status."""
+        DataFolio(tmp_path / "test")  # read-only never creates a folio
         folio = DataFolio(tmp_path / "test", read_only=True)
         repr_str = repr(folio)
         assert "[READ-ONLY]" in repr_str
@@ -392,6 +393,7 @@ class TestErrorMessages:
 
     def test_read_only_error_message(self, tmp_path):
         """Test read-only error message is clear."""
+        DataFolio(tmp_path / "test")  # read-only never creates a folio
         folio = DataFolio(tmp_path / "test", read_only=True)
         df = pd.DataFrame({"a": [1, 2, 3]})
 
@@ -420,6 +422,7 @@ class TestErrorMessages:
 
     def test_metadata_read_only_error_message(self, tmp_path):
         """Test metadata read-only error message is clear."""
+        DataFolio(tmp_path / "test")  # read-only never creates a folio
         folio = DataFolio(tmp_path / "test", read_only=True)
 
         with pytest.raises(RuntimeError) as exc_info:
