@@ -1,0 +1,1109 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://ceesem.github.io/datafolio/guides/snapshots/">
+      
+      
+        <link rel="prev" href="../sharing/">
+      
+      
+        <link rel="next" href="../format/">
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.6.21">
+    
+    
+      
+        <title>Snapshots - DataFolio Documentation</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.2a3383ac.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Bitter:300,300i,400,400i,700,700i%7CInconsolata:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Bitter";--md-code-font:"Inconsolata"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="blue-grey" data-md-color-accent="deep-orange">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#snapshots" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="DataFolio Documentation" class="md-header__button md-logo" aria-label="DataFolio Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            DataFolio Documentation
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Snapshots
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/ceesem/datafolio" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.0.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    ceesem/datafolio
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  About
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../getting-started/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Your First Folio
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Guides
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../reference/datafolio-api/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../changelog/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Changelog
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+  
+
+<nav class="md-nav md-nav--primary md-nav--lifted md-nav--integrated" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="DataFolio Documentation" class="md-nav__button md-logo" aria-label="DataFolio Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    DataFolio Documentation
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/ceesem/datafolio" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.0.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    ceesem/datafolio
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    About
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Your First Folio
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+    
+    
+      
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    Guides
+    
+  </span>
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_3" id="__nav_3_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            Guides
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../everyday/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Everyday Patterns
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tables/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Tables
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../models/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Models
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sharing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Sharing a Folio
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    Snapshots
+    
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    Snapshots
+    
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#what-a-snapshot-actually-is" class="md-nav__link">
+    <span class="md-ellipsis">
+      What a snapshot actually is
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="What a snapshot actually is">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-it-does-not-cover" class="md-nav__link">
+    <span class="md-ellipsis">
+      What it does not cover
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#creating" class="md-nav__link">
+    <span class="md-ellipsis">
+      Creating
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reading-one-back" class="md-nav__link">
+    <span class="md-ellipsis">
+      Reading one back
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#comparing" class="md-nav__link">
+    <span class="md-ellipsis">
+      Comparing
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#going-back" class="md-nav__link">
+    <span class="md-ellipsis">
+      Going back
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cleaning-up" class="md-nav__link">
+    <span class="md-ellipsis">
+      Cleaning up
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#from-the-terminal" class="md-nav__link">
+    <span class="md-ellipsis">
+      From the terminal
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#when-not-to-snapshot" class="md-nav__link">
+    <span class="md-ellipsis">
+      When not to snapshot
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#next" class="md-nav__link">
+    <span class="md-ellipsis">
+      Next
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../format/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Reading a Folio without DataFolio
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../limits/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    What DataFolio Is Not
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../migrating-to-2.0/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Migrating to 2.0
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+    
+    
+      
+        
+        
+      
+    
+    <li class="md-nav__item md-nav__item--pruned md-nav__item--nested">
+      
+        
+  
+  
+  
+    <a href="../../reference/datafolio-api/" class="md-nav__link">
+      
+  
+  
+  <span class="md-ellipsis">
+    Reference
+    
+  </span>
+  
+
+      
+        <span class="md-nav__icon md-icon"></span>
+      
+    </a>
+  
+
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Changelog
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="snapshots">Snapshots</h1>
+<p>A snapshot gives a name to the folio's current contents so you can come back to
+them: <em>the tables the paper used</em>, <em>the model before the March retrain</em>.</p>
+<pre><code class="language-python">folio.create_snapshot(&quot;paper-v1&quot;, description=&quot;Figures 2–4 in the submission&quot;)
+
+# months later
+paper = DataFolio.load_snapshot(&quot;analysis/experiment-12&quot;, &quot;paper-v1&quot;)
+features = paper.get(&quot;features&quot;)     # exactly the bytes from that day
+</code></pre>
+<p>Reach for a snapshot at a moment you might need to defend or reproduce later.
+For everything else, the ordinary folio is enough.</p>
+<h2 id="what-a-snapshot-actually-is">What a snapshot actually is</h2>
+<p>It is a named record of which <em>version</em> of each item was current, plus a copy
+of the folio metadata and (by default) your git commit and branch. It is not a
+copy of your data.</p>
+<pre><code class="language-python">folio.get_snapshot_info(&quot;paper-v1&quot;)
+{
+  &quot;name&quot;: &quot;paper-v1&quot;,
+  &quot;timestamp&quot;: &quot;2026-08-14T17:45:03+00:00&quot;,
+  &quot;item_versions&quot;: {&quot;features&quot;: &quot;features--r2&quot;, &quot;classifier&quot;: &quot;classifier--r8&quot;, …},
+  &quot;metadata_snapshot&quot;: {&quot;experiment&quot;: &quot;exp-12&quot;, &quot;analyst&quot;: &quot;casey&quot;, …},
+  &quot;tags&quot;: [&quot;baseline&quot;],
+  &quot;description&quot;: &quot;Figures 2–4 in the submission&quot;,
+  &quot;git&quot;: {&quot;commit&quot;: &quot;9d1a60b…&quot;, &quot;branch&quot;: &quot;v2-refactor&quot;, &quot;dirty&quot;: true,
+          &quot;remote&quot;: &quot;https://github.com/ceesem/datafolio.git&quot;},
+}
+</code></pre>
+<p>Snapshots are cheap because nothing is copied when you take one. A second file
+appears only when you <em>overwrite</em> an item a snapshot has pinned:</p>
+<pre><code class="language-python">folio.add(&quot;big_table&quot;, df)             # tables/big_table--r2.parquet (5 GB)
+folio.create_snapshot(&quot;v1&quot;)            # no new bytes
+folio.create_snapshot(&quot;v2&quot;)            # still no new bytes
+folio.create_snapshot(&quot;v3&quot;)            # still 5 GB on disk
+
+folio.add(&quot;big_table&quot;, df2, overwrite=True)
+# now two files: big_table--r2.parquet (pinned by v1–v3) and big_table--r9.parquet (current)
+</code></pre>
+<p>Overwriting an unsnapshotted item does not accumulate versions — the old
+payload is removed once the new catalog is committed.</p>
+<h3 id="what-it-does-not-cover">What it does not cover</h3>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Owned items — tables, models, arrays, JSON, files you <code>add()</code>ed</td>
+<td><strong>frozen</strong></td>
+</tr>
+<tr>
+<td>External <code>reference_table()</code> data</td>
+<td><strong>not frozen</strong> — the link is preserved, the bytes are not yours</td>
+</tr>
+<tr>
+<td>Your analysis code</td>
+<td>not stored — the git commit is <em>recorded</em>, that is all</td>
+</tr>
+<tr>
+<td>The Python environment</td>
+<td>only if you pass <code>capture_environment=True</code></td>
+</tr>
+</tbody>
+</table>
+<pre><code class="language-python">folio.mutable_references()      # ['raw_measurements'] — references in this folio
+folio.get_snapshot_info(&quot;v1&quot;)   # flags them under 'mutable_references'
+</code></pre>
+<p>If a snapshot must survive a source dataset changing, <code>add()</code> a copy of that
+table into the folio instead of referencing it. And record source identity at
+link time if you want drift to be detectable later:</p>
+<pre><code class="language-python">folio.inspect_table(&quot;raw_measurements&quot;)   # records size, schema, source identity
+</code></pre>
+<h2 id="creating">Creating</h2>
+<pre><code class="language-python">folio.create_snapshot(
+    &quot;paper-v1&quot;,
+    description=&quot;Figures 2–4 in the submission&quot;,
+    tags=[&quot;paper&quot;, &quot;final&quot;],
+)
+</code></pre>
+<p>Options: <code>capture_git=True</code> (default), <code>capture_environment=False</code>,
+<code>capture_execution=False</code>. Environment and execution capture are opt-in
+because they record more about your machine than most folios need. Environment
+variables are <strong>never</strong> captured, and git remote URLs are stripped of embedded
+credentials before storage.</p>
+<p>Two rules worth knowing up front: snapshot names must be unique (creating one
+twice raises), and <code>create_snapshot()</code> cannot be called inside a <code>batch()</code>
+block — the batch's items are not committed yet.</p>
+<h2 id="reading-one-back">Reading one back</h2>
+<p><strong>As a full folio</strong> — this is usually what you want:</p>
+<pre><code class="language-python">paper = DataFolio.load_snapshot(&quot;analysis/experiment-12&quot;, &quot;paper-v1&quot;)
+# or, if you already have the folio open:
+paper = folio.get_snapshot(&quot;paper-v1&quot;)
+
+paper.describe()
+paper.get(&quot;features&quot;)
+paper.get_model(&quot;classifier&quot;)
+paper.metadata[&quot;accuracy&quot;]        # the metadata as it was then
+paper.read_only                   # True — always
+</code></pre>
+<p>A loaded snapshot behaves like any read-only folio: <code>get</code>, <code>get_many</code>,
+<code>scan_table</code>, <code>item_path</code>, <code>describe</code>, lineage. It cannot be written to.</p>
+<p><strong>As a quick view</strong> — when you only want one item or the metadata:</p>
+<pre><code class="language-python">snap = folio.snapshots[&quot;paper-v1&quot;]
+snap.description, snap.timestamp, snap.tags
+snap.get(&quot;features&quot;)
+snap.scan_table(&quot;features&quot;)
+
+&quot;paper-v1&quot; in folio.snapshots
+list(folio.snapshots)
+</code></pre>
+<p><strong>Without loading anything:</strong></p>
+<pre><code class="language-python">folio.describe(snapshot=&quot;paper-v1&quot;)
+</code></pre>
+<h2 id="comparing">Comparing</h2>
+<pre><code class="language-python">folio.list_snapshots()                      # name, timestamp, description, tags
+folio.diff_from_snapshot(&quot;paper-v1&quot;)        # current state vs. a snapshot
+folio.diff_from_snapshot()                  # vs. the newest snapshot
+folio.compare_snapshots(&quot;v1&quot;, &quot;v2&quot;)         # snapshot vs. snapshot
+</code></pre>
+<pre><code class="language-python">{'snapshot_name': 'paper-v1',
+ 'added_items': [], 'removed_items': [], 'modified_items': ['features'],
+ 'unchanged_items': ['classifier', 'labels', 'params', …],
+ 'metadata_changes': {}}
+</code></pre>
+<p>"Modified" means the item's pinned version is no longer the current one. It is
+a version comparison, not a diff of the data itself — DataFolio does not open
+payloads to compare their contents.</p>
+<h2 id="going-back">Going back</h2>
+<p><strong>Restore</strong> rewinds the working folio to a snapshot: pinned versions become
+current again, items deleted since the snapshot come back, and items added
+since it are removed from the working set. It is destructive to the current
+state, so it insists you say so:</p>
+<pre><code class="language-python">folio.restore_snapshot(&quot;paper-v1&quot;, confirm=True)
+</code></pre>
+<p><strong>Export</strong> is the safer and usually better move — it writes a clean, standalone
+folio containing only that snapshot's items, leaving the original untouched:</p>
+<pre><code class="language-python">shared = folio.export_snapshot(&quot;paper-v1&quot;, &quot;share/paper-final&quot;)
+</code></pre>
+<p>That is what to hand a collaborator or attach to a submission: no version
+history, no unrelated items, just the state you named.</p>
+<h2 id="cleaning-up">Cleaning up</h2>
+<p>Snapshots retain old payloads. When you delete a snapshot, the versions it was
+the last to pin become orphans, and you decide when the bytes go:</p>
+<pre><code class="language-python">folio.delete_snapshot(&quot;scratch-v3&quot;)
+folio.delete_snapshot(&quot;scratch-v3&quot;, cleanup_orphans=True)
+
+folio.cleanup_orphaned_versions(dry_run=True)    # list what would be removed
+folio.cleanup_orphaned_versions()                # actually remove it
+</code></pre>
+<p>DataFolio never garbage-collects on its own. Reclaiming disk is always an
+explicit call — which also means an interrupted write can leave an
+unreferenced file behind, harmless until you sweep it.</p>
+<h2 id="from-the-terminal">From the terminal</h2>
+<pre><code class="language-bash">datafolio snapshot create v1.0 -d &quot;Baseline&quot; -t baseline -t production
+datafolio snapshot list
+datafolio snapshot list -t baseline
+datafolio snapshot show v1.0
+datafolio snapshot status              # like git status, vs. the last snapshot
+datafolio snapshot diff v1.0
+datafolio snapshot compare v1.0 v2.0
+datafolio snapshot delete v0.1 --cleanup
+datafolio snapshot gc --dry-run
+</code></pre>
+<pre><code class="language-text">Current bundle: /Users/casey/analysis/experiment-12
+Last snapshot: v1 (2026-08-14)
+
+Changes since last snapshot:
+
+Modified (1):
+  ~ features
+
+Unchanged: 11 items
+</code></pre>
+<p>Restore and export are Python-only — both rewrite or create bundles, which is
+not something to do from a one-line command by accident.</p>
+<h2 id="when-not-to-snapshot">When <em>not</em> to snapshot</h2>
+<ul>
+<li><strong>As a backup.</strong> A snapshot lives in the same directory as the data. If the
+  directory is lost, so is the snapshot. Back up the folio itself.</li>
+<li><strong>For code history.</strong> Git already does this. A snapshot records the commit
+  hash so you can pair them; it stores no code.</li>
+<li><strong>Per run of a loop.</strong> Twenty snapshots of a hyperparameter sweep is worse
+  than twenty named items and one snapshot of the conclusion.</li>
+<li><strong>As a substitute for a fork.</strong> If two lines of work will diverge and both
+  continue, <code>folio.copy()</code> gives each a folio of its own.</li>
+<li><strong>For a moment you will not return to.</strong> A description on the item usually
+  carries the same information at no cost.</li>
+</ul>
+<p>Good practice: snapshot at boundaries a person would recognize — <em>baseline</em>,
+<em>submitted</em>, <em>before the retrain</em>, <em>shipped</em> — with a description that says why
+you stopped there.</p>
+<h2 id="next">Next</h2>
+<ul>
+<li><strong><a href="../sharing/">Sharing a folio</a></strong> — exporting and handing over.</li>
+<li><strong><a href="../format/">Reading a folio without DataFolio</a></strong> — how snapshots look on disk.</li>
+<li><strong><a href="../limits/">What DataFolio is not</a></strong>.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      <script id="__config" type="application/json">{"base": "../..", "features": ["navigation.indexes", "navigation.instant", "navigation.prune", "navigation.tabs", "navigation.tabs.sticky", "toc.follow", "toc.integrate", "navigation.top", "search.suggest", "search.highlight", "search.share", "content.code.copy", "header.autohide"], "search": "../../assets/javascripts/workers/search.973d3a69.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.f55a23d4.min.js"></script>
+      
+    
+  </body>
+</html>
